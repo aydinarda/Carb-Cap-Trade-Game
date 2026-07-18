@@ -1,158 +1,135 @@
-import { ArrowRightLeft, BookOpen, History, Send } from 'lucide-react'
-import { useState } from 'react'
+import { ArrowRightLeft, Check, ShoppingCart } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import type { OrderSide, PlayerSnapshot } from '@shared/types'
+import type { PlayerSnapshot } from '@shared/types'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
-import { StatCard } from '../../components/game/cards'
-import { MarketTicker, OrderBook, TradesFeed } from '../../components/game/market'
-import { cn } from '../../components/game/theme'
+import { Slider } from '../../components/ui/slider'
+import { StatCard, WarningBanner } from '../../components/game/cards'
 import { useGame } from '../../net/GameContext'
 
 export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
-  const { placeOrder, cancelOrder } = useGame()
-  const [side, setSide] = useState<OrderSide>('buy')
-  const [qty, setQty] = useState('')
-  const [price, setPrice] = useState('')
+  const { buyCredits } = useGame()
+  const price = snap.regulatorPrice
+  const realized = snap.you.realized ?? 0
+  const alreadyBought = snap.you.secondaryBought ?? 0
+  // creditsHeld already includes alreadyBought; the pre-top-up holding is
+  // held − alreadyBought, so the shortfall to cover is realized − that.
+  const held = snap.you.creditsHeld ?? 0
+  const baseHeld = Math.round((held - alreadyBought) * 10) / 10
+  const shortfall = Math.max(0, Math.round((realized - baseHeld) * 10) / 10)
+
+  // Local input = the desired TOTAL bought this year (server treats it as a set).
+  const [qty, setQty] = useState<number>(alreadyBought || shortfall)
   const [busy, setBusy] = useState(false)
 
-  const realized = snap.you.realized ?? 0
-  const held = snap.you.creditsHeld ?? 0
-  const gap = Math.round((realized - held) * 10) / 10
-  const shortage = gap > 0
-  const market = snap.market
+  useEffect(() => {
+    setQty(snap.you.secondaryBought ?? 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap.currentYear])
+
+  const projectedHeld = Math.round((baseHeld + qty) * 10) / 10
+  const projectedGap = Math.round((realized - projectedHeld) * 10) / 10
+  const stillShort = projectedGap > 0
+  const cost = Math.round(qty * price * 10) / 10
+  const sliderMax = Math.max(20, Math.ceil(shortfall * 1.5))
 
   const submit = async () => {
     setBusy(true)
-    const ok = await placeOrder(side, Number(qty), Number(price))
+    const ok = await buyCredits(qty)
     setBusy(false)
-    if (ok) {
-      toast.success(`${side === 'buy' ? 'Buy' : 'Sell'} order placed: ${qty} cr @ ${price}`)
-      setQty('')
-      setPrice('')
-    }
+    if (ok) toast.success(`Buying ${qty} credits @ ${price} — cost ${cost}`)
   }
 
   return (
     <div className="flex flex-col gap-5">
-      {market && <MarketTicker market={market} />}
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <StatCard label="Realized emissions" value={realized} unit="tCO₂" tone="accent" />
         <StatCard
-          label="Your position"
-          value={`${shortage ? '−' : '+'}${Math.abs(gap).toLocaleString()}`}
-          unit="tCO₂"
-          tone={shortage ? 'bad' : 'good'}
-          hint={
-            shortage
-              ? `short — buy credits or face the penalty`
-              : `surplus — sell it or it expires at year end`
-          }
-          icon={<ArrowRightLeft size={12} />}
+          label="Credits before buying"
+          value={baseHeld}
+          unit="cr"
+          hint="free + regulator (cap stage)"
         />
         <StatCard
-          label="Credits held / realized"
-          value={`${held.toLocaleString()} / ${realized.toLocaleString()}`}
-          hint="free + regulator + net trades"
+          label={stillShort ? 'Still short' : 'Covered'}
+          value={stillShort ? projectedGap : Math.abs(projectedGap)}
+          unit="tCO₂"
+          tone={stillShort ? 'bad' : 'good'}
+          hint={stillShort ? 'buy more to avoid the penalty' : 'no penalty at settlement'}
+          icon={<ArrowRightLeft size={12} />}
         />
       </div>
 
-      {/* Order form */}
+      {/* Fixed-price buy panel */}
       <div className="rounded-xl border border-accent/30 bg-card/80 p-5">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-4">
-          <Send size={12} className="text-accent" />
-          Place a limit order — you set the price
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider">
+            <ShoppingCart size={12} className="text-accent" />
+            Buy credits from the regulator
+          </div>
+          <span className="text-xs font-mono text-accent border border-accent/30 rounded-full px-2 py-0.5">
+            fixed price {price} / credit
+          </span>
         </div>
-        <form
-          className="flex flex-wrap items-end gap-3"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void submit()
-          }}
-        >
-          <div className="flex rounded-lg border border-border overflow-hidden">
-            {(['buy', 'sell'] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setSide(s)}
-                className={cn(
-                  'px-5 py-2 text-sm font-bold transition-colors',
-                  side === s
-                    ? s === 'buy'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-accent text-accent-foreground'
-                    : 'bg-transparent text-muted-foreground hover:text-foreground',
-                )}
-              >
-                {s === 'buy' ? 'Buy' : 'Sell'}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-mono uppercase text-muted-foreground">Quantity (cr)</label>
-            <Input
-              type="number"
-              min={0.1}
-              step="0.1"
-              value={qty}
-              onChange={(e) => setQty(e.target.value)}
-              className="w-28 font-mono"
-              placeholder="20"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-mono uppercase text-muted-foreground">Limit price</label>
-            <Input
-              type="number"
-              min={0.1}
-              step="0.1"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              className="w-28 font-mono"
-              placeholder={market?.lastPrice?.toString() ?? '10'}
-            />
-          </div>
-          <Button
-            type="submit"
-            disabled={busy || !qty || !price || Number(qty) <= 0 || Number(price) <= 0}
-            className="font-bold"
-          >
-            Place order
+
+        <WarningBanner>
+          The price is a real cost. Every credit you buy costs {price}; each tCO₂ left
+          uncovered costs the penalty rate at settlement. Surplus credits expire — don&apos;t
+          overbuy. Lowest total cost wins.
+        </WarningBanner>
+
+        <div className="flex items-center gap-4 mt-5">
+          <Slider
+            value={[Math.min(qty, sliderMax)]}
+            onValueChange={([v]) => setQty(v)}
+            max={sliderMax}
+            step={1}
+            className="flex-1"
+          />
+          <Input
+            type="number"
+            min={0}
+            step="0.1"
+            value={qty}
+            onChange={(e) => setQty(Math.max(0, Number(e.target.value)))}
+            className="w-28 font-mono text-right"
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mt-5">
+          <StatCard label="Credits after buying" value={projectedHeld} unit="cr" />
+          <StatCard
+            label="Cost of this purchase"
+            value={cost}
+            tone="bad"
+            hint={`${qty} × ${price}`}
+          />
+        </div>
+
+        <div className="flex items-center justify-between mt-5">
+          <span className="text-xs font-mono text-muted-foreground">
+            {shortfall > 0
+              ? `Buy ${shortfall} to exactly cover your emissions`
+              : 'You are already covered — buying is optional'}
+          </span>
+          <Button onClick={() => void submit()} disabled={busy} className="font-bold">
+            {alreadyBought > 0 ? (
+              <>
+                <Check size={14} /> Update purchase
+              </>
+            ) : (
+              'Confirm purchase'
+            )}
           </Button>
-        </form>
-        {side === 'sell' && (
-          <p className="text-[11px] text-muted-foreground font-mono mt-2">
-            You can offer up to what you hold minus your open offers.
+        </div>
+        {alreadyBought > 0 && (
+          <p className="text-xs text-primary font-mono mt-2 flex items-center gap-1">
+            <Check size={12} /> Buying {alreadyBought} credits — you can change it until the
+            instructor closes the market.
           </p>
         )}
       </div>
-
-      {/* Order book */}
-      {market && (
-        <div className="rounded-xl border border-border bg-card/70 p-5">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
-            <BookOpen size={12} className="text-primary" />
-            Order book — your orders are highlighted
-          </div>
-          <OrderBook
-            market={market}
-            youId={snap.you.id}
-            onCancel={(id) => void cancelOrder(id)}
-          />
-        </div>
-      )}
-
-      {/* Recent trades */}
-      {market && (
-        <div className="rounded-xl border border-border bg-card/70 p-5">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
-            <History size={12} className="text-primary" />
-            Trades
-          </div>
-          <TradesFeed trades={market.trades} youId={snap.you.id} />
-        </div>
-      )}
     </div>
   )
 }

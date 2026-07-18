@@ -55,7 +55,7 @@ export function EmissionsRevealScreen({ snap }: { snap: PlayerSnapshot }) {
           value={Math.abs(gap)}
           unit="tCO₂"
           tone={shortage ? 'bad' : 'good'}
-          hint={shortage ? 'buy in the trade stage' : 'sell in the trade stage'}
+          hint={shortage ? 'buy in the trade stage' : 'covered — surplus will expire'}
         />
       </div>
 

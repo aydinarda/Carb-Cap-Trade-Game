@@ -35,15 +35,15 @@ export const MODE_LABELS = {
   },
   benchmarking: {
     label: 'Benchmarking',
-    tagline: 'Free credits from an industry benchmark × production',
-    desc: 'Each industry gets an emission parameter; free credits equal production quantity times the benchmark. Allocation details are pending from the game designer.',
-    implemented: false,
+    tagline: 'A flat free allowance per industry',
+    desc: 'Every company in an industry gets the same free credits — the industry benchmark you set — regardless of its own history. The regulator sells the rest at the fixed price.',
+    implemented: true,
   },
   auctioning: {
     label: 'Auctioning',
-    tagline: 'No free credits — purely auction-based',
-    desc: 'The modern ETS model: every credit must be bought at auction. Auction mechanics are pending from the game designer.',
-    implemented: false,
+    tagline: 'No free credits — buy every allowance',
+    desc: 'The modern ETS model: no free credits. Every allowance is bought from the regulator at the fixed price (the full baseline is on sale, pro-rata if oversubscribed).',
+    implemented: true,
   },
 } as const
 

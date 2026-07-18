@@ -1,10 +1,8 @@
 import {
   ArrowRight,
-  BookOpen,
   Eye,
   EyeOff,
   Flag,
-  History,
   Landmark,
   SkipForward,
   Trophy,
@@ -20,7 +18,6 @@ import {
   StatCard,
 } from '../../components/game/cards'
 import { ClassYearChart, IndustryBreakdownChart } from '../../components/game/charts'
-import { MarketTicker, OrderBook, TradesFeed } from '../../components/game/market'
 import { cn } from '../../components/game/theme'
 import { useGame } from '../../net/GameContext'
 import { ModePicker, SettingsPanel } from './HostControls'
@@ -68,11 +65,10 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
               <Progress value={submittedPct} className="h-2" />
             </div>
           )}
-          {snap.phase === 'trade' && snap.market && (
+          {snap.phase === 'trade' && (
             <span className="text-sm text-muted-foreground font-mono">
-              Market open · {snap.market.trades.length} trade
-              {snap.market.trades.length === 1 ? '' : 's'} · last price{' '}
-              <span className="text-foreground font-bold">{snap.market.lastPrice ?? '—'}</span>
+              Market open · students buying at the fixed price{' '}
+              <span className="text-foreground font-bold">{snap.config.regulatorPrice}</span> / credit
             </span>
           )}
           {(snap.phase === 'reveal' || snap.phase === 'yearSummary') && (
@@ -109,14 +105,14 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           label="Cap (free credit limit)"
           value={snap.freeCreditLimit ?? 0}
           unit="cr"
-          hint="80% of class baseline, fixed"
+          hint="total free allowance, fixed"
         />
         <StatCard
           label="Regulator pool"
           value={`${requests.toLocaleString()} / ${pool.toLocaleString()}`}
           unit="cr"
           tone={requests > pool ? 'bad' : 'default'}
-          hint={requests > pool ? 'oversubscribed — pro-rata' : 'requests vs pool (20%)'}
+          hint={requests > pool ? 'oversubscribed — pro-rata' : 'requests vs pool'}
           icon={<Landmark size={12} />}
         />
         <StatCard
@@ -133,40 +129,12 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           hint={agg.totalRealized === null ? 'hidden until reveal' : undefined}
         />
         <StatCard
-          label="Penalties this year"
-          value={agg.totalPenaltyThisYear ?? '—'}
-          unit={agg.totalPenaltyThisYear !== null ? 'pt' : undefined}
-          tone={agg.totalPenaltyThisYear ? 'bad' : 'default'}
-          hint={
-            agg.leftoverDistributed !== null
-              ? `${agg.leftoverDistributed} cr leftover distributed`
-              : 'after market close'
-          }
+          label="Cost this year"
+          value={agg.totalCostThisYear ?? '—'}
+          tone={agg.totalCostThisYear ? 'bad' : 'default'}
+          hint={agg.totalCostThisYear !== null ? 'purchases + penalties' : 'after market close'}
         />
       </div>
-
-      {/* Trade phase: live market */}
-      {snap.phase === 'trade' && snap.market && (
-        <>
-          <MarketTicker market={snap.market} />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div className="rounded-xl border border-border bg-card/70 p-5">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
-                <BookOpen size={12} className="text-primary" />
-                Live order book
-              </div>
-              <OrderBook market={snap.market} />
-            </div>
-            <div className="rounded-xl border border-border bg-card/70 p-5">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
-                <History size={12} className="text-primary" />
-                Trades feed
-              </div>
-              <TradesFeed trades={snap.market.trades} max={14} />
-            </div>
-          </div>
-        </>
-      )}
 
       {/* Year summary / end: leaderboard + between-year controls */}
       {(snap.phase === 'yearSummary' || snap.phase === 'ended') && (
@@ -174,7 +142,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           <div className="rounded-xl border border-border bg-card/70 p-5">
             <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
               <Trophy size={12} className="text-accent" />
-              Leaderboard — fewest penalty points wins
+              Leaderboard — lowest total cost wins
             </div>
             <LeaderboardTable rows={snap.leaderboard} />
           </div>
@@ -237,10 +205,11 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                   <th className="py-2 pr-3 font-normal">Industry</th>
                   <th className="py-2 pr-3 font-normal text-right">Free</th>
                   <th className="py-2 pr-3 font-normal text-right">Regulator</th>
+                  <th className="py-2 pr-3 font-normal text-right">Bought</th>
                   <th className="py-2 pr-3 font-normal text-right">Held</th>
                   <th className="py-2 pr-3 font-normal text-right">Realized</th>
                   <th className="py-2 pr-3 font-normal text-right">Net</th>
-                  <th className="py-2 font-normal text-right">Penalty Σ</th>
+                  <th className="py-2 font-normal text-right">Cost Σ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -264,6 +233,9 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                         : (p.regulatorRequest?.toLocaleString() ?? '—')}
                     </td>
                     <td className="py-2 pr-3 font-mono text-right">
+                      {p.secondaryBought?.toLocaleString() ?? '—'}
+                    </td>
+                    <td className="py-2 pr-3 font-mono text-right">
                       {p.creditsHeld?.toLocaleString() ?? '—'}
                     </td>
                     <td className="py-2 pr-3 font-mono text-right">
@@ -281,7 +253,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                         : '—'}
                     </td>
                     <td className="py-2 font-mono text-right text-muted-foreground">
-                      {p.penaltyPoints.toLocaleString()}
+                      {p.score.toLocaleString()}
                     </td>
                   </tr>
                 ))}

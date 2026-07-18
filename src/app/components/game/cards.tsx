@@ -106,8 +106,12 @@ export function AllocationCard({
         <span className="text-sm text-muted-foreground ml-1.5">credits</span>
       </div>
       <p className="text-xs text-muted-foreground mt-1.5">
-        Proportional to your share of the class&apos;s total emissions over the past ten
-        years (80% of the class baseline is distributed for free).
+        {mode === 'grandfathering' &&
+          "Proportional to your share of the class's total emissions over the past ten years (80% of the class baseline is distributed for free)."}
+        {mode === 'benchmarking' &&
+          'A flat allowance set for your industry — every company in the same industry gets the same free credits, regardless of its own history.'}
+        {mode === 'auctioning' &&
+          'No free credits under auctioning — every allowance must be bought from the regulator at the fixed price.'}
       </p>
       {regulatorRequest !== null && (
         <div className="mt-2 text-xs font-mono text-accent">
@@ -120,51 +124,46 @@ export function AllocationCard({
 
 export function SettlementCard({
   settlement,
-  penaltyPointsTotal,
+  scoreTotal,
 }: {
   settlement: PlayerSettlement
-  penaltyPointsTotal: number
+  scoreTotal: number
 }) {
-  const clean = settlement.shortage === 0
-  const uncovered = Math.round((settlement.shortage - settlement.coveredByLeftover) * 10) / 10
+  const noPenalty = settlement.penaltyCost === 0
   return (
     <div
       className={cn(
         'rounded-xl border p-4',
-        clean ? 'border-primary/40 bg-primary/10' : 'border-destructive/40 bg-destructive/10',
+        noPenalty ? 'border-primary/40 bg-primary/10' : 'border-destructive/40 bg-destructive/10',
       )}
     >
       <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-wider mb-1 text-muted-foreground">
-        <Gavel size={12} className={clean ? 'text-primary' : 'text-destructive'} />
-        Penalty settlement
+        <Gavel size={12} className={noPenalty ? 'text-primary' : 'text-destructive'} />
+        Cost settlement
       </div>
-      {clean ? (
-        <div className="text-2xl font-bold font-mono text-primary">
-          No penalty
-          <span className="text-sm text-muted-foreground ml-1.5">covered in full</span>
-        </div>
-      ) : (
-        <>
-          <div className="text-2xl font-bold font-mono text-destructive">
-            +{settlement.penalty.toLocaleString()}
-            <span className="text-sm text-muted-foreground ml-1.5">penalty points</span>
-          </div>
-          <div className="text-xs font-mono text-muted-foreground mt-2 flex flex-col gap-0.5">
-            <span>
-              Shortage: <span className="text-foreground">{settlement.shortage}</span> tCO₂
-            </span>
-            <span>
-              Covered by leftover market credits (low rate):{' '}
-              <span className="text-accent">{settlement.coveredByLeftover}</span>
-            </span>
-            <span>
-              Uncovered (high rate): <span className="text-destructive">{uncovered}</span>
-            </span>
-          </div>
-        </>
-      )}
+      <div
+        className={cn(
+          'text-2xl font-bold font-mono',
+          noPenalty ? 'text-primary' : 'text-destructive',
+        )}
+      >
+        +{settlement.yearCost.toLocaleString()}
+        <span className="text-sm text-muted-foreground ml-1.5">cost this year</span>
+      </div>
+      <div className="text-xs font-mono text-muted-foreground mt-2 flex flex-col gap-0.5">
+        <span>
+          Credits bought: cost{' '}
+          <span className="text-accent">{settlement.purchaseCost.toLocaleString()}</span>
+        </span>
+        <span>
+          Shortage: <span className="text-foreground">{settlement.shortage}</span> tCO₂ → penalty{' '}
+          <span className={noPenalty ? 'text-primary' : 'text-destructive'}>
+            {settlement.penaltyCost.toLocaleString()}
+          </span>
+        </span>
+      </div>
       <div className="text-xs font-mono text-muted-foreground mt-2 pt-2 border-t border-border">
-        Total penalty points: <span className="text-foreground font-bold">{penaltyPointsTotal}</span>{' '}
+        Total cost so far: <span className="text-foreground font-bold">{scoreTotal}</span>{' '}
         (lowest wins)
       </div>
     </div>
@@ -199,10 +198,10 @@ export function LeaderboardTable({
             <span
               className={cn(
                 'font-mono font-bold w-20 text-right',
-                row.penaltyPoints === 0 ? 'text-primary' : 'text-destructive',
+                row.score === 0 ? 'text-primary' : 'text-foreground',
               )}
             >
-              {row.penaltyPoints.toLocaleString()} pt
+              {row.score.toLocaleString()}
             </span>
           </div>
         )

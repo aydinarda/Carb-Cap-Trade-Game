@@ -168,10 +168,8 @@ export function registerSockets(io: IO) {
 
     socket.on('player:requestCredits', ({ qty }, ack) =>
       playerAction(ack, (s, pid) => s.requestCredits(pid, Number(qty))))
-    socket.on('player:placeOrder', ({ side, qty, price }, ack) =>
-      playerAction(ack, (s, pid) => s.placeOrder(pid, side, Number(qty), Number(price))))
-    socket.on('player:cancelOrder', ({ orderId }, ack) =>
-      playerAction(ack, (s, pid) => s.cancelOrder(pid, String(orderId))))
+    socket.on('player:buyCredits', ({ qty }, ack) =>
+      playerAction(ack, (s, pid) => s.buyCredits(pid, Number(qty))))
 
     socket.on('disconnect', () => {
       if (!socket.data.roomCode || !socket.data.playerId) return

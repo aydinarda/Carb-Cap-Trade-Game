@@ -16,12 +16,5 @@ export { generateHistoryForIndustry, generatePlayerProfile } from './playerGener
 export { createRng, round1, type Rng } from './rng'
 export { computeNetPositions } from './trade'
 export { windowSum, computeFreeCreditLimit } from './grandfathering'
-export {
-  buildMarketView,
-  cancelOrder,
-  matchOrder,
-  openSellRemaining,
-  tradedNet,
-} from './orderBook'
 export { grantRegulator } from './regulator'
 export { settleYear } from './settlement'

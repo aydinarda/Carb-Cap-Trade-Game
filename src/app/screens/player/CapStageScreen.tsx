@@ -6,13 +6,8 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Progress } from '../../components/ui/progress'
 import { Slider } from '../../components/ui/slider'
-import {
-  AllocationCard,
-  PendingMechanismNotice,
-  WarningBanner,
-} from '../../components/game/cards'
+import { AllocationCard, WarningBanner } from '../../components/game/cards'
 import { EmissionHistoryChart } from '../../components/game/charts'
-import { MODE_LABELS } from '../../components/game/theme'
 import { useGame } from '../../net/GameContext'
 
 export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
@@ -26,14 +21,6 @@ export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
     setQty(snap.you.regulatorRequest ?? 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap.currentYear])
-
-  if (snap.capMode && !MODE_LABELS[snap.capMode].implemented) {
-    return (
-      <PendingMechanismNotice
-        title={`${MODE_LABELS[snap.capMode].label} — allocation pending`}
-      />
-    )
-  }
 
   const freeAllocation = snap.you.freeAllocation ?? 0
   const pool = snap.regulatorPool ?? 0

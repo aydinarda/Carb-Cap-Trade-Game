@@ -110,11 +110,23 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
             {snap.classAggregate.totalBaselineEmissions.toLocaleString()}
             <span className="text-sm text-muted-foreground ml-1">tCO₂</span>
           </div>
-          <div className="text-xs text-muted-foreground mt-1 font-mono">
-            → free credit limit ={' '}
-            {(Math.round(snap.classAggregate.totalBaselineEmissions * 0.8 * 10) / 10).toLocaleString()}{' '}
-            (80%)
-          </div>
+          {snap.capMode === 'grandfathering' && (
+            <div className="text-xs text-muted-foreground mt-1 font-mono">
+              → free credit limit ={' '}
+              {(Math.round(snap.classAggregate.totalBaselineEmissions * 0.8 * 10) / 10).toLocaleString()}{' '}
+              (80%)
+            </div>
+          )}
+          {snap.capMode === 'auctioning' && (
+            <div className="text-xs text-muted-foreground mt-1 font-mono">
+              → no free credits; the full baseline is sold at the fixed price
+            </div>
+          )}
+          {snap.capMode === 'benchmarking' && (
+            <div className="text-xs text-muted-foreground mt-1 font-mono">
+              → free credits come from per-industry benchmarks (see settings)
+            </div>
+          )}
         </div>
 
         {mode && !mode.implemented && (

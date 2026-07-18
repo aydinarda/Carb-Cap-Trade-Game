@@ -20,37 +20,18 @@ export interface Player extends PlayerProfile {
   id: string // "P1", "P2", … in join order (matches the notebook)
   name: string
   connected: boolean
-  /** Cumulative penalty points across years — lowest wins. */
-  penaltyPoints: number
-}
-
-export type OrderSide = 'buy' | 'sell'
-
-export interface Order {
-  id: string
-  playerId: string
-  side: OrderSide
-  qty: number
-  remaining: number
-  price: number
-  status: 'open' | 'filled' | 'cancelled'
-  seq: number // placement order, for time priority
-}
-
-export interface Trade {
-  id: string
-  buyerId: string
-  sellerId: string
-  qty: number
-  price: number
-  seq: number
+  /** Cumulative cost across years (credit spend + penalties) — lowest wins. */
+  score: number
 }
 
 export interface PlayerSettlement {
   shortage: number
-  /** Part of the shortage covered by leftover unsold market credits (low penalty). */
-  coveredByLeftover: number
-  penalty: number // covered×lowRate + uncovered×highRate
+  /** (regulatorGranted + secondaryBought) × regulatorPrice for the year. */
+  purchaseCost: number
+  /** shortage × penaltyRate. */
+  penaltyCost: number
+  /** purchaseCost + penaltyCost — added to the cumulative score. */
+  yearCost: number
 }
 
 export interface YearRecord {
@@ -60,13 +41,12 @@ export interface YearRecord {
   regulatorRequest: Record<string, number>
   /** Credits actually granted after pro-rata against the pool. */
   regulatorGranted: Record<string, number>
-  /** Yearly regulator pool = Σbaseline × (1 − freeCreditRatio). */
+  /** Yearly regulator pool = Σbaseline − Σ freeAllocation. */
   regulatorPool: number
   realized: Record<string, number>
-  orders: Order[]
-  trades: Trade[]
+  /** Credits bought at the fixed price in the trade stage (unlimited). */
+  secondaryBought: Record<string, number>
   settlement: Record<string, PlayerSettlement> | null
-  leftoverDistributed: number
   netPosition: Record<string, number>
 }
 
@@ -74,10 +54,12 @@ export interface SessionConfig {
   freeCreditRatio: number
   historyWindow: number
   baselineYear: number
-  /** Fixed regulator sale price (informational — no cash ledger). */
+  /** Fixed price per credit bought (regulator cap stage + secondary market). Real cost. */
   regulatorPrice: number
-  lowPenaltyRate: number
-  highPenaltyRate: number
+  /** Cost per tCO2 of emissions left uncovered at settlement. */
+  penaltyRate: number
+  /** Benchmarking mode: free credits per company, by industry. */
+  benchmark: Record<Industry, number>
 }
 
 export interface GameState {
@@ -102,42 +84,30 @@ export interface PublicPlayerInfo {
   connected: boolean
 }
 
-/** Live order-book market view (shared by players and host). */
-export interface MarketView {
-  bids: Order[] // open buys, best (highest price) first
-  asks: Order[] // open sells, best (lowest price) first
-  trades: Trade[] // most recent first
-  lastPrice: number | null
-  bestBid: number | null
-  bestAsk: number | null
-  vwap: number | null
-  volume: number
-}
-
 /** What a player knows about themself in the current year. */
 export interface YouView {
   id: string
   name: string
   industry: Industry
   emissions: Record<number, number>
-  penaltyPoints: number
+  score: number
   freeAllocation: number | null
   regulatorRequest: number | null
   regulatorGranted: number | null
-  /** free + granted + bought − sold, this year. */
+  /** Credits bought at the fixed price in the trade stage. */
+  secondaryBought: number | null
+  /** free + regulatorGranted + secondaryBought, this year. */
   creditsHeld: number | null
   realized: number | null
   netPosition: number | null
   settlement: PlayerSettlement | null
-  myOrders: Order[]
-  myTrades: Trade[]
 }
 
 export interface LeaderboardRow {
   id: string
   name: string
   industry: Industry
-  penaltyPoints: number
+  score: number
 }
 
 export interface PlayerSnapshot {
@@ -153,7 +123,6 @@ export interface PlayerSnapshot {
   regulatorRequestTotal: number | null
   regulatorPrice: number
   classAggregate: ClassAggregate | null
-  market: MarketView | null
   leaderboard: LeaderboardRow[] | null // visible from yearSummary on
   you: YouView
 }
@@ -174,8 +143,8 @@ export interface ClassAggregate {
   submittedCount: number
   totalRealized: number | null
   totalNetPosition: number | null
-  totalPenaltyThisYear: number | null
-  leftoverDistributed: number | null
+  /** Total cost accrued this year across the class (purchases + penalties). */
+  totalCostThisYear: number | null
   industryBreakdown: IndustryBreakdownRow[]
   /** Total emissions vs cap per completed year, for the class chart. */
   yearHistory: { year: number; totalRealized: number; cap: number }[]
@@ -184,10 +153,11 @@ export interface ClassAggregate {
 export interface HostPlayerRow extends PublicPlayerInfo {
   baselineEmission: number
   windowSum: number
-  penaltyPoints: number
+  score: number
   freeAllocation: number | null
   regulatorRequest: number | null
   regulatorGranted: number | null
+  secondaryBought: number | null
   creditsHeld: number | null
   realized: number | null
   netPosition: number | null
@@ -206,7 +176,6 @@ export interface HostSnapshot {
   freeCreditLimit: number | null
   regulatorPool: number | null
   config: SessionConfig
-  market: MarketView | null
   leaderboard: LeaderboardRow[]
 }
 

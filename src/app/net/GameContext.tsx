@@ -8,7 +8,7 @@ import {
 } from 'react'
 import { toast } from 'sonner'
 import type { Industry } from '@shared/constants'
-import type { CapMode, HostSnapshot, OrderSide, PlayerSnapshot, Snapshot } from '@shared/types'
+import type { CapMode, HostSnapshot, PlayerSnapshot, Snapshot } from '@shared/types'
 import {
   clearIdentity,
   getSocket,
@@ -57,8 +57,7 @@ interface GameContextValue {
     payload?: Record<string, unknown>,
   ) => Promise<boolean>
   requestCredits: (qty: number) => Promise<boolean>
-  placeOrder: (side: OrderSide, qty: number, price: number) => Promise<boolean>
-  cancelOrder: (orderId: string) => Promise<boolean>
+  buyCredits: (qty: number) => Promise<boolean>
   leave: () => void
 }
 
@@ -146,9 +145,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }
 
     const requestCredits = (qty: number) => playerRequest('player:requestCredits', { qty })
-    const placeOrder = (side: OrderSide, qty: number, price: number) =>
-      playerRequest('player:placeOrder', { side, qty, price })
-    const cancelOrder = (orderId: string) => playerRequest('player:cancelOrder', { orderId })
+    const buyCredits = (qty: number) => playerRequest('player:buyCredits', { qty })
 
     const leave = () => {
       clearIdentity()
@@ -167,8 +164,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       createSession,
       hostAction,
       requestCredits,
-      placeOrder,
-      cancelOrder,
+      buyCredits,
       leave,
     }
   }, [connected, snapshot, hasIdentity])

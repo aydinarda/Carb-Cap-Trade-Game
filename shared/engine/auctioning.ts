@@ -1,20 +1,20 @@
 import type { CapMechanism } from './capMechanism'
-import { MechanismNotImplementedError } from './capMechanism'
-import { computeFreeCreditLimit } from './grandfathering'
 
 /**
- * Auctioning (STUB — details pending from the game designer).
- *
- * Per the notebook: "no free credits. Purely auction-based." The auction format
- * (sealed bid? uniform price? rounds?) is not yet specified, so `allocate`
- * throws rather than silently returning all-zeros — the auction itself would
- * replace the cap-stage decision flow, not just the allocation numbers.
+ * Auctioning: no free credits. Every company buys all its allowances at the fixed
+ * price. Since nothing is given for free, the regulator pool at the cap stage is
+ * the full baseline (Σbaseline − Σfree = Σbaseline), sold pro-rata if the class
+ * over-requests, and companies still top up in the fixed-price secondary market.
  */
 export const auctioning: CapMechanism = {
   mode: 'auctioning',
-  implemented: false,
-  computeFreeCreditLimit,
-  allocate() {
-    throw new MechanismNotImplementedError('auctioning')
+  implemented: true,
+  computeFreeCreditLimit() {
+    return 0
+  },
+  allocate(players) {
+    const allocation: Record<string, number> = {}
+    for (const player of players) allocation[player.id] = 0
+    return allocation
   },
 }

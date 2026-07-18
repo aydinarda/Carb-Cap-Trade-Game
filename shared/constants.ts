@@ -17,9 +17,21 @@ export const BASELINE_YEAR = 10
 export const FIRST_GAME_YEAR = 11
 
 // Host-adjustable defaults
-export const DEFAULT_REGULATOR_PRICE = 10 // informational — no cash ledger yet
-export const DEFAULT_LOW_PENALTY_RATE = 1 // points per tCO2 covered by leftover credits
-export const DEFAULT_HIGH_PENALTY_RATE = 3 // points per tCO2 left uncovered
+export const DEFAULT_REGULATOR_PRICE = 10 // real cost per credit bought (regulator + secondary market)
+export const DEFAULT_PENALTY_RATE = 20 // cost per tCO2 left uncovered — kept above the credit price so covering beats defaulting
+
+/**
+ * Benchmarking free allocation: every company in an industry gets this many
+ * free credits regardless of its own history. Defaults are ~80% of each
+ * industry's midpoint so the totals are comparable to grandfathering; the host
+ * can tune them.
+ */
+export const DEFAULT_BENCHMARK: Record<Industry, number> = {
+  'Power & Utilities': 800,
+  'Heavy Materials': 640,
+  'Manufacturing & Chemicals': 420,
+  Transport: 240,
+}
 
 export const MIN_PLAYERS = 1
 export const MAX_PLAYERS = 60

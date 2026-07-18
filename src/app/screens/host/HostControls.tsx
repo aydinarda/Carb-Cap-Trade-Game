@@ -36,26 +36,32 @@ export function ModePicker({ capMode, compact }: { capMode: CapMode | null; comp
   )
 }
 
-/** Regulator price + penalty rates — editable in the lobby and between years. */
+/** Credit price + penalty rate + per-industry benchmarks — editable in the lobby and between years. */
 export function SettingsPanel({ config }: { config: SessionConfig }) {
   const { hostAction } = useGame()
   const [regulatorPrice, setRegulatorPrice] = useState(String(config.regulatorPrice))
-  const [low, setLow] = useState(String(config.lowPenaltyRate))
-  const [high, setHigh] = useState(String(config.highPenaltyRate))
+  const [penalty, setPenalty] = useState(String(config.penaltyRate))
+  const [benchmark, setBenchmark] = useState<Record<string, string>>(() =>
+    Object.fromEntries(Object.entries(config.benchmark).map(([k, v]) => [k, String(v)])),
+  )
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     setRegulatorPrice(String(config.regulatorPrice))
-    setLow(String(config.lowPenaltyRate))
-    setHigh(String(config.highPenaltyRate))
-  }, [config.regulatorPrice, config.lowPenaltyRate, config.highPenaltyRate])
+    setPenalty(String(config.penaltyRate))
+    setBenchmark(Object.fromEntries(Object.entries(config.benchmark).map(([k, v]) => [k, String(v)])))
+  }, [config.regulatorPrice, config.penaltyRate, config.benchmark])
+
+  const priceHigh = Number(penalty) <= Number(regulatorPrice)
 
   const save = async () => {
     setBusy(true)
     const ok = await hostAction('host:updateSettings', {
       regulatorPrice: Number(regulatorPrice),
-      lowPenaltyRate: Number(low),
-      highPenaltyRate: Number(high),
+      penaltyRate: Number(penalty),
+      benchmark: Object.fromEntries(
+        Object.entries(benchmark).map(([k, v]) => [k, Number(v)]),
+      ),
     })
     setBusy(false)
     if (ok) toast.success('Settings updated')
@@ -85,9 +91,28 @@ export function SettingsPanel({ config }: { config: SessionConfig }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {field('Regulator price', regulatorPrice, setRegulatorPrice, 'per credit, informational')}
-      {field('Low penalty rate', low, setLow, 'pt/tCO₂ covered by leftovers')}
-      {field('High penalty rate', high, setHigh, 'pt/tCO₂ uncovered')}
+      {field('Credit price', regulatorPrice, setRegulatorPrice, 'real cost per credit bought')}
+      {field('Penalty rate', penalty, setPenalty, 'cost per tCO₂ uncovered')}
+      {priceHigh && (
+        <p className="text-[10px] text-destructive font-mono">
+          Penalty rate should exceed the credit price, or covering costs more than defaulting.
+        </p>
+      )}
+      <div className="pt-1 mt-1 border-t border-border">
+        <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-2">
+          Benchmark free credits (benchmarking mode)
+        </div>
+        <div className="flex flex-col gap-2">
+          {Object.keys(benchmark).map((industry) =>
+            field(
+              industry,
+              benchmark[industry],
+              (v) => setBenchmark((b) => ({ ...b, [industry]: v })),
+              'free credits per company',
+            ),
+          )}
+        </div>
+      </div>
       <Button
         variant="outline"
         onClick={() => void save()}

@@ -1,8 +1,8 @@
 import { customAlphabet, nanoid } from 'nanoid'
 import {
   BASELINE_YEAR,
-  DEFAULT_HIGH_PENALTY_RATE,
-  DEFAULT_LOW_PENALTY_RATE,
+  DEFAULT_BENCHMARK,
+  DEFAULT_PENALTY_RATE,
   DEFAULT_REGULATOR_PRICE,
   FIRST_GAME_YEAR,
   FREE_CREDIT_RATIO,
@@ -13,27 +13,16 @@ import {
 } from '../shared/constants'
 import {
   CAP_MECHANISMS,
-  cancelOrder,
   computeNetPositions,
   createRng,
   generateHistoryForIndustry,
   grantRegulator,
-  matchOrder,
-  openSellRemaining,
   realizeYear,
   round1,
   settleYear,
-  tradedNet,
   type Rng,
 } from '../shared/engine'
-import type {
-  CapMode,
-  GameState,
-  Order,
-  OrderSide,
-  Player,
-  YearRecord,
-} from '../shared/types'
+import type { CapMode, GameState, Player, YearRecord } from '../shared/types'
 
 const roomCodeAlphabet = customAlphabet('ABCDEFGHJKMNPQRSTUVWXYZ23456789', 4)
 
@@ -53,7 +42,6 @@ export class Session {
   /** player token -> playerId */
   readonly playerTokens = new Map<string, string>()
   private readonly rng: Rng
-  private orderSeq = 0
 
   constructor(capMode: CapMode, seed?: number) {
     const actualSeed = seed ?? Math.floor(Math.random() * 2 ** 31)
@@ -72,8 +60,8 @@ export class Session {
         historyWindow: HISTORY_WINDOW,
         baselineYear: BASELINE_YEAR,
         regulatorPrice: DEFAULT_REGULATOR_PRICE,
-        lowPenaltyRate: DEFAULT_LOW_PENALTY_RATE,
-        highPenaltyRate: DEFAULT_HIGH_PENALTY_RATE,
+        penaltyRate: DEFAULT_PENALTY_RATE,
+        benchmark: { ...DEFAULT_BENCHMARK },
       },
       freeCreditLimit: null,
     }
@@ -104,14 +92,23 @@ export class Session {
     )
   }
 
-  /** Credits a player holds this year: free + regulator + bought − sold. */
+  /** Credits a player holds this year: free + regulator (cap stage) + secondary buys. */
   creditsHeld(playerId: string): number {
     const record = this.currentYearRecord()
     if (!record) return 0
     return round1(
       (record.freeAllocation[playerId] ?? 0) +
         (record.regulatorGranted[playerId] ?? 0) +
-        tradedNet(record.trades, playerId),
+        (record.secondaryBought[playerId] ?? 0),
+    )
+  }
+
+  /** Total credits a player bought for money this year (regulator + secondary). */
+  purchased(playerId: string): number {
+    const record = this.currentYearRecord()
+    if (!record) return 0
+    return round1(
+      (record.regulatorGranted[playerId] ?? 0) + (record.secondaryBought[playerId] ?? 0),
     )
   }
 
@@ -132,7 +129,7 @@ export class Session {
       id: `P${this.state.players.length + 1}`,
       name: trimmed.slice(0, 40),
       connected: true,
-      penaltyPoints: 0,
+      score: 0,
       ...profile,
     }
     this.state.players.push(player)
@@ -149,17 +146,26 @@ export class Session {
 
   updateSettings(settings: {
     regulatorPrice?: number
-    lowPenaltyRate?: number
-    highPenaltyRate?: number
+    penaltyRate?: number
+    benchmark?: Partial<Record<Industry, number>>
   }) {
     this.requirePhase('lobby', 'yearSummary')
-    for (const key of ['regulatorPrice', 'lowPenaltyRate', 'highPenaltyRate'] as const) {
+    for (const key of ['regulatorPrice', 'penaltyRate'] as const) {
       const value = settings[key]
       if (value === undefined) continue
       if (!Number.isFinite(value) || value < 0) {
         throw new GameError('BAD_SETTING', `${key} must be a non-negative number.`)
       }
       this.state.config[key] = round1(value)
+    }
+    if (settings.benchmark) {
+      for (const [industry, value] of Object.entries(settings.benchmark)) {
+        if (value === undefined) continue
+        if (!Number.isFinite(value) || value < 0) {
+          throw new GameError('BAD_SETTING', `benchmark for ${industry} must be non-negative.`)
+        }
+        this.state.config.benchmark[industry as Industry] = round1(value)
+      }
     }
   }
 
@@ -213,24 +219,25 @@ export class Session {
       )
     }
     this.state.currentYear = year
+    const freeAllocation = mechanism.allocate(
+      this.state.players,
+      year,
+      this.state.freeCreditLimit!,
+      this.state.config,
+    )
+    const totalFree = Object.values(freeAllocation).reduce((a, b) => a + b, 0)
     this.state.years[year] = {
       year,
-      freeAllocation: mechanism.allocate(
-        this.state.players,
-        year,
-        this.state.freeCreditLimit!,
-        this.state.config,
-      ),
+      freeAllocation,
       regulatorRequest: {},
       regulatorGranted: {},
-      // The regulator sells the slice of the baseline NOT given out for free,
-      // so the total cap (free + regulator) stays at 100% of the baseline.
-      regulatorPool: round1(this.totalBaseline() * (1 - this.state.config.freeCreditRatio)),
+      // The regulator sells whatever slice of the baseline is not given out for
+      // free, so the cap stays at 100% of the baseline: grandfathering → ~20%,
+      // benchmarking → the remainder, auctioning → 100% (nothing is free).
+      regulatorPool: round1(Math.max(0, this.totalBaseline() - totalFree)),
       realized: {},
-      orders: [],
-      trades: [],
+      secondaryBought: {},
       settlement: null,
-      leftoverDistributed: 0,
       netPosition: {},
     }
     this.state.phase = 'cap'
@@ -261,26 +268,19 @@ export class Session {
     this.requirePhase('trade', 'reveal')
     const record = this.currentYearRecord()!
     const held: Record<string, number> = {}
+    const purchased: Record<string, number> = {}
     for (const player of this.state.players) {
       held[player.id] = this.creditsHeld(player.id)
+      purchased[player.id] = this.purchased(player.id)
     }
-    // Credits still resting in open sell orders at close form the leftover pool
-    const leftoverPool = round1(
-      this.state.players.reduce((s, p) => s + openSellRemaining(record.orders, p.id), 0),
-    )
-    const { settlement, leftoverDistributed } = settleYear(
-      record.realized,
-      held,
-      leftoverPool,
-      this.state.config,
-    )
+    const { settlement } = settleYear(record.realized, held, purchased, {
+      regulatorPrice: this.state.config.regulatorPrice,
+      penaltyRate: this.state.config.penaltyRate,
+    })
     record.settlement = settlement
-    record.leftoverDistributed = leftoverDistributed
     record.netPosition = computeNetPositions(record.realized, held)
     for (const player of this.state.players) {
-      player.penaltyPoints = round1(
-        player.penaltyPoints + (settlement[player.id]?.penalty ?? 0),
-      )
+      player.score = round1(player.score + (settlement[player.id]?.yearCost ?? 0))
     }
     this.state.phase = 'yearSummary'
   }
@@ -305,48 +305,19 @@ export class Session {
     record.regulatorRequest[playerId] = round1(qty)
   }
 
-  placeOrder(playerId: string, side: OrderSide, qty: number, price: number) {
+  /**
+   * Trade stage: buy `qty` credits from the regulator at the fixed price. Supply
+   * is unlimited; this is a cumulative set (the client sends the desired total
+   * for the year), so re-submitting replaces the running amount rather than
+   * stacking, matching the cap-stage requestCredits pattern.
+   */
+  buyCredits(playerId: string, qty: number) {
     this.requirePhase('trade')
-    if (!Number.isFinite(qty) || qty <= 0) {
-      throw new GameError('BAD_ORDER', 'Quantity must be a positive number.')
-    }
-    if (!Number.isFinite(price) || price <= 0) {
-      throw new GameError('BAD_ORDER', 'Price must be a positive number.')
+    if (!Number.isFinite(qty) || qty < 0) {
+      throw new GameError('BAD_BUY', 'Credits to buy must be a non-negative number.')
     }
     const record = this.currentYearRecord()!
-    const roundedQty = round1(qty)
-    if (side === 'sell') {
-      const capacity = round1(
-        this.creditsHeld(playerId) - openSellRemaining(record.orders, playerId),
-      )
-      if (roundedQty > capacity) {
-        throw new GameError(
-          'INSUFFICIENT_CREDITS',
-          `You can offer at most ${capacity} credits (held minus already-listed offers).`,
-        )
-      }
-    }
-    this.orderSeq += 1
-    const order: Order = {
-      id: nanoid(8),
-      playerId,
-      side,
-      qty: roundedQty,
-      remaining: roundedQty,
-      price: round1(price),
-      status: 'open',
-      seq: this.orderSeq,
-    }
-    const { trades } = matchOrder(record.orders, order, () => nanoid(8))
-    record.trades.push(...trades)
-  }
-
-  cancelOrder(playerId: string, orderId: string) {
-    this.requirePhase('trade')
-    const record = this.currentYearRecord()!
-    if (!cancelOrder(record.orders, playerId, orderId)) {
-      throw new GameError('NO_ORDER', 'Order not found or already closed.')
-    }
+    record.secondaryBought[playerId] = round1(qty)
   }
 
   getPlayer(playerId: string): Player | undefined {

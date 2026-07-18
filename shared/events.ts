@@ -1,5 +1,5 @@
 import type { Industry } from './constants'
-import type { CapMode, OrderSide, Phase, PlayerProfile, Snapshot } from './types'
+import type { CapMode, Phase, PlayerProfile, Snapshot } from './types'
 
 export type Ack<T = unknown> = (
   response: ({ ok: true } & T) | { ok: false; error: string },
@@ -13,7 +13,11 @@ export interface ClientToServerEvents {
   /** Allowed in lobby and yearSummary — the new mode applies from the next year. */
   'host:setCapMode': (payload: { mode: CapMode }, ack: Ack) => void
   'host:updateSettings': (
-    payload: { regulatorPrice?: number; lowPenaltyRate?: number; highPenaltyRate?: number },
+    payload: {
+      regulatorPrice?: number
+      penaltyRate?: number
+      benchmark?: Partial<Record<Industry, number>>
+    },
     ack: Ack,
   ) => void
   'host:startYear': (payload: Record<string, never>, ack: Ack) => void
@@ -29,9 +33,8 @@ export interface ClientToServerEvents {
   ) => void
   /** Cap stage: how many credits to request from the regulator pool. */
   'player:requestCredits': (payload: { qty: number }, ack: Ack) => void
-  /** Trade stage: place a limit order in the student market. */
-  'player:placeOrder': (payload: { side: OrderSide; qty: number; price: number }, ack: Ack) => void
-  'player:cancelOrder': (payload: { orderId: string }, ack: Ack) => void
+  /** Trade stage: buy credits from the regulator at the fixed price (unlimited). */
+  'player:buyCredits': (payload: { qty: number }, ack: Ack) => void
 }
 
 export interface ServerToClientEvents {

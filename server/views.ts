@@ -1,11 +1,10 @@
 import { INDUSTRY_NAMES } from '../shared/constants'
-import { buildMarketView, windowSum } from '../shared/engine'
+import { windowSum } from '../shared/engine'
 import type {
   ClassAggregate,
   HostSnapshot,
   IndustryBreakdownRow,
   LeaderboardRow,
-  MarketView,
   PlayerSnapshot,
   PublicPlayerInfo,
 } from '../shared/types'
@@ -26,19 +25,13 @@ function publicRoster(session: Session): PublicPlayerInfo[] {
 
 function leaderboard(session: Session): LeaderboardRow[] {
   return [...session.state.players]
-    .sort((a, b) => a.penaltyPoints - b.penaltyPoints)
+    .sort((a, b) => a.score - b.score)
     .map((p) => ({
       id: p.id,
       name: p.name,
       industry: p.industry,
-      penaltyPoints: p.penaltyPoints,
+      score: p.score,
     }))
-}
-
-function marketView(session: Session): MarketView | null {
-  const record = session.currentYearRecord()
-  if (!record) return null
-  return buildMarketView(record.orders, record.trades)
 }
 
 function classAggregate(session: Session): ClassAggregate {
@@ -90,10 +83,9 @@ function classAggregate(session: Session): ClassAggregate {
     totalRealized: hasRealized ? sum(record!.realized) : null,
     totalNetPosition:
       record && Object.keys(record.netPosition).length > 0 ? sum(record.netPosition) : null,
-    totalPenaltyThisYear: settlement
-      ? round1(Object.values(settlement).reduce((s, x) => s + x.penalty, 0))
+    totalCostThisYear: settlement
+      ? round1(Object.values(settlement).reduce((s, x) => s + x.yearCost, 0))
       : null,
-    leftoverDistributed: settlement ? record!.leftoverDistributed : null,
     industryBreakdown,
     yearHistory,
   }
@@ -128,32 +120,24 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
       : null,
     regulatorPrice: state.config.regulatorPrice,
     classAggregate: state.phase === 'lobby' ? null : classAggregate(session),
-    market: state.phase === 'trade' || settled ? marketView(session) : null,
     leaderboard: settled ? leaderboard(session) : null,
     you: {
       id: player.id,
       name: player.name,
       industry: player.industry,
       emissions: player.emissions,
-      penaltyPoints: player.penaltyPoints,
+      score: player.score,
       freeAllocation: record?.freeAllocation[player.id] ?? null,
       regulatorRequest: record?.regulatorRequest[player.id] ?? null,
       regulatorGranted:
         record && Object.keys(record.regulatorGranted).length > 0
           ? (record.regulatorGranted[player.id] ?? 0)
           : null,
+      secondaryBought: record?.secondaryBought[player.id] ?? null,
       creditsHeld: record && revealed ? session.creditsHeld(player.id) : null,
       realized: revealed ? (record?.realized[player.id] ?? null) : null,
       netPosition: record?.netPosition[player.id] ?? null,
       settlement: record?.settlement?.[player.id] ?? null,
-      myOrders: record
-        ? [...record.orders.filter((o) => o.playerId === player.id)].reverse()
-        : [],
-      myTrades: record
-        ? [...record.trades.filter(
-            (t) => t.buyerId === player.id || t.sellerId === player.id,
-          )].reverse()
-        : [],
     },
   }
 }
@@ -173,14 +157,13 @@ export function hostSnapshot(session: Session): HostSnapshot {
     regulatorPool: record?.regulatorPool ?? null,
     config: state.config,
     classAggregate: classAggregate(session),
-    market: marketView(session),
     leaderboard: leaderboard(session),
     players: state.players.map((p) => ({
       id: p.id,
       name: p.name,
       industry: p.industry,
       connected: p.connected,
-      penaltyPoints: p.penaltyPoints,
+      score: p.score,
       baselineEmission: p.emissions[state.config.baselineYear] ?? 0,
       windowSum: round1(windowSum(p, state.currentYear, state.config.historyWindow)),
       freeAllocation: record?.freeAllocation[p.id] ?? null,
@@ -189,6 +172,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
         record && Object.keys(record.regulatorGranted).length > 0
           ? (record.regulatorGranted[p.id] ?? 0)
           : null,
+      secondaryBought: record?.secondaryBought[p.id] ?? null,
       creditsHeld: record ? session.creditsHeld(p.id) : null,
       realized: record?.realized[p.id] ?? null,
       netPosition: record?.netPosition[p.id] ?? null,
