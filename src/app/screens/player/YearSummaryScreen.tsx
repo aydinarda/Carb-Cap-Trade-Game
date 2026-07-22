@@ -37,7 +37,17 @@ export function YearSummaryScreen({ snap }: { snap: PlayerSnapshot }) {
           }
         />
         <StatCard label="Held at close" value={snap.you.creditsHeld ?? 0} unit="cr" />
-        <StatCard label="Realized" value={snap.you.realized ?? 0} unit="tCO₂" tone="accent" />
+        <StatCard
+          label="Realized"
+          value={snap.you.realized ?? 0}
+          unit="tCO₂"
+          tone="accent"
+          hint={
+            snap.you.expectedEmission !== null
+              ? `expected ${snap.you.expectedEmission}`
+              : undefined
+          }
+        />
       </div>
 
       {snap.leaderboard && (

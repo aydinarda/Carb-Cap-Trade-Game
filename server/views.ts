@@ -1,5 +1,5 @@
 import { INDUSTRY_NAMES } from '../shared/constants'
-import { windowSum } from '../shared/engine'
+import { expectedEmission, windowSum } from '../shared/engine'
 import type {
   ClassAggregate,
   HostSnapshot,
@@ -80,6 +80,9 @@ function classAggregate(session: Session): ClassAggregate {
     totalRegulatorRequests: record ? sum(record.regulatorRequest) : null,
     totalRegulatorGranted: record ? sum(record.regulatorGranted) : null,
     submittedCount: record ? Object.keys(record.regulatorRequest).length : 0,
+    totalExpected: record
+      ? round1(players.reduce((s, p) => s + expectedEmission(p, state.currentYear), 0))
+      : null,
     totalRealized: hasRealized ? sum(record!.realized) : null,
     totalNetPosition:
       record && Object.keys(record.netPosition).length > 0 ? sum(record.netPosition) : null,
@@ -135,7 +138,8 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
           : null,
       secondaryBought: record?.secondaryBought[player.id] ?? null,
       creditsHeld: record && revealed ? session.creditsHeld(player.id) : null,
-      realized: revealed ? (record?.realized[player.id] ?? null) : null,
+      expectedEmission: record ? expectedEmission(player, state.currentYear) : null,
+      realized: settled ? (record?.realized[player.id] ?? null) : null,
       netPosition: record?.netPosition[player.id] ?? null,
       settlement: record?.settlement?.[player.id] ?? null,
     },
@@ -174,6 +178,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
           : null,
       secondaryBought: record?.secondaryBought[p.id] ?? null,
       creditsHeld: record ? session.creditsHeld(p.id) : null,
+      expectedEmission: round1(expectedEmission(p, state.currentYear)),
       realized: record?.realized[p.id] ?? null,
       netPosition: record?.netPosition[p.id] ?? null,
       settlement: record?.settlement?.[p.id] ?? null,

@@ -98,6 +98,9 @@ export interface YouView {
   secondaryBought: number | null
   /** free + regulatorGranted + secondaryBought, this year. */
   creditsHeld: number | null
+  /** Mean emission players plan against; known from the cap stage on. */
+  expectedEmission: number | null
+  /** Actual emission — revealed only at year end (settlement). */
   realized: number | null
   netPosition: number | null
   settlement: PlayerSettlement | null
@@ -141,6 +144,8 @@ export interface ClassAggregate {
   totalRegulatorRequests: number | null
   totalRegulatorGranted: number | null
   submittedCount: number
+  /** Σ expected emissions — the mean the class plans against, before realization. */
+  totalExpected: number | null
   totalRealized: number | null
   totalNetPosition: number | null
   /** Total cost accrued this year across the class (purchases + penalties). */
@@ -159,6 +164,7 @@ export interface HostPlayerRow extends PublicPlayerInfo {
   regulatorGranted: number | null
   secondaryBought: number | null
   creditsHeld: number | null
+  expectedEmission: number
   realized: number | null
   netPosition: number | null
   settlement: PlayerSettlement | null

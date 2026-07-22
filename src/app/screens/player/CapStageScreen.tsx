@@ -65,9 +65,10 @@ export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
         </div>
 
         <WarningBanner>
-          Your Year {snap.currentYear} emissions are still uncertain — they are revealed
-          after this stage closes. The regulator pool is the 20% of the baseline not given
-          out for free; if the class requests more, everyone is cut pro-rata.
+          Your expected Year {snap.currentYear} emission is{' '}
+          <strong>{snap.you.expectedEmission ?? '—'} tCO₂</strong> — the actual is realized
+          only at year end and may differ. The regulator pool is the baseline not given out
+          for free; if the class requests more, everyone is cut pro-rata.
         </WarningBanner>
 
         <div className="flex items-center gap-4 mt-5">

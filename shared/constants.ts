@@ -16,6 +16,14 @@ export const HISTORY_WINDOW = 10
 export const BASELINE_YEAR = 10
 export const FIRST_GAME_YEAR = 11
 
+/**
+ * Realized emissions are drawn from each company's own distribution, centred on
+ * its expected (mean) emission — the most recent known level — with this
+ * standard deviation as a fraction of the mean. Players plan against the mean;
+ * the actual realization (revealed only at year end) can differ by this spread.
+ */
+export const EMISSION_VOLATILITY = 0.08
+
 // Host-adjustable defaults
 export const DEFAULT_REGULATOR_PRICE = 10 // real cost per credit bought (regulator + secondary market)
 export const DEFAULT_PENALTY_RATE = 20 // cost per tCO2 left uncovered — kept above the credit price so covering beats defaulting

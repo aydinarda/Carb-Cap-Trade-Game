@@ -16,9 +16,9 @@ function CountUp({ value }: { value: number }) {
 }
 
 export function EmissionsRevealScreen({ snap }: { snap: PlayerSnapshot }) {
-  const realized = snap.you.realized ?? 0
+  const expected = snap.you.expectedEmission ?? 0
   const cover = snap.you.creditsHeld ?? 0
-  const gap = Math.round((realized - cover) * 10) / 10
+  const gap = Math.round((expected - cover) * 10) / 10
   const shortage = gap > 0
 
   return (
@@ -26,15 +26,17 @@ export function EmissionsRevealScreen({ snap }: { snap: PlayerSnapshot }) {
       <div className="rounded-xl border border-accent/40 bg-accent/5 p-6 text-center">
         <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-2">
           <Flame size={13} className="text-accent" />
-          Your realized emissions — Year {snap.currentYear}
+          Your expected emissions — Year {snap.currentYear}
         </div>
         <div
           className="text-5xl font-black font-mono text-accent"
           style={{ fontFamily: "'Unbounded', sans-serif" }}
         >
-          <CountUp value={realized} />
+          <CountUp value={expected} />
         </div>
-        <div className="text-sm text-muted-foreground mt-1">tCO₂</div>
+        <div className="text-sm text-muted-foreground mt-1">
+          tCO₂ · mean — the actual is realized at year end
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -49,9 +51,9 @@ export function EmissionsRevealScreen({ snap }: { snap: PlayerSnapshot }) {
               : 'free + regulator'
           }
         />
-        <StatCard label="Realized" value={realized} unit="tCO₂" tone="accent" />
+        <StatCard label="Expected" value={expected} unit="tCO₂" tone="accent" />
         <StatCard
-          label={shortage ? 'Shortage' : 'Surplus'}
+          label={shortage ? 'Expected shortage' : 'Expected surplus'}
           value={Math.abs(gap)}
           unit="tCO₂"
           tone={shortage ? 'bad' : 'good'}

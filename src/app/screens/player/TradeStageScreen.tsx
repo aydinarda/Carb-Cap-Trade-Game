@@ -11,13 +11,15 @@ import { useGame } from '../../net/GameContext'
 export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   const { buyCredits } = useGame()
   const price = snap.regulatorPrice
-  const realized = snap.you.realized ?? 0
+  // Players trade against their EXPECTED (mean) emission — the actual is realized
+  // only at year end, so buying to the mean may leave them a little over or short.
+  const expected = snap.you.expectedEmission ?? 0
   const alreadyBought = snap.you.secondaryBought ?? 0
   // creditsHeld already includes alreadyBought; the pre-top-up holding is
-  // held − alreadyBought, so the shortfall to cover is realized − that.
+  // held − alreadyBought, so the shortfall to cover is expected − that.
   const held = snap.you.creditsHeld ?? 0
   const baseHeld = Math.round((held - alreadyBought) * 10) / 10
-  const shortfall = Math.max(0, Math.round((realized - baseHeld) * 10) / 10)
+  const shortfall = Math.max(0, Math.round((expected - baseHeld) * 10) / 10)
 
   // Local input = the desired TOTAL bought this year (server treats it as a set).
   const [qty, setQty] = useState<number>(alreadyBought || shortfall)
@@ -29,7 +31,7 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   }, [snap.currentYear])
 
   const projectedHeld = Math.round((baseHeld + qty) * 10) / 10
-  const projectedGap = Math.round((realized - projectedHeld) * 10) / 10
+  const projectedGap = Math.round((expected - projectedHeld) * 10) / 10
   const stillShort = projectedGap > 0
   const cost = Math.round(qty * price * 10) / 10
   const sliderMax = Math.max(20, Math.ceil(shortfall * 1.5))
@@ -44,7 +46,13 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <StatCard label="Realized emissions" value={realized} unit="tCO₂" tone="accent" />
+        <StatCard
+          label="Expected emissions"
+          value={expected}
+          unit="tCO₂"
+          tone="accent"
+          hint="mean — actual is realized at year end"
+        />
         <StatCard
           label="Credits before buying"
           value={baseHeld}
@@ -52,11 +60,11 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
           hint="free + regulator (cap stage)"
         />
         <StatCard
-          label={stillShort ? 'Still short' : 'Covered'}
+          label={stillShort ? 'Short vs expected' : 'Covers expected'}
           value={stillShort ? projectedGap : Math.abs(projectedGap)}
           unit="tCO₂"
           tone={stillShort ? 'bad' : 'good'}
-          hint={stillShort ? 'buy more to avoid the penalty' : 'no penalty at settlement'}
+          hint={stillShort ? 'buy more to cover the mean' : 'covers your expected emissions'}
           icon={<ArrowRightLeft size={12} />}
         />
       </div>
@@ -74,9 +82,10 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
         </div>
 
         <WarningBanner>
-          The price is a real cost. Every credit you buy costs {price}; each tCO₂ left
-          uncovered costs the penalty rate at settlement. Surplus credits expire — don&apos;t
-          overbuy. Lowest total cost wins.
+          You only know your <strong>expected</strong> emission ({expected}); the actual is
+          realized at year end and may be higher or lower. Every credit costs {price}; each
+          tCO₂ left uncovered costs the penalty rate. Surplus credits expire — buying past
+          the mean is a hedge, not a guarantee. Lowest total cost wins.
         </WarningBanner>
 
         <div className="flex items-center gap-4 mt-5">
@@ -110,8 +119,8 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
         <div className="flex items-center justify-between mt-5">
           <span className="text-xs font-mono text-muted-foreground">
             {shortfall > 0
-              ? `Buy ${shortfall} to exactly cover your emissions`
-              : 'You are already covered — buying is optional'}
+              ? `Buy ${shortfall} to cover your expected emissions`
+              : 'You already cover the mean — buying more is a hedge'}
           </span>
           <Button onClick={() => void submit()} disabled={busy} className="font-bold">
             {alreadyBought > 0 ? (

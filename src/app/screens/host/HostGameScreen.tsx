@@ -26,9 +26,9 @@ import { ModePicker, SettingsPanel } from './HostControls'
 const NEXT_ACTION: Partial<
   Record<Phase, { event: 'host:closeCapStage' | 'host:openTrade' | 'host:closeTrade' | 'host:advanceYear'; label: (year: number) => string }>
 > = {
-  cap: { event: 'host:closeCapStage', label: () => 'Close cap stage & reveal emissions' },
+  cap: { event: 'host:closeCapStage', label: () => 'Close cap stage → expected emissions' },
   reveal: { event: 'host:openTrade', label: () => 'Open the market' },
-  trade: { event: 'host:closeTrade', label: () => 'Close market & settle penalties' },
+  trade: { event: 'host:closeTrade', label: () => 'Close market → realize & settle' },
   yearSummary: { event: 'host:advanceYear', label: (y) => `Start Year ${y + 1}` },
 }
 
@@ -116,9 +116,9 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           icon={<Landmark size={12} />}
         />
         <StatCard
-          label="Class realized"
-          value={agg.totalRealized ?? '—'}
-          unit={agg.totalRealized !== null ? 'tCO₂' : undefined}
+          label={agg.totalRealized !== null ? 'Class realized' : 'Class expected'}
+          value={agg.totalRealized ?? agg.totalExpected ?? '—'}
+          unit={agg.totalRealized !== null || agg.totalExpected !== null ? 'tCO₂' : undefined}
           tone={
             agg.totalRealized !== null && snap.freeCreditLimit !== null
               ? agg.totalRealized > snap.freeCreditLimit
@@ -126,7 +126,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                 : 'good'
               : 'default'
           }
-          hint={agg.totalRealized === null ? 'hidden until reveal' : undefined}
+          hint={agg.totalRealized === null ? 'mean — realized at year end' : undefined}
         />
         <StatCard
           label="Cost this year"
@@ -207,6 +207,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                   <th className="py-2 pr-3 font-normal text-right">Regulator</th>
                   <th className="py-2 pr-3 font-normal text-right">Bought</th>
                   <th className="py-2 pr-3 font-normal text-right">Held</th>
+                  <th className="py-2 pr-3 font-normal text-right">Expected</th>
                   <th className="py-2 pr-3 font-normal text-right">Realized</th>
                   <th className="py-2 pr-3 font-normal text-right">Net</th>
                   <th className="py-2 font-normal text-right">Cost Σ</th>
@@ -237,6 +238,9 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                     </td>
                     <td className="py-2 pr-3 font-mono text-right">
                       {p.creditsHeld?.toLocaleString() ?? '—'}
+                    </td>
+                    <td className="py-2 pr-3 font-mono text-right text-muted-foreground">
+                      {p.expectedEmission.toLocaleString()}
                     </td>
                     <td className="py-2 pr-3 font-mono text-right">
                       {p.realized?.toLocaleString() ?? '—'}

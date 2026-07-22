@@ -11,7 +11,7 @@ export const CAP_MECHANISMS: Record<CapMode, CapMechanism> = {
 }
 
 export { MechanismNotImplementedError, type CapMechanism } from './capMechanism'
-export { realizeYear } from './emissions'
+export { realizeYear, expectedEmission } from './emissions'
 export { generateHistoryForIndustry, generatePlayerProfile } from './playerGeneration'
 export { createRng, round1, type Rng } from './rng'
 export { computeNetPositions } from './trade'

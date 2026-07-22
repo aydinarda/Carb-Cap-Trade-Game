@@ -33,7 +33,7 @@ export function IndustryBadge({ industry, size = 'md' }: { industry: Industry; s
 const PHASE_LABELS: Record<Phase, string> = {
   lobby: 'Lobby — registration open',
   cap: 'Cap stage — decide credits to buy',
-  reveal: 'Emissions revealed',
+  reveal: 'Expected emissions',
   trade: 'Trade stage',
   yearSummary: 'Year summary',
   ended: 'Game over',

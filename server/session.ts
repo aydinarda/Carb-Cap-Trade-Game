@@ -251,11 +251,8 @@ export class Session {
       record.regulatorRequest[player.id] ??= 0
     }
     record.regulatorGranted = grantRegulator(record.regulatorRequest, record.regulatorPool)
-    // Emission uncertainty is revealed only after the cap stage closes
-    record.realized = realizeYear(this.state.players, this.rng)
-    for (const player of this.state.players) {
-      player.emissions[record.year] = record.realized[player.id]
-    }
+    // Emissions are NOT realized here — players trade against their expected
+    // (mean) emission; the actual realization happens at year end (closeTrade).
     this.state.phase = 'reveal'
   }
 
@@ -267,6 +264,12 @@ export class Session {
   closeTrade() {
     this.requirePhase('trade', 'reveal')
     const record = this.currentYearRecord()!
+    // Realization happens now, at year end: each company's actual emission is
+    // drawn from its own distribution around the expected mean it planned against.
+    record.realized = realizeYear(this.state.players, this.rng, record.year)
+    for (const player of this.state.players) {
+      player.emissions[record.year] = record.realized[player.id]
+    }
     const held: Record<string, number> = {}
     const purchased: Record<string, number> = {}
     for (const player of this.state.players) {
