@@ -3,6 +3,7 @@ node_modules/
 
 # build output
 dist/
+Carbon_Cap_and_trade___Game/
 
 # logs
 *.log
