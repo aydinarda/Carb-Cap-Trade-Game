@@ -170,6 +170,8 @@ export function registerSockets(io: IO) {
       playerAction(ack, (s, pid) => s.requestCredits(pid, Number(qty))))
     socket.on('player:buyCredits', ({ qty }, ack) =>
       playerAction(ack, (s, pid) => s.buyCredits(pid, Number(qty))))
+    socket.on('player:sellCredits', ({ qty }, ack) =>
+      playerAction(ack, (s, pid) => s.sellCredits(pid, Number(qty))))
 
     socket.on('disconnect', () => {
       if (!socket.data.roomCode || !socket.data.playerId) return

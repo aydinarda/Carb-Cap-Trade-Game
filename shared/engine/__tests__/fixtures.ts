@@ -53,6 +53,7 @@ export const DEFAULT_CONFIG = {
   historyWindow: 10,
   baselineYear: 10,
   regulatorPrice: 10,
+  sellPrice: 10,
   penaltyRate: 20,
   benchmark: {
     'Power & Utilities': 800,

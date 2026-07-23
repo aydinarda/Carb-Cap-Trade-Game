@@ -144,16 +144,23 @@ export function SettlementCard({
       <div
         className={cn(
           'text-2xl font-bold font-mono',
-          noPenalty ? 'text-primary' : 'text-destructive',
+          settlement.yearCost <= 0 ? 'text-primary' : noPenalty ? 'text-foreground' : 'text-destructive',
         )}
       >
-        +{settlement.yearCost.toLocaleString()}
-        <span className="text-sm text-muted-foreground ml-1.5">cost this year</span>
+        {settlement.yearCost >= 0 ? '+' : ''}
+        {settlement.yearCost.toLocaleString()}
+        <span className="text-sm text-muted-foreground ml-1.5">
+          {settlement.yearCost < 0 ? 'net gain this year' : 'cost this year'}
+        </span>
       </div>
       <div className="text-xs font-mono text-muted-foreground mt-2 flex flex-col gap-0.5">
         <span>
-          Credits bought: cost{' '}
-          <span className="text-accent">{settlement.purchaseCost.toLocaleString()}</span>
+          Bought: cost{' '}
+          <span className="text-destructive">{settlement.purchaseCost.toLocaleString()}</span>
+        </span>
+        <span>
+          Sold: income{' '}
+          <span className="text-primary">{settlement.sellIncome.toLocaleString()}</span>
         </span>
         <span>
           Shortage: <span className="text-foreground">{settlement.shortage}</span> tCO₂ → penalty{' '}
@@ -198,7 +205,7 @@ export function LeaderboardTable({
             <span
               className={cn(
                 'font-mono font-bold w-20 text-right',
-                row.score === 0 ? 'text-primary' : 'text-foreground',
+                row.score <= 0 ? 'text-primary' : 'text-foreground',
               )}
             >
               {row.score.toLocaleString()}

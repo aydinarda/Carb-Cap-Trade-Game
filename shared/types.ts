@@ -28,9 +28,11 @@ export interface PlayerSettlement {
   shortage: number
   /** (regulatorGranted + secondaryBought) × regulatorPrice for the year. */
   purchaseCost: number
+  /** secondarySold × sellPrice — income from selling credits back. */
+  sellIncome: number
   /** shortage × penaltyRate. */
   penaltyCost: number
-  /** purchaseCost + penaltyCost — added to the cumulative score. */
+  /** purchaseCost − sellIncome + penaltyCost — added to the cumulative score. */
   yearCost: number
 }
 
@@ -46,6 +48,8 @@ export interface YearRecord {
   realized: Record<string, number>
   /** Credits bought at the fixed price in the trade stage (unlimited). */
   secondaryBought: Record<string, number>
+  /** Credits sold back at the sell price in the trade stage. */
+  secondarySold: Record<string, number>
   settlement: Record<string, PlayerSettlement> | null
   netPosition: Record<string, number>
 }
@@ -56,6 +60,8 @@ export interface SessionConfig {
   baselineYear: number
   /** Fixed price per credit bought (regulator cap stage + secondary market). Real cost. */
   regulatorPrice: number
+  /** Income per credit sold back in the trade stage. */
+  sellPrice: number
   /** Cost per tCO2 of emissions left uncovered at settlement. */
   penaltyRate: number
   /** Benchmarking mode: free credits per company, by industry. */
@@ -96,7 +102,9 @@ export interface YouView {
   regulatorGranted: number | null
   /** Credits bought at the fixed price in the trade stage. */
   secondaryBought: number | null
-  /** free + regulatorGranted + secondaryBought, this year. */
+  /** Credits sold back in the trade stage. */
+  secondarySold: number | null
+  /** free + regulatorGranted + secondaryBought − secondarySold, this year. */
   creditsHeld: number | null
   /** Mean emission players plan against; known from the cap stage on. */
   expectedEmission: number | null
@@ -125,6 +133,7 @@ export interface PlayerSnapshot {
   regulatorPool: number | null
   regulatorRequestTotal: number | null
   regulatorPrice: number
+  sellPrice: number
   classAggregate: ClassAggregate | null
   leaderboard: LeaderboardRow[] | null // visible from yearSummary on
   you: YouView
@@ -163,6 +172,7 @@ export interface HostPlayerRow extends PublicPlayerInfo {
   regulatorRequest: number | null
   regulatorGranted: number | null
   secondaryBought: number | null
+  secondarySold: number | null
   creditsHeld: number | null
   expectedEmission: number
   realized: number | null

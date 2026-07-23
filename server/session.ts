@@ -4,6 +4,7 @@ import {
   DEFAULT_BENCHMARK,
   DEFAULT_PENALTY_RATE,
   DEFAULT_REGULATOR_PRICE,
+  DEFAULT_SELL_PRICE,
   FIRST_GAME_YEAR,
   FREE_CREDIT_RATIO,
   HISTORY_WINDOW,
@@ -60,6 +61,7 @@ export class Session {
         historyWindow: HISTORY_WINDOW,
         baselineYear: BASELINE_YEAR,
         regulatorPrice: DEFAULT_REGULATOR_PRICE,
+        sellPrice: DEFAULT_SELL_PRICE,
         penaltyRate: DEFAULT_PENALTY_RATE,
         benchmark: { ...DEFAULT_BENCHMARK },
       },
@@ -92,14 +94,15 @@ export class Session {
     )
   }
 
-  /** Credits a player holds this year: free + regulator (cap stage) + secondary buys. */
+  /** Credits a player holds: free + regulator (cap stage) + secondary buys − sells. */
   creditsHeld(playerId: string): number {
     const record = this.currentYearRecord()
     if (!record) return 0
     return round1(
       (record.freeAllocation[playerId] ?? 0) +
         (record.regulatorGranted[playerId] ?? 0) +
-        (record.secondaryBought[playerId] ?? 0),
+        (record.secondaryBought[playerId] ?? 0) -
+        (record.secondarySold[playerId] ?? 0),
     )
   }
 
@@ -109,6 +112,17 @@ export class Session {
     if (!record) return 0
     return round1(
       (record.regulatorGranted[playerId] ?? 0) + (record.secondaryBought[playerId] ?? 0),
+    )
+  }
+
+  /** Credits a player could still sell: free + regulator + bought − already sold. */
+  private sellableCapacity(playerId: string): number {
+    const record = this.currentYearRecord()
+    if (!record) return 0
+    return round1(
+      (record.freeAllocation[playerId] ?? 0) +
+        (record.regulatorGranted[playerId] ?? 0) +
+        (record.secondaryBought[playerId] ?? 0),
     )
   }
 
@@ -146,11 +160,12 @@ export class Session {
 
   updateSettings(settings: {
     regulatorPrice?: number
+    sellPrice?: number
     penaltyRate?: number
     benchmark?: Partial<Record<Industry, number>>
   }) {
     this.requirePhase('lobby', 'yearSummary')
-    for (const key of ['regulatorPrice', 'penaltyRate'] as const) {
+    for (const key of ['regulatorPrice', 'sellPrice', 'penaltyRate'] as const) {
       const value = settings[key]
       if (value === undefined) continue
       if (!Number.isFinite(value) || value < 0) {
@@ -237,6 +252,7 @@ export class Session {
       regulatorPool: round1(Math.max(0, this.totalBaseline() - totalFree)),
       realized: {},
       secondaryBought: {},
+      secondarySold: {},
       settlement: null,
       netPosition: {},
     }
@@ -272,12 +288,15 @@ export class Session {
     }
     const held: Record<string, number> = {}
     const purchased: Record<string, number> = {}
+    const sold: Record<string, number> = {}
     for (const player of this.state.players) {
       held[player.id] = this.creditsHeld(player.id)
       purchased[player.id] = this.purchased(player.id)
+      sold[player.id] = round1(record.secondarySold[player.id] ?? 0)
     }
-    const { settlement } = settleYear(record.realized, held, purchased, {
+    const { settlement } = settleYear(record.realized, held, purchased, sold, {
       regulatorPrice: this.state.config.regulatorPrice,
+      sellPrice: this.state.config.sellPrice,
       penaltyRate: this.state.config.penaltyRate,
     })
     record.settlement = settlement
@@ -320,7 +339,41 @@ export class Session {
       throw new GameError('BAD_BUY', 'Credits to buy must be a non-negative number.')
     }
     const record = this.currentYearRecord()!
-    record.secondaryBought[playerId] = round1(qty)
+    const rounded = round1(qty)
+    // Can't lower your buy below what you've already committed to sell (holdings ≥ 0).
+    const alreadySold = round1(record.secondarySold[playerId] ?? 0)
+    const base = round1(
+      (record.freeAllocation[playerId] ?? 0) + (record.regulatorGranted[playerId] ?? 0),
+    )
+    if (base + rounded < alreadySold) {
+      throw new GameError(
+        'INSUFFICIENT_CREDITS',
+        `You have listed ${alreadySold} credits to sell; buy at least ${round1(alreadySold - base)}.`,
+      )
+    }
+    record.secondaryBought[playerId] = rounded
+  }
+
+  /**
+   * Trade stage: sell `qty` held credits back at the sell price. Cumulative set,
+   * like buyCredits. Capped by holdings (free + regulator + bought) so you can't
+   * sell credits you don't have; the sell income is applied at settlement.
+   */
+  sellCredits(playerId: string, qty: number) {
+    this.requirePhase('trade')
+    if (!Number.isFinite(qty) || qty < 0) {
+      throw new GameError('BAD_SELL', 'Credits to sell must be a non-negative number.')
+    }
+    const rounded = round1(qty)
+    const capacity = this.sellableCapacity(playerId)
+    if (rounded > capacity) {
+      throw new GameError(
+        'INSUFFICIENT_CREDITS',
+        `You hold ${capacity} credits — you can sell at most that many.`,
+      )
+    }
+    const record = this.currentYearRecord()!
+    record.secondarySold[playerId] = rounded
   }
 
   getPlayer(playerId: string): Player | undefined {

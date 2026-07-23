@@ -122,6 +122,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
       ? round1(Object.values(record.regulatorRequest).reduce((a, b) => a + b, 0))
       : null,
     regulatorPrice: state.config.regulatorPrice,
+    sellPrice: state.config.sellPrice,
     classAggregate: state.phase === 'lobby' ? null : classAggregate(session),
     leaderboard: settled ? leaderboard(session) : null,
     you: {
@@ -137,6 +138,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
           ? (record.regulatorGranted[player.id] ?? 0)
           : null,
       secondaryBought: record?.secondaryBought[player.id] ?? null,
+      secondarySold: record?.secondarySold[player.id] ?? null,
       creditsHeld: record && revealed ? session.creditsHeld(player.id) : null,
       expectedEmission: record ? expectedEmission(player, state.currentYear) : null,
       realized: settled ? (record?.realized[player.id] ?? null) : null,
@@ -177,6 +179,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
           ? (record.regulatorGranted[p.id] ?? 0)
           : null,
       secondaryBought: record?.secondaryBought[p.id] ?? null,
+      secondarySold: record?.secondarySold[p.id] ?? null,
       creditsHeld: record ? session.creditsHeld(p.id) : null,
       expectedEmission: round1(expectedEmission(p, state.currentYear)),
       realized: record?.realized[p.id] ?? null,

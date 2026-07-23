@@ -15,6 +15,7 @@ export interface ClientToServerEvents {
   'host:updateSettings': (
     payload: {
       regulatorPrice?: number
+      sellPrice?: number
       penaltyRate?: number
       benchmark?: Partial<Record<Industry, number>>
     },
@@ -35,6 +36,8 @@ export interface ClientToServerEvents {
   'player:requestCredits': (payload: { qty: number }, ack: Ack) => void
   /** Trade stage: buy credits from the regulator at the fixed price (unlimited). */
   'player:buyCredits': (payload: { qty: number }, ack: Ack) => void
+  /** Trade stage: sell held credits back at the sell price. */
+  'player:sellCredits': (payload: { qty: number }, ack: Ack) => void
 }
 
 export interface ServerToClientEvents {

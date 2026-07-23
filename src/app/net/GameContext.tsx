@@ -58,6 +58,7 @@ interface GameContextValue {
   ) => Promise<boolean>
   requestCredits: (qty: number) => Promise<boolean>
   buyCredits: (qty: number) => Promise<boolean>
+  sellCredits: (qty: number) => Promise<boolean>
   leave: () => void
 }
 
@@ -146,6 +147,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
     const requestCredits = (qty: number) => playerRequest('player:requestCredits', { qty })
     const buyCredits = (qty: number) => playerRequest('player:buyCredits', { qty })
+    const sellCredits = (qty: number) => playerRequest('player:sellCredits', { qty })
 
     const leave = () => {
       clearIdentity()
@@ -165,6 +167,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       hostAction,
       requestCredits,
       buyCredits,
+      sellCredits,
       leave,
     }
   }, [connected, snapshot, hasIdentity])

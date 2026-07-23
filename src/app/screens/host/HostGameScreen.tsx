@@ -206,6 +206,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                   <th className="py-2 pr-3 font-normal text-right">Free</th>
                   <th className="py-2 pr-3 font-normal text-right">Regulator</th>
                   <th className="py-2 pr-3 font-normal text-right">Bought</th>
+                  <th className="py-2 pr-3 font-normal text-right">Sold</th>
                   <th className="py-2 pr-3 font-normal text-right">Held</th>
                   <th className="py-2 pr-3 font-normal text-right">Expected</th>
                   <th className="py-2 pr-3 font-normal text-right">Realized</th>
@@ -235,6 +236,9 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                     </td>
                     <td className="py-2 pr-3 font-mono text-right">
                       {p.secondaryBought?.toLocaleString() ?? '—'}
+                    </td>
+                    <td className="py-2 pr-3 font-mono text-right">
+                      {p.secondarySold?.toLocaleString() ?? '—'}
                     </td>
                     <td className="py-2 pr-3 font-mono text-right">
                       {p.creditsHeld?.toLocaleString() ?? '—'}
