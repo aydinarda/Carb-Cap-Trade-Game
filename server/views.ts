@@ -24,13 +24,19 @@ function publicRoster(session: Session): PublicPlayerInfo[] {
 }
 
 function leaderboard(session: Session): LeaderboardRow[] {
+  const { baselineYear } = session.state.config
+  const normalized = (p: Session['state']['players'][number]) => {
+    const baseline = p.emissions[baselineYear] ?? 0
+    return baseline > 0 ? round1((p.score - p.optimalScore) / baseline) : p.score - p.optimalScore
+  }
   return [...session.state.players]
-    .sort((a, b) => a.score - b.score)
+    .sort((a, b) => normalized(a) - normalized(b))
     .map((p) => ({
       id: p.id,
       name: p.name,
       industry: p.industry,
       score: p.score,
+      normalizedScore: normalized(p),
     }))
 }
 
@@ -123,6 +129,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
       : null,
     regulatorPrice: state.config.regulatorPrice,
     sellPrice: state.config.sellPrice,
+    abatementCoeff: state.config.abatement[player.industry],
     classAggregate: state.phase === 'lobby' ? null : classAggregate(session),
     leaderboard: settled ? leaderboard(session) : null,
     you: {
@@ -139,6 +146,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
           : null,
       secondaryBought: record?.secondaryBought[player.id] ?? null,
       secondarySold: record?.secondarySold[player.id] ?? null,
+      abatement: record?.abatement[player.id] ?? null,
       creditsHeld: record && revealed ? session.creditsHeld(player.id) : null,
       expectedEmission: record ? expectedEmission(player, state.currentYear) : null,
       realized: settled ? (record?.realized[player.id] ?? null) : null,
@@ -180,6 +188,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
           : null,
       secondaryBought: record?.secondaryBought[p.id] ?? null,
       secondarySold: record?.secondarySold[p.id] ?? null,
+      abatement: record?.abatement[p.id] ?? null,
       creditsHeld: record ? session.creditsHeld(p.id) : null,
       expectedEmission: round1(expectedEmission(p, state.currentYear)),
       realized: record?.realized[p.id] ?? null,

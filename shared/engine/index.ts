@@ -12,6 +12,12 @@ export const CAP_MECHANISMS: Record<CapMode, CapMechanism> = {
 
 export { MechanismNotImplementedError, type CapMechanism } from './capMechanism'
 export { realizeYear, expectedEmission } from './emissions'
+export {
+  abatementCost,
+  optimalAbatement,
+  optimalYearCost,
+  type AbatementCoeff,
+} from './abatement'
 export { generateHistoryForIndustry, generatePlayerProfile } from './playerGeneration'
 export { createRng, round1, type Rng } from './rng'
 export { computeNetPositions } from './trade'

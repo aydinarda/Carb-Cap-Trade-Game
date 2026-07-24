@@ -43,4 +43,14 @@ describe('realizeYear', () => {
     for (let i = 0; i < n; i++) sum += realizeYear([player], rng, 11)[player.id]
     expect(sum / n).toBeCloseTo(mean, 0)
   })
+
+  it('abatement lowers the mean by the chosen fraction', () => {
+    const [{ player }] = XLSX_PLAYERS
+    const rng = createRng(3)
+    const mean = expectedEmission(player, 11)
+    let sum = 0
+    const n = 4000
+    for (let i = 0; i < n; i++) sum += realizeYear([player], rng, 11, { [player.id]: 0.4 })[player.id]
+    expect(sum / n).toBeCloseTo(mean * 0.6, 0)
+  })
 })

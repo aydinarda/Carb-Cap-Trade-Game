@@ -20,19 +20,23 @@ export interface Player extends PlayerProfile {
   id: string // "P1", "P2", … in join order (matches the notebook)
   name: string
   connected: boolean
-  /** Cumulative cost across years (credit spend + penalties) — lowest wins. */
+  /** Cumulative actual cost across years (abatement + credit spend + penalties). */
   score: number
+  /** Cumulative best-achievable cost — the per-company optimum benchmark. */
+  optimalScore: number
 }
 
 export interface PlayerSettlement {
   shortage: number
+  /** Cost of the emission cuts the company invested in this year. */
+  abatementCost: number
   /** (regulatorGranted + secondaryBought) × regulatorPrice for the year. */
   purchaseCost: number
   /** secondarySold × sellPrice — income from selling credits back. */
   sellIncome: number
   /** shortage × penaltyRate. */
   penaltyCost: number
-  /** purchaseCost − sellIncome + penaltyCost — added to the cumulative score. */
+  /** abatementCost + purchaseCost − sellIncome + penaltyCost. */
   yearCost: number
 }
 
@@ -50,6 +54,8 @@ export interface YearRecord {
   secondaryBought: Record<string, number>
   /** Credits sold back at the sell price in the trade stage. */
   secondarySold: Record<string, number>
+  /** Fraction of expected emissions each company chose to abate (0..1). */
+  abatement: Record<string, number>
   settlement: Record<string, PlayerSettlement> | null
   netPosition: Record<string, number>
 }
@@ -66,6 +72,8 @@ export interface SessionConfig {
   penaltyRate: number
   /** Benchmarking mode: free credits per company, by industry. */
   benchmark: Record<Industry, number>
+  /** Per-sector marginal abatement cost coefficients (MAC = a + b·fraction). */
+  abatement: Record<Industry, { a: number; b: number }>
 }
 
 export interface GameState {
@@ -104,6 +112,8 @@ export interface YouView {
   secondaryBought: number | null
   /** Credits sold back in the trade stage. */
   secondarySold: number | null
+  /** Fraction of expected emissions this company chose to abate (0..1). */
+  abatement: number | null
   /** free + regulatorGranted + secondaryBought − secondarySold, this year. */
   creditsHeld: number | null
   /** Mean emission players plan against; known from the cap stage on. */
@@ -118,7 +128,10 @@ export interface LeaderboardRow {
   id: string
   name: string
   industry: Industry
+  /** Raw cumulative cost. */
   score: number
+  /** (score − optimalScore) / baseline — skill vs the company's own optimum; lowest wins. */
+  normalizedScore: number
 }
 
 export interface PlayerSnapshot {
@@ -134,6 +147,8 @@ export interface PlayerSnapshot {
   regulatorRequestTotal: number | null
   regulatorPrice: number
   sellPrice: number
+  /** This player's sector MAC coefficients, for live abatement-cost preview. */
+  abatementCoeff: { a: number; b: number }
   classAggregate: ClassAggregate | null
   leaderboard: LeaderboardRow[] | null // visible from yearSummary on
   you: YouView
@@ -173,6 +188,7 @@ export interface HostPlayerRow extends PublicPlayerInfo {
   regulatorGranted: number | null
   secondaryBought: number | null
   secondarySold: number | null
+  abatement: number | null
   creditsHeld: number | null
   expectedEmission: number
   realized: number | null

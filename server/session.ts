@@ -1,6 +1,7 @@
 import { customAlphabet, nanoid } from 'nanoid'
 import {
   BASELINE_YEAR,
+  DEFAULT_ABATEMENT,
   DEFAULT_BENCHMARK,
   DEFAULT_PENALTY_RATE,
   DEFAULT_REGULATOR_PRICE,
@@ -13,11 +14,14 @@ import {
   type Industry,
 } from '../shared/constants'
 import {
+  abatementCost,
   CAP_MECHANISMS,
   computeNetPositions,
   createRng,
+  expectedEmission,
   generateHistoryForIndustry,
   grantRegulator,
+  optimalYearCost,
   realizeYear,
   round1,
   settleYear,
@@ -64,6 +68,9 @@ export class Session {
         sellPrice: DEFAULT_SELL_PRICE,
         penaltyRate: DEFAULT_PENALTY_RATE,
         benchmark: { ...DEFAULT_BENCHMARK },
+        abatement: Object.fromEntries(
+          INDUSTRY_NAMES.map((i) => [i, { ...DEFAULT_ABATEMENT[i] }]),
+        ) as Record<Industry, { a: number; b: number }>,
       },
       freeCreditLimit: null,
     }
@@ -144,6 +151,7 @@ export class Session {
       name: trimmed.slice(0, 40),
       connected: true,
       score: 0,
+      optimalScore: 0,
       ...profile,
     }
     this.state.players.push(player)
@@ -163,6 +171,7 @@ export class Session {
     sellPrice?: number
     penaltyRate?: number
     benchmark?: Partial<Record<Industry, number>>
+    abatement?: Partial<Record<Industry, { a: number; b: number }>>
   }) {
     this.requirePhase('lobby', 'yearSummary')
     for (const key of ['regulatorPrice', 'sellPrice', 'penaltyRate'] as const) {
@@ -180,6 +189,18 @@ export class Session {
           throw new GameError('BAD_SETTING', `benchmark for ${industry} must be non-negative.`)
         }
         this.state.config.benchmark[industry as Industry] = round1(value)
+      }
+    }
+    if (settings.abatement) {
+      for (const [industry, coeff] of Object.entries(settings.abatement)) {
+        if (!coeff) continue
+        if (!Number.isFinite(coeff.a) || coeff.a < 0 || !Number.isFinite(coeff.b) || coeff.b < 0) {
+          throw new GameError('BAD_SETTING', `abatement for ${industry} must be non-negative.`)
+        }
+        this.state.config.abatement[industry as Industry] = {
+          a: round1(coeff.a),
+          b: round1(coeff.b),
+        }
       }
     }
   }
@@ -253,6 +274,7 @@ export class Session {
       realized: {},
       secondaryBought: {},
       secondarySold: {},
+      abatement: {},
       settlement: null,
       netPosition: {},
     }
@@ -282,27 +304,39 @@ export class Session {
     const record = this.currentYearRecord()!
     // Realization happens now, at year end: each company's actual emission is
     // drawn from its own distribution around the expected mean it planned against.
-    record.realized = realizeYear(this.state.players, this.rng, record.year)
+    record.realized = realizeYear(this.state.players, this.rng, record.year, record.abatement)
     for (const player of this.state.players) {
       player.emissions[record.year] = record.realized[player.id]
     }
     const held: Record<string, number> = {}
     const purchased: Record<string, number> = {}
     const sold: Record<string, number> = {}
+    const abateCost: Record<string, number> = {}
+    const optimal: Record<string, number> = {}
+    const { regulatorPrice, sellPrice, penaltyRate } = this.state.config
     for (const player of this.state.players) {
       held[player.id] = this.creditsHeld(player.id)
       purchased[player.id] = this.purchased(player.id)
       sold[player.id] = round1(record.secondarySold[player.id] ?? 0)
+      const expected = expectedEmission(player, record.year)
+      const coeff = this.state.config.abatement[player.industry]
+      abateCost[player.id] = abatementCost(expected, record.abatement[player.id] ?? 0, coeff)
+      // Best achievable cost for this company (abate to r*, cover residual vs its free credits)
+      const free = round1(
+        (record.freeAllocation[player.id] ?? 0) + (record.regulatorGranted[player.id] ?? 0),
+      )
+      optimal[player.id] = optimalYearCost(expected, free, coeff, regulatorPrice, sellPrice)
     }
-    const { settlement } = settleYear(record.realized, held, purchased, sold, {
-      regulatorPrice: this.state.config.regulatorPrice,
-      sellPrice: this.state.config.sellPrice,
-      penaltyRate: this.state.config.penaltyRate,
+    const { settlement } = settleYear(record.realized, held, purchased, sold, abateCost, {
+      regulatorPrice,
+      sellPrice,
+      penaltyRate,
     })
     record.settlement = settlement
     record.netPosition = computeNetPositions(record.realized, held)
     for (const player of this.state.players) {
       player.score = round1(player.score + (settlement[player.id]?.yearCost ?? 0))
+      player.optimalScore = round1(player.optimalScore + (optimal[player.id] ?? 0))
     }
     this.state.phase = 'yearSummary'
   }
@@ -374,6 +408,19 @@ export class Session {
     }
     const record = this.currentYearRecord()!
     record.secondarySold[playerId] = rounded
+  }
+
+  /**
+   * Trade stage: choose to abate a fraction (0..1) of expected emissions. Lowers
+   * the realized mean at year end, at a per-sector convex cost. Cumulative set.
+   */
+  setAbatement(playerId: string, fraction: number) {
+    this.requirePhase('trade')
+    if (!Number.isFinite(fraction) || fraction < 0) {
+      throw new GameError('BAD_ABATE', 'Abatement fraction must be a non-negative number.')
+    }
+    const record = this.currentYearRecord()!
+    record.abatement[playerId] = round1(Math.min(1, fraction))
   }
 
   getPlayer(playerId: string): Player | undefined {

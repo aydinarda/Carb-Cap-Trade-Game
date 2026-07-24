@@ -155,6 +155,10 @@ export function SettlementCard({
       </div>
       <div className="text-xs font-mono text-muted-foreground mt-2 flex flex-col gap-0.5">
         <span>
+          Emission cuts: cost{' '}
+          <span className="text-destructive">{settlement.abatementCost.toLocaleString()}</span>
+        </span>
+        <span>
           Bought: cost{' '}
           <span className="text-destructive">{settlement.purchaseCost.toLocaleString()}</span>
         </span>
@@ -205,10 +209,11 @@ export function LeaderboardTable({
             <span
               className={cn(
                 'font-mono font-bold w-20 text-right',
-                row.score <= 0 ? 'text-primary' : 'text-foreground',
+                row.normalizedScore <= 0.05 ? 'text-primary' : 'text-foreground',
               )}
+              title="cost above your own optimum, per baseline tonne — lower is better"
             >
-              {row.score.toLocaleString()}
+              {row.normalizedScore.toLocaleString()}
             </span>
           </div>
         )

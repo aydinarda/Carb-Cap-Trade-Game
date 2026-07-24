@@ -23,7 +23,7 @@ function player(
   yearsDescending.forEach((value, i) => {
     emissions[10 - i] = value
   })
-  return { id, name: id, industry, emissions, connected: true, score: 0 }
+  return { id, name: id, industry, emissions, connected: true, score: 0, optimalScore: 0 }
 }
 
 export const XLSX_PLAYERS: {
@@ -60,5 +60,11 @@ export const DEFAULT_CONFIG = {
     'Heavy Materials': 640,
     'Manufacturing & Chemicals': 420,
     Transport: 240,
+  },
+  abatement: {
+    'Power & Utilities': { a: 2, b: 15 },
+    'Heavy Materials': { a: 8, b: 30 },
+    'Manufacturing & Chemicals': { a: 4, b: 20 },
+    Transport: { a: 5, b: 20 },
   },
 }

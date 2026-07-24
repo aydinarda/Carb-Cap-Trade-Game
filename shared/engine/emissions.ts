@@ -18,7 +18,8 @@ export function expectedEmission(player: Player, year: number): number {
 
 /**
  * Draws each company's realized emission for the year from its own distribution:
- * a normal centred on its expected emission with std EMISSION_VOLATILITY × mean.
+ * a normal centred on its (post-abatement) expected emission with std
+ * EMISSION_VOLATILITY × mean. Abatement lowers the mean by the chosen fraction.
  * Revealed only at year end (settlement), so trading happens under real
  * uncertainty — the realization can differ from the mean players planned against.
  */
@@ -26,10 +27,12 @@ export function realizeYear(
   players: Player[],
   rng: Rng,
   year: number,
+  abatement: Record<string, number> = {},
 ): Record<string, number> {
   const realized: Record<string, number> = {}
   for (const player of players) {
-    const mean = expectedEmission(player, year)
+    const r = Math.max(0, Math.min(1, abatement[player.id] ?? 0))
+    const mean = expectedEmission(player, year) * (1 - r)
     const draw = rng.normal(mean, EMISSION_VOLATILITY * mean)
     realized[player.id] = round1(Math.max(0, draw))
   }

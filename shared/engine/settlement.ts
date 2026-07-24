@@ -8,8 +8,9 @@ import { round1 } from './rng'
  *  - sellIncome = every credit sold back earns `sellPrice`.
  *  - penaltyCost = emissions left uncovered (realized > creditsHeld) cost
  *    `penaltyRate` each.
- *  - yearCost = purchaseCost − sellIncome + penaltyCost, added to the cumulative
- *    score (lowest wins). Can be negative for a clean company that sells surplus.
+ *  - abatementCost = cost of the emission cuts the company invested in.
+ *  - yearCost = abatementCost + purchaseCost − sellIncome + penaltyCost, added to
+ *    the cumulative score. Can be negative for a clean company that sells surplus.
  *    Unsold surplus credits expire (no banking).
  *
  * With `penaltyRate > regulatorPrice`, covering a shortage by buying beats
@@ -21,6 +22,7 @@ export function settleYear(
   creditsHeld: Record<string, number>,
   purchased: Record<string, number>,
   sold: Record<string, number>,
+  abatementCost: Record<string, number>,
   rates: { regulatorPrice: number; sellPrice: number; penaltyRate: number },
 ): {
   settlement: Record<string, PlayerSettlement>
@@ -28,15 +30,17 @@ export function settleYear(
   const settlement: Record<string, PlayerSettlement> = {}
   for (const id of Object.keys(realized)) {
     const shortage = round1(Math.max(0, realized[id] - (creditsHeld[id] ?? 0)))
+    const abateCost = round1(abatementCost[id] ?? 0)
     const purchaseCost = round1((purchased[id] ?? 0) * rates.regulatorPrice)
     const sellIncome = round1((sold[id] ?? 0) * rates.sellPrice)
     const penaltyCost = round1(shortage * rates.penaltyRate)
     settlement[id] = {
       shortage,
+      abatementCost: abateCost,
       purchaseCost,
       sellIncome,
       penaltyCost,
-      yearCost: round1(purchaseCost - sellIncome + penaltyCost),
+      yearCost: round1(abateCost + purchaseCost - sellIncome + penaltyCost),
     }
   }
   return { settlement }

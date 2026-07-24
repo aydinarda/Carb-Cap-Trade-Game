@@ -42,5 +42,18 @@ export const DEFAULT_BENCHMARK: Record<Industry, number> = {
   Transport: 240,
 }
 
+/**
+ * Per-sector marginal abatement cost (MAC): cost to cut the f-th fraction of a
+ * company's emissions is `a + b·f` per tonne (rising — cheap cuts first). The
+ * optimal cut is where MAC meets the carbon price: r* = (price − a)/b. Sectors
+ * differ (some decarbonise cheaply, some not), and the host can tune these.
+ */
+export const DEFAULT_ABATEMENT: Record<Industry, { a: number; b: number }> = {
+  'Power & Utilities': { a: 2, b: 15 }, // cheap (renewables) → cuts a lot
+  'Manufacturing & Chemicals': { a: 4, b: 20 },
+  Transport: { a: 5, b: 20 },
+  'Heavy Materials': { a: 8, b: 30 }, // hard (cement/steel) → cuts little
+}
+
 export const MIN_PLAYERS = 1
 export const MAX_PLAYERS = 60

@@ -18,6 +18,7 @@ export interface ClientToServerEvents {
       sellPrice?: number
       penaltyRate?: number
       benchmark?: Partial<Record<Industry, number>>
+      abatement?: Partial<Record<Industry, { a: number; b: number }>>
     },
     ack: Ack,
   ) => void
@@ -38,6 +39,8 @@ export interface ClientToServerEvents {
   'player:buyCredits': (payload: { qty: number }, ack: Ack) => void
   /** Trade stage: sell held credits back at the sell price. */
   'player:sellCredits': (payload: { qty: number }, ack: Ack) => void
+  /** Trade stage: invest to cut emissions by a fraction (0..1) of the expected. */
+  'player:abate': (payload: { fraction: number }, ack: Ack) => void
 }
 
 export interface ServerToClientEvents {
