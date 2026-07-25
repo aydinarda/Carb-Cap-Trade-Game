@@ -5,6 +5,7 @@ import type {
   HostSnapshot,
   IndustryBreakdownRow,
   LeaderboardRow,
+  PlayerHistoryYear,
   PlayerSnapshot,
   PublicPlayerInfo,
 } from '../shared/types'
@@ -156,6 +157,34 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
   }
 }
 
+function buildPlayerHistory(session: Session): Record<string, PlayerHistoryYear[]> {
+  const { state } = session
+  const years = Object.values(state.years).sort((a, b) => a.year - b.year)
+  const history: Record<string, PlayerHistoryYear[]> = {}
+  for (const p of state.players) {
+    history[p.id] = years.map((y) => {
+      const free = round1(y.freeAllocation[p.id] ?? 0)
+      const granted = round1(y.regulatorGranted[p.id] ?? 0)
+      const bought = round1(y.secondaryBought[p.id] ?? 0)
+      const sold = round1(y.secondarySold[p.id] ?? 0)
+      return {
+        year: y.year,
+        expected: round1(expectedEmission(p, y.year)),
+        realized: y.realized[p.id] ?? null,
+        free,
+        regulatorGranted: granted,
+        secondaryBought: bought,
+        secondarySold: sold,
+        abatement: round1(y.abatement[p.id] ?? 0),
+        creditsHeld: round1(free + granted + bought - sold),
+        netPosition: y.netPosition[p.id] ?? null,
+        settlement: y.settlement?.[p.id] ?? null,
+      }
+    })
+  }
+  return history
+}
+
 export function hostSnapshot(session: Session): HostSnapshot {
   const { state } = session
   const record = session.currentYearRecord()
@@ -172,6 +201,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
     config: state.config,
     classAggregate: classAggregate(session),
     leaderboard: leaderboard(session),
+    playerHistory: buildPlayerHistory(session),
     players: state.players.map((p) => ({
       id: p.id,
       name: p.name,

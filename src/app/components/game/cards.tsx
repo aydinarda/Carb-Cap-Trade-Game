@@ -184,9 +184,12 @@ export function SettlementCard({
 export function LeaderboardTable({
   rows,
   youId,
+  onRowClick,
 }: {
   rows: LeaderboardRow[]
   youId?: string
+  /** When provided (host), rows become clickable to open the player's history. */
+  onRowClick?: (id: string) => void
 }) {
   return (
     <div className="flex flex-col divide-y divide-border">
@@ -195,9 +198,11 @@ export function LeaderboardTable({
         return (
           <div
             key={row.id}
+            onClick={onRowClick ? () => onRowClick(row.id) : undefined}
             className={cn(
               'flex items-center gap-3 py-2 px-1 text-sm',
               row.id === youId && 'bg-primary/5 rounded',
+              onRowClick && 'cursor-pointer hover:bg-accent/10 rounded transition-colors',
             )}
           >
             <span className="w-7 text-center font-mono font-bold text-muted-foreground">

@@ -26,7 +26,7 @@ export const EMISSION_VOLATILITY = 0.08
 
 // Host-adjustable defaults
 export const DEFAULT_REGULATOR_PRICE = 10 // real cost per credit bought (regulator + secondary market)
-export const DEFAULT_SELL_PRICE = 10 // income per credit sold back; = buy price by default → no buy/resell arbitrage
+export const DEFAULT_SELL_PRICE = 8 // income per credit sold back; below buy price → a round-trip loses, so no arbitrage / no incentive to over-grab and resell (host may still raise it above buy to demonstrate arbitrage)
 export const DEFAULT_PENALTY_RATE = 20 // cost per tCO2 left uncovered — kept above the credit price so covering beats defaulting
 
 /**

@@ -196,6 +196,21 @@ export interface HostPlayerRow extends PublicPlayerInfo {
   settlement: PlayerSettlement | null
 }
 
+/** One completed/in-progress year of a single company, for the host history view. */
+export interface PlayerHistoryYear {
+  year: number
+  expected: number
+  realized: number | null
+  free: number
+  regulatorGranted: number
+  secondaryBought: number
+  secondarySold: number
+  abatement: number
+  creditsHeld: number
+  netPosition: number | null
+  settlement: PlayerSettlement | null
+}
+
 export interface HostSnapshot {
   role: 'host'
   roomCode: string
@@ -209,6 +224,8 @@ export interface HostSnapshot {
   regulatorPool: number | null
   config: SessionConfig
   leaderboard: LeaderboardRow[]
+  /** Full year-by-year history per player (host-only). */
+  playerHistory: Record<string, PlayerHistoryYear[]>
 }
 
 export type Snapshot = PlayerSnapshot | HostSnapshot

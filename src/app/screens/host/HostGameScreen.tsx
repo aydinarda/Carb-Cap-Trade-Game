@@ -17,6 +17,7 @@ import {
   LeaderboardTable,
   StatCard,
 } from '../../components/game/cards'
+import { PlayerHistoryDialog } from './PlayerHistoryDialog'
 import { ClassYearChart, IndustryBreakdownChart } from '../../components/game/charts'
 import { cn } from '../../components/game/theme'
 import { useGame } from '../../net/GameContext'
@@ -36,6 +37,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
   const { hostAction } = useGame()
   const [busy, setBusy] = useState(false)
   const [showPlayers, setShowPlayers] = useState(false)
+  const [historyId, setHistoryId] = useState<string | null>(null)
   const agg = snap.classAggregate
   const next = NEXT_ACTION[snap.phase]
   const submittedPct =
@@ -102,10 +104,10 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
       {/* Aggregate stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
-          label="Cap (free credit limit)"
-          value={snap.freeCreditLimit ?? 0}
+          label="Free allocation (this year)"
+          value={agg.totalFreeAllocation ?? 0}
           unit="cr"
-          hint="total free allowance, fixed"
+          hint="this year, by mode"
         />
         <StatCard
           label="Regulator pool"
@@ -120,8 +122,8 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           value={agg.totalRealized ?? agg.totalExpected ?? '—'}
           unit={agg.totalRealized !== null || agg.totalExpected !== null ? 'tCO₂' : undefined}
           tone={
-            agg.totalRealized !== null && snap.freeCreditLimit !== null
-              ? agg.totalRealized > snap.freeCreditLimit
+            agg.totalRealized !== null && agg.totalFreeAllocation !== null
+              ? agg.totalRealized > agg.totalFreeAllocation
                 ? 'bad'
                 : 'good'
               : 'default'
@@ -142,9 +144,9 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           <div className="rounded-xl border border-border bg-card/70 p-5">
             <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
               <Trophy size={12} className="text-accent" />
-              Leaderboard — closest to your own optimum wins (skill, size-neutral)
+              Leaderboard — closest to your own optimum wins (skill, size-neutral) · click a row for history
             </div>
-            <LeaderboardTable rows={snap.leaderboard} />
+            <LeaderboardTable rows={snap.leaderboard} onRowClick={setHistoryId} />
           </div>
           {snap.phase === 'yearSummary' && (
             <div className="flex flex-col gap-5">
@@ -270,6 +272,8 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           </div>
         )}
       </div>
+
+      <PlayerHistoryDialog snap={snap} playerId={historyId} onClose={() => setHistoryId(null)} />
     </div>
   )
 }
