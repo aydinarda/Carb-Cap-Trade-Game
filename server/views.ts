@@ -128,6 +128,9 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     regulatorRequestTotal: record
       ? round1(Object.values(record.regulatorRequest).reduce((a, b) => a + b, 0))
       : null,
+    regulatorRequestCap: round1(
+      ((record?.regulatorPool ?? 0) / Math.max(1, state.players.length)) * 2,
+    ),
     regulatorPrice: state.config.regulatorPrice,
     sellPrice: state.config.sellPrice,
     abatementCoeff: state.config.abatement[player.industry],

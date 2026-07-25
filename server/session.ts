@@ -358,6 +358,15 @@ export class Session {
       throw new GameError('BAD_REQUEST', 'Requested credits must be a non-negative number.')
     }
     const record = this.currentYearRecord()!
+    // No one may request more than twice their fair share of the regulator pool,
+    // so a single company can't corner it and starve the others.
+    const cap = round1((record.regulatorPool / this.state.players.length) * 2)
+    if (round1(qty) > cap) {
+      throw new GameError(
+        'REQUEST_TOO_HIGH',
+        `You can request at most ${cap} credits (twice your fair share of the pool).`,
+      )
+    }
     record.regulatorRequest[playerId] = round1(qty)
   }
 

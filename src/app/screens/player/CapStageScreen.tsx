@@ -26,7 +26,9 @@ export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
   const pool = snap.regulatorPool ?? 0
   const requestTotal = snap.regulatorRequestTotal ?? 0
   const oversubscribed = requestTotal > pool
-  const sliderMax = Math.max(100, Math.round(pool / Math.max(1, snap.playerCount)) * 3)
+  // Hard cap: you may request at most twice your fair share of the pool.
+  const requestCap = snap.regulatorRequestCap
+  const sliderMax = Math.max(1, requestCap)
 
   const submit = async () => {
     setBusy(true)
@@ -74,7 +76,7 @@ export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
         <div className="flex items-center gap-4 mt-5">
           <Slider
             value={[Math.min(qty, sliderMax)]}
-            onValueChange={([v]) => setQty(v)}
+            onValueChange={([v]) => setQty(Math.min(v, requestCap))}
             max={sliderMax}
             step={1}
             className="flex-1"
@@ -82,14 +84,16 @@ export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
           <Input
             type="number"
             min={0}
+            max={requestCap}
             value={qty}
-            onChange={(e) => setQty(Math.max(0, Number(e.target.value)))}
+            onChange={(e) => setQty(Math.min(requestCap, Math.max(0, Number(e.target.value))))}
             className="w-28 font-mono text-right"
           />
         </div>
         <div className="flex items-center justify-between mt-5">
           <span className="text-xs font-mono text-muted-foreground">
-            If granted in full: {(freeAllocation + qty).toLocaleString()} credits total
+            Max request {requestCap.toLocaleString()} (2× fair share) · if granted in full:{' '}
+            {(freeAllocation + qty).toLocaleString()} credits total
           </span>
           <Button onClick={() => void submit()} disabled={busy} className="font-bold">
             {submitted ? (

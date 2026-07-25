@@ -145,6 +145,8 @@ export interface PlayerSnapshot {
   freeCreditLimit: number | null
   regulatorPool: number | null
   regulatorRequestTotal: number | null
+  /** Per-player cap on a cap-stage request: (regulatorPool / playerCount) × 2. */
+  regulatorRequestCap: number
   regulatorPrice: number
   sellPrice: number
   /** This player's sector MAC coefficients, for live abatement-cost preview. */
