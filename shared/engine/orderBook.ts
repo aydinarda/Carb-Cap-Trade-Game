@@ -99,6 +99,12 @@ export function openSellRemaining(orders: Order[], playerId: string): number {
   )
 }
 
+/** How much of the book/tape to put on the wire. Aggregates below use the FULL data;
+ * only the returned arrays are truncated, keeping snapshots small at classroom scale
+ * (many bots can pile up thousands of orders/trades within a year). */
+const MAX_DEPTH_LEVELS = 25
+const MAX_TAPE = 60
+
 export function buildMarketView(orders: Order[], trades: Trade[]): MarketView {
   const open = orders.filter((o) => o.status === 'open' && o.remaining > 0)
   const bids = open.filter((o) => o.side === 'buy').sort((a, b) => b.price - a.price || a.seq - b.seq)
@@ -106,9 +112,10 @@ export function buildMarketView(orders: Order[], trades: Trade[]): MarketView {
   const volume = round1(trades.reduce((s, t) => s + t.qty, 0))
   const notional = trades.reduce((s, t) => s + t.qty * t.price, 0)
   return {
-    bids,
-    asks,
-    trades: [...trades].reverse(),
+    // Best levels / most recent tape only; the aggregates below still reflect all data.
+    bids: bids.slice(0, MAX_DEPTH_LEVELS),
+    asks: asks.slice(0, MAX_DEPTH_LEVELS),
+    trades: trades.slice(-MAX_TAPE).reverse(),
     lastPrice: trades.length > 0 ? trades[trades.length - 1].price : null,
     bestBid: bids[0]?.price ?? null,
     bestAsk: asks[0]?.price ?? null,
