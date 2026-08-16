@@ -2,27 +2,25 @@ import type { PlayerSettlement } from '../types'
 import { round1 } from './rng'
 
 /**
- * Year-end cost settlement (cost-ledger model):
- *  - purchaseCost = money spent acquiring credits, computed by the caller (cap
- *    stage: regulator sale at `regulatorPrice` OR auction at the clearing price;
- *    plus the fixed-price secondary market). Free-allocated credits cost 0.
- *  - sellIncome = every credit sold back earns `sellPrice`.
- *  - penaltyCost = emissions left uncovered (realized > creditsHeld) cost
- *    `penaltyRate` each.
+ * Year-end cost settlement (cost-ledger model). purchaseCost and sellIncome are
+ * passed in as MONEY (the caller derives them from the auction clearing price and
+ * the market trade prices):
+ *  - purchaseCost = cash spent acquiring credits (auction + market buys). Free = 0.
+ *  - sellIncome = cash earned selling credits in the market.
+ *  - penaltyCost = emissions left uncovered (realized > creditsHeld) × penaltyRate.
  *  - abatementCost = cost of the emission cuts the company invested in.
  *  - yearCost = abatementCost + purchaseCost − sellIncome + penaltyCost, added to
  *    the cumulative score. Can be negative for a clean company that sells surplus.
- *    Unsold surplus credits expire (no banking).
  *
- * Penalty rate is kept above the credit price so covering beats defaulting.
+ * The penalty rate is the effective ceiling on the market price.
  */
 export function settleYear(
   realized: Record<string, number>,
   creditsHeld: Record<string, number>,
   purchaseCost: Record<string, number>,
-  sold: Record<string, number>,
+  sellIncome: Record<string, number>,
   abatementCost: Record<string, number>,
-  rates: { sellPrice: number; penaltyRate: number },
+  rates: { penaltyRate: number },
 ): {
   settlement: Record<string, PlayerSettlement>
 } {
@@ -31,15 +29,15 @@ export function settleYear(
     const shortage = round1(Math.max(0, realized[id] - (creditsHeld[id] ?? 0)))
     const abateCost = round1(abatementCost[id] ?? 0)
     const purchCost = round1(purchaseCost[id] ?? 0)
-    const sellIncome = round1((sold[id] ?? 0) * rates.sellPrice)
+    const sellIncomeVal = round1(sellIncome[id] ?? 0)
     const penaltyCost = round1(shortage * rates.penaltyRate)
     settlement[id] = {
       shortage,
       abatementCost: abateCost,
       purchaseCost: purchCost,
-      sellIncome,
+      sellIncome: sellIncomeVal,
       penaltyCost,
-      yearCost: round1(abateCost + purchCost - sellIncome + penaltyCost),
+      yearCost: round1(abateCost + purchCost - sellIncomeVal + penaltyCost),
     }
   }
   return { settlement }

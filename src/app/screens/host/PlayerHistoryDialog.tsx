@@ -43,9 +43,8 @@ export function PlayerHistoryDialog({
                 <th className="py-2 pr-3 font-normal text-right">Expected</th>
                 <th className="py-2 pr-3 font-normal text-right">Realized</th>
                 <th className="py-2 pr-3 font-normal text-right">Free</th>
-                <th className="py-2 pr-3 font-normal text-right">Reg</th>
-                <th className="py-2 pr-3 font-normal text-right">Bought</th>
-                <th className="py-2 pr-3 font-normal text-right">Sold</th>
+                <th className="py-2 pr-3 font-normal text-right">Auction</th>
+                <th className="py-2 pr-3 font-normal text-right">Traded</th>
                 <th className="py-2 pr-3 font-normal text-right">Cut</th>
                 <th className="py-2 pr-3 font-normal text-right">Held</th>
                 <th className="py-2 font-normal text-right">Cost</th>
@@ -59,8 +58,7 @@ export function PlayerHistoryDialog({
                   <td className="py-2 pr-3 text-right text-accent">{num(r.realized)}</td>
                   <td className="py-2 pr-3 text-right">{num(r.free)}</td>
                   <td className="py-2 pr-3 text-right">{num(r.regulatorGranted)}</td>
-                  <td className="py-2 pr-3 text-right">{num(r.secondaryBought)}</td>
-                  <td className="py-2 pr-3 text-right">{num(r.secondarySold)}</td>
+                  <td className="py-2 pr-3 text-right">{num(r.traded)}</td>
                   <td className="py-2 pr-3 text-right">{Math.round(r.abatement * 100)}%</td>
                   <td className="py-2 pr-3 text-right">{num(r.creditsHeld)}</td>
                   <td className="py-2 text-right font-bold">{num(r.settlement?.yearCost)}</td>

@@ -5,8 +5,6 @@ import {
   DEFAULT_AUCTION_CAP_RATIO,
   DEFAULT_BENCHMARK,
   DEFAULT_PENALTY_RATE,
-  DEFAULT_REGULATOR_PRICE,
-  DEFAULT_SELL_PRICE,
   FIRST_GAME_YEAR,
   FREE_CREDIT_RATIO,
   HISTORY_WINDOW,
@@ -16,20 +14,25 @@ import {
 } from '../shared/constants'
 import {
   abatementCost,
+  buildMarketView,
+  cancelOrder,
   CAP_MECHANISMS,
   clearAuction,
   computeNetPositions,
   createRng,
   expectedEmission,
   generateHistoryForIndustry,
-  grantRegulator,
+  matchOrder,
+  openSellRemaining,
   optimalYearCost,
   realizeYear,
   round1,
   settleYear,
+  tradedCash,
+  tradedNet,
   type Rng,
 } from '../shared/engine'
-import type { CapMode, GameState, Player, YearRecord } from '../shared/types'
+import type { CapMode, GameState, Order, OrderSide, Player, YearRecord } from '../shared/types'
 
 const roomCodeAlphabet = customAlphabet('ABCDEFGHJKMNPQRSTUVWXYZ23456789', 4)
 
@@ -49,6 +52,7 @@ export class Session {
   /** player token -> playerId */
   readonly playerTokens = new Map<string, string>()
   private readonly rng: Rng
+  private orderSeq = 0
 
   constructor(capMode: CapMode, seed?: number) {
     const actualSeed = seed ?? Math.floor(Math.random() * 2 ** 31)
@@ -66,8 +70,6 @@ export class Session {
         freeCreditRatio: FREE_CREDIT_RATIO,
         historyWindow: HISTORY_WINDOW,
         baselineYear: BASELINE_YEAR,
-        regulatorPrice: DEFAULT_REGULATOR_PRICE,
-        sellPrice: DEFAULT_SELL_PRICE,
         penaltyRate: DEFAULT_PENALTY_RATE,
         benchmark: { ...DEFAULT_BENCHMARK },
         abatement: Object.fromEntries(
@@ -104,26 +106,14 @@ export class Session {
     )
   }
 
-  /** Credits a player holds: free + regulator (cap stage) + secondary buys − sells. */
+  /** Credits a player holds: free + cap-stage (auction) + net traded in the market. */
   creditsHeld(playerId: string): number {
     const record = this.currentYearRecord()
     if (!record) return 0
     return round1(
       (record.freeAllocation[playerId] ?? 0) +
         (record.regulatorGranted[playerId] ?? 0) +
-        (record.secondaryBought[playerId] ?? 0) -
-        (record.secondarySold[playerId] ?? 0),
-    )
-  }
-
-  /** Credits a player could still sell: free + regulator + bought − already sold. */
-  private sellableCapacity(playerId: string): number {
-    const record = this.currentYearRecord()
-    if (!record) return 0
-    return round1(
-      (record.freeAllocation[playerId] ?? 0) +
-        (record.regulatorGranted[playerId] ?? 0) +
-        (record.secondaryBought[playerId] ?? 0),
+        tradedNet(record.trades, playerId),
     )
   }
 
@@ -161,15 +151,13 @@ export class Session {
   }
 
   updateSettings(settings: {
-    regulatorPrice?: number
-    sellPrice?: number
     penaltyRate?: number
     auctionCapRatio?: number
     benchmark?: Partial<Record<Industry, number>>
     abatement?: Partial<Record<Industry, { a: number; b: number }>>
   }) {
     this.requirePhase('lobby', 'yearSummary')
-    for (const key of ['regulatorPrice', 'sellPrice', 'penaltyRate', 'auctionCapRatio'] as const) {
+    for (const key of ['penaltyRate', 'auctionCapRatio'] as const) {
       const value = settings[key]
       if (value === undefined) continue
       if (!Number.isFinite(value) || value < 0) {
@@ -256,23 +244,21 @@ export class Session {
       this.state.freeCreditLimit!,
       this.state.config,
     )
-    const totalFree = Object.values(freeAllocation).reduce((a, b) => a + b, 0)
-    // The cap-stage supply. Grandfathering/benchmarking: the slice of the baseline
-    // not given for free (regulator sale). Auctioning: the auction cap =
-    // auctionCapRatio × Σbaseline (nothing is free).
+    // Only auctioning issues priced allowances (the auction cap). G/B just hand out
+    // free credits; the rest of the cap simply isn't created, so the total in
+    // circulation is fixed and the secondary market only redistributes it.
     const pool =
       this.state.capMode === 'auctioning'
         ? round1(this.state.config.auctionCapRatio * this.totalBaseline())
-        : round1(Math.max(0, this.totalBaseline() - totalFree))
+        : 0
     this.state.years[year] = {
       year,
       freeAllocation,
-      regulatorRequest: {},
       regulatorGranted: {},
       regulatorPool: pool,
       realized: {},
-      secondaryBought: {},
-      secondarySold: {},
+      orders: [],
+      trades: [],
       abatement: {},
       auctionBid: {},
       auctionPrice: null,
@@ -291,15 +277,11 @@ export class Session {
       const { clearingPrice, awarded } = clearAuction(record.auctionBid, record.regulatorPool)
       record.regulatorGranted = awarded
       record.auctionPrice = clearingPrice
-    } else {
-      // Stragglers default to requesting 0
-      for (const player of this.state.players) {
-        record.regulatorRequest[player.id] ??= 0
-      }
-      record.regulatorGranted = grantRegulator(record.regulatorRequest, record.regulatorPool)
     }
-    // Emissions are NOT realized here — players trade against their expected
-    // (mean) emission; the actual realization happens at year end (closeTrade).
+    // Grandfathering/benchmarking: free allocation is all that's issued (already
+    // applied in openYear) — nothing else happens at the cap close.
+    // Emissions are NOT realized here — players trade against their expected mean;
+    // the actual realization happens at year end (closeTrade).
     this.state.phase = 'reveal'
   }
 
@@ -319,32 +301,30 @@ export class Session {
     }
     const held: Record<string, number> = {}
     const purchaseCost: Record<string, number> = {}
-    const sold: Record<string, number> = {}
+    const sellIncome: Record<string, number> = {}
     const abateCost: Record<string, number> = {}
     const optimal: Record<string, number> = {}
-    const { regulatorPrice, sellPrice, penaltyRate } = this.state.config
-    // Cap-stage credits cost the auction clearing price under auctioning, else the
-    // fixed regulator price. Secondary buys always cost the fixed price.
-    const capPrice =
-      this.state.capMode === 'auctioning' ? (record.auctionPrice ?? 0) : regulatorPrice
+    const { penaltyRate } = this.state.config
+    // Auction credits cost the clearing price; G/B free credits cost 0.
+    const capPrice = this.state.capMode === 'auctioning' ? (record.auctionPrice ?? 0) : 0
+    // The market's volume-weighted average price is the reference for the optimum
+    // benchmark. With no trades, fall back to the auction price or the penalty rate.
+    const refPrice = buildMarketView(record.orders, record.trades).vwap ?? (record.auctionPrice || penaltyRate)
     for (const player of this.state.players) {
       held[player.id] = this.creditsHeld(player.id)
-      const capBought = round1(record.regulatorGranted[player.id] ?? 0)
-      const secBought = round1(record.secondaryBought[player.id] ?? 0)
-      purchaseCost[player.id] = round1(capBought * capPrice + secBought * regulatorPrice)
-      sold[player.id] = round1(record.secondarySold[player.id] ?? 0)
+      const { buyCash, sellCash } = tradedCash(record.trades, player.id)
+      const capCost = round1((record.regulatorGranted[player.id] ?? 0) * capPrice)
+      purchaseCost[player.id] = round1(capCost + buyCash)
+      sellIncome[player.id] = sellCash
       const expected = expectedEmission(player, record.year)
       const coeff = this.state.config.abatement[player.industry]
       abateCost[player.id] = abatementCost(expected, record.abatement[player.id] ?? 0, coeff)
-      // Best achievable cost for this company (abate to r*, cover residual vs its free credits).
-      // Under auctioning free credits are 0 and the effective buy price is the clearing price.
       const free = round1(
         (record.freeAllocation[player.id] ?? 0) + (record.regulatorGranted[player.id] ?? 0),
       )
-      optimal[player.id] = optimalYearCost(expected, free, coeff, capPrice || regulatorPrice, sellPrice)
+      optimal[player.id] = optimalYearCost(expected, free, coeff, refPrice, refPrice)
     }
-    const { settlement } = settleYear(record.realized, held, purchaseCost, sold, abateCost, {
-      sellPrice,
+    const { settlement } = settleYear(record.realized, held, purchaseCost, sellIncome, abateCost, {
       penaltyRate,
     })
     record.settlement = settlement
@@ -367,27 +347,6 @@ export class Session {
 
   // ---- player actions ----
 
-  requestCredits(playerId: string, qty: number) {
-    this.requirePhase('cap')
-    if (this.state.capMode === 'auctioning') {
-      throw new GameError('WRONG_MODE', 'Under auctioning, submit a bid instead of requesting.')
-    }
-    if (!Number.isFinite(qty) || qty < 0) {
-      throw new GameError('BAD_REQUEST', 'Requested credits must be a non-negative number.')
-    }
-    const record = this.currentYearRecord()!
-    // No one may request more than twice their fair share of the regulator pool,
-    // so a single company can't corner it and starve the others.
-    const cap = round1((record.regulatorPool / this.state.players.length) * 2)
-    if (round1(qty) > cap) {
-      throw new GameError(
-        'REQUEST_TOO_HIGH',
-        `You can request at most ${cap} credits (twice your fair share of the pool).`,
-      )
-    }
-    record.regulatorRequest[playerId] = round1(qty)
-  }
-
   /**
    * Cap stage under auctioning: submit a sealed bid (quantity + max price per
    * credit). Resolved by a uniform-price auction when the cap stage closes.
@@ -408,52 +367,51 @@ export class Session {
   }
 
   /**
-   * Trade stage: buy `qty` credits from the regulator at the fixed price. Supply
-   * is unlimited; this is a cumulative set (the client sends the desired total
-   * for the year), so re-submitting replaces the running amount rather than
-   * stacking, matching the cap-stage requestCredits pattern.
+   * Trade stage: place a limit order in the order book. Matches immediately
+   * against crossing orders (continuous double auction); the rest rests in the
+   * book. No shorting — a sell order can't exceed credits held minus open asks.
    */
-  buyCredits(playerId: string, qty: number) {
+  placeOrder(playerId: string, side: OrderSide, qty: number, price: number) {
     this.requirePhase('trade')
-    if (!Number.isFinite(qty) || qty < 0) {
-      throw new GameError('BAD_BUY', 'Credits to buy must be a non-negative number.')
+    if (side !== 'buy' && side !== 'sell') throw new GameError('BAD_ORDER', 'Invalid side.')
+    if (!Number.isFinite(qty) || qty <= 0) {
+      throw new GameError('BAD_ORDER', 'Quantity must be a positive number.')
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new GameError('BAD_ORDER', 'Price must be a positive number.')
     }
     const record = this.currentYearRecord()!
-    const rounded = round1(qty)
-    // Can't lower your buy below what you've already committed to sell (holdings ≥ 0).
-    const alreadySold = round1(record.secondarySold[playerId] ?? 0)
-    const base = round1(
-      (record.freeAllocation[playerId] ?? 0) + (record.regulatorGranted[playerId] ?? 0),
-    )
-    if (base + rounded < alreadySold) {
-      throw new GameError(
-        'INSUFFICIENT_CREDITS',
-        `You have listed ${alreadySold} credits to sell; buy at least ${round1(alreadySold - base)}.`,
-      )
+    const roundedQty = round1(qty)
+    if (side === 'sell') {
+      const capacity = round1(this.creditsHeld(playerId) - openSellRemaining(record.orders, playerId))
+      if (roundedQty > capacity) {
+        throw new GameError(
+          'INSUFFICIENT_CREDITS',
+          `You can offer at most ${capacity} credits (held minus your open asks) — no shorting.`,
+        )
+      }
     }
-    record.secondaryBought[playerId] = rounded
+    this.orderSeq += 1
+    const order: Order = {
+      id: nanoid(8),
+      playerId,
+      side,
+      qty: roundedQty,
+      remaining: roundedQty,
+      price: round1(price),
+      status: 'open',
+      seq: this.orderSeq,
+    }
+    const { trades } = matchOrder(record.orders, order, () => nanoid(8))
+    record.trades.push(...trades)
   }
 
-  /**
-   * Trade stage: sell `qty` held credits back at the sell price. Cumulative set,
-   * like buyCredits. Capped by holdings (free + regulator + bought) so you can't
-   * sell credits you don't have; the sell income is applied at settlement.
-   */
-  sellCredits(playerId: string, qty: number) {
+  cancelOrder(playerId: string, orderId: string) {
     this.requirePhase('trade')
-    if (!Number.isFinite(qty) || qty < 0) {
-      throw new GameError('BAD_SELL', 'Credits to sell must be a non-negative number.')
-    }
-    const rounded = round1(qty)
-    const capacity = this.sellableCapacity(playerId)
-    if (rounded > capacity) {
-      throw new GameError(
-        'INSUFFICIENT_CREDITS',
-        `You hold ${capacity} credits — you can sell at most that many.`,
-      )
-    }
     const record = this.currentYearRecord()!
-    record.secondarySold[playerId] = rounded
+    if (!cancelOrder(record.orders, playerId, orderId)) {
+      throw new GameError('NO_ORDER', 'Order not found or already closed.')
+    }
   }
 
   /**

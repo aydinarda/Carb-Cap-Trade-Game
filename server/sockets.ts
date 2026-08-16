@@ -166,14 +166,12 @@ export function registerSockets(io: IO) {
       }
     }
 
-    socket.on('player:requestCredits', ({ qty }, ack) =>
-      playerAction(ack, (s, pid) => s.requestCredits(pid, Number(qty))))
     socket.on('player:submitBid', ({ qty, price }, ack) =>
       playerAction(ack, (s, pid) => s.submitBid(pid, Number(qty), Number(price))))
-    socket.on('player:buyCredits', ({ qty }, ack) =>
-      playerAction(ack, (s, pid) => s.buyCredits(pid, Number(qty))))
-    socket.on('player:sellCredits', ({ qty }, ack) =>
-      playerAction(ack, (s, pid) => s.sellCredits(pid, Number(qty))))
+    socket.on('player:placeOrder', ({ side, qty, price }, ack) =>
+      playerAction(ack, (s, pid) => s.placeOrder(pid, side, Number(qty), Number(price))))
+    socket.on('player:cancelOrder', ({ orderId }, ack) =>
+      playerAction(ack, (s, pid) => s.cancelOrder(pid, String(orderId))))
     socket.on('player:abate', ({ fraction }, ack) =>
       playerAction(ack, (s, pid) => s.setAbatement(pid, Number(fraction))))
 

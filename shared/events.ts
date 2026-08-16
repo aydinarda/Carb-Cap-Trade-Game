@@ -1,5 +1,5 @@
 import type { Industry } from './constants'
-import type { CapMode, Phase, PlayerProfile, Snapshot } from './types'
+import type { CapMode, OrderSide, Phase, PlayerProfile, Snapshot } from './types'
 
 export type Ack<T = unknown> = (
   response: ({ ok: true } & T) | { ok: false; error: string },
@@ -14,8 +14,6 @@ export interface ClientToServerEvents {
   'host:setCapMode': (payload: { mode: CapMode }, ack: Ack) => void
   'host:updateSettings': (
     payload: {
-      regulatorPrice?: number
-      sellPrice?: number
       penaltyRate?: number
       benchmark?: Partial<Record<Industry, number>>
       abatement?: Partial<Record<Industry, { a: number; b: number }>>
@@ -34,14 +32,12 @@ export interface ClientToServerEvents {
     payload: { roomCode: string; name: string; industry: Industry },
     ack: Ack<{ playerId: string; token: string; profile: PlayerProfile }>,
   ) => void
-  /** Cap stage (grandfathering/benchmarking): credits to request from the regulator pool. */
-  'player:requestCredits': (payload: { qty: number }, ack: Ack) => void
   /** Cap stage (auctioning): sealed bid — quantity and max price per credit. */
   'player:submitBid': (payload: { qty: number; price: number }, ack: Ack) => void
-  /** Trade stage: buy credits from the regulator at the fixed price (unlimited). */
-  'player:buyCredits': (payload: { qty: number }, ack: Ack) => void
-  /** Trade stage: sell held credits back at the sell price. */
-  'player:sellCredits': (payload: { qty: number }, ack: Ack) => void
+  /** Trade stage: place a limit order (bid/ask) in the order book. */
+  'player:placeOrder': (payload: { side: OrderSide; qty: number; price: number }, ack: Ack) => void
+  /** Trade stage: cancel one of your resting orders. */
+  'player:cancelOrder': (payload: { orderId: string }, ack: Ack) => void
   /** Trade stage: invest to cut emissions by a fraction (0..1) of the expected. */
   'player:abate': (payload: { fraction: number }, ack: Ack) => void
 }

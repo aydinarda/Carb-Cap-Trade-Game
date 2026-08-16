@@ -24,4 +24,12 @@ export { computeNetPositions } from './trade'
 export { windowSum, computeFreeCreditLimit } from './grandfathering'
 export { grantRegulator } from './regulator'
 export { clearAuction, type AuctionBid } from './auction'
+export {
+  matchOrder,
+  cancelOrder,
+  tradedNet,
+  tradedCash,
+  openSellRemaining,
+  buildMarketView,
+} from './orderBook'
 export { settleYear } from './settlement'

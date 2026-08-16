@@ -17,6 +17,7 @@ import {
   LeaderboardTable,
   StatCard,
 } from '../../components/game/cards'
+import { MarketTicker, OrderBook, TradesFeed } from '../../components/game/market'
 import { PlayerHistoryDialog } from './PlayerHistoryDialog'
 import { ClassYearChart, IndustryBreakdownChart } from '../../components/game/charts'
 import { cn } from '../../components/game/theme'
@@ -69,8 +70,9 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           )}
           {snap.phase === 'trade' && (
             <span className="text-sm text-muted-foreground font-mono">
-              Market open · students buying at the fixed price{' '}
-              <span className="text-foreground font-bold">{snap.config.regulatorPrice}</span> / credit
+              Market open · last price{' '}
+              <span className="text-foreground font-bold">{snap.market?.lastPrice ?? '—'}</span> ·{' '}
+              {snap.market?.volume ?? 0} cr traded
             </span>
           )}
           {(snap.phase === 'reveal' || snap.phase === 'yearSummary') && (
@@ -152,6 +154,29 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
         />
       </div>
 
+      {/* Live market (trade phase) */}
+      {snap.phase === 'trade' && snap.market && (
+        <>
+          <MarketTicker market={snap.market} />
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">
+            <div className="rounded-xl border border-border bg-card/70 p-5">
+              <div className="text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
+                Live order book
+              </div>
+              <OrderBook market={snap.market} anonymous={false} />
+            </div>
+            <div className="rounded-xl border border-border bg-card/70 p-5">
+              <div className="text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
+                Live trades
+              </div>
+              <div className="max-h-[60vh] overflow-y-auto">
+                <TradesFeed trades={snap.market.trades} anonymous={false} max={40} />
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Year summary / end: leaderboard + between-year controls */}
       {(snap.phase === 'yearSummary' || snap.phase === 'ended') && (
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">
@@ -220,9 +245,8 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                   <th className="py-2 pr-3 font-normal">Company</th>
                   <th className="py-2 pr-3 font-normal">Industry</th>
                   <th className="py-2 pr-3 font-normal text-right">Free</th>
-                  <th className="py-2 pr-3 font-normal text-right">Regulator</th>
-                  <th className="py-2 pr-3 font-normal text-right">Bought</th>
-                  <th className="py-2 pr-3 font-normal text-right">Sold</th>
+                  <th className="py-2 pr-3 font-normal text-right">Auction</th>
+                  <th className="py-2 pr-3 font-normal text-right">Traded</th>
                   <th className="py-2 pr-3 font-normal text-right">Held</th>
                   <th className="py-2 pr-3 font-normal text-right">Expected</th>
                   <th className="py-2 pr-3 font-normal text-right">Realized</th>
@@ -246,15 +270,12 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                       {p.freeAllocation?.toLocaleString() ?? '—'}
                     </td>
                     <td className="py-2 pr-3 font-mono text-right">
-                      {p.regulatorGranted !== null
-                        ? p.regulatorGranted.toLocaleString()
-                        : (p.regulatorRequest?.toLocaleString() ?? '—')}
+                      {p.regulatorGranted?.toLocaleString() ?? '—'}
                     </td>
                     <td className="py-2 pr-3 font-mono text-right">
-                      {p.secondaryBought?.toLocaleString() ?? '—'}
-                    </td>
-                    <td className="py-2 pr-3 font-mono text-right">
-                      {p.secondarySold?.toLocaleString() ?? '—'}
+                      {p.traded !== null
+                        ? `${p.traded > 0 ? '+' : ''}${p.traded.toLocaleString()}`
+                        : '—'}
                     </td>
                     <td className="py-2 pr-3 font-mono text-right">
                       {p.creditsHeld?.toLocaleString() ?? '—'}

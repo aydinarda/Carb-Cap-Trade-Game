@@ -8,7 +8,7 @@ import {
 } from 'react'
 import { toast } from 'sonner'
 import type { Industry } from '@shared/constants'
-import type { CapMode, HostSnapshot, PlayerSnapshot, Snapshot } from '@shared/types'
+import type { CapMode, HostSnapshot, OrderSide, PlayerSnapshot, Snapshot } from '@shared/types'
 import {
   clearIdentity,
   getSocket,
@@ -56,10 +56,9 @@ interface GameContextValue {
       | 'host:kickPlayer',
     payload?: Record<string, unknown>,
   ) => Promise<boolean>
-  requestCredits: (qty: number) => Promise<boolean>
   submitBid: (qty: number, price: number) => Promise<boolean>
-  buyCredits: (qty: number) => Promise<boolean>
-  sellCredits: (qty: number) => Promise<boolean>
+  placeOrder: (side: OrderSide, qty: number, price: number) => Promise<boolean>
+  cancelOrder: (orderId: string) => Promise<boolean>
   abate: (fraction: number) => Promise<boolean>
   leave: () => void
 }
@@ -147,11 +146,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    const requestCredits = (qty: number) => playerRequest('player:requestCredits', { qty })
     const submitBid = (qty: number, price: number) =>
       playerRequest('player:submitBid', { qty, price })
-    const buyCredits = (qty: number) => playerRequest('player:buyCredits', { qty })
-    const sellCredits = (qty: number) => playerRequest('player:sellCredits', { qty })
+    const placeOrder = (side: OrderSide, qty: number, price: number) =>
+      playerRequest('player:placeOrder', { side, qty, price })
+    const cancelOrder = (orderId: string) => playerRequest('player:cancelOrder', { orderId })
     const abate = (fraction: number) => playerRequest('player:abate', { fraction })
 
     const leave = () => {
@@ -170,10 +169,9 @@ export function GameProvider({ children }: { children: ReactNode }) {
       joinAsPlayer,
       createSession,
       hostAction,
-      requestCredits,
       submitBid,
-      buyCredits,
-      sellCredits,
+      placeOrder,
+      cancelOrder,
       abate,
       leave,
     }

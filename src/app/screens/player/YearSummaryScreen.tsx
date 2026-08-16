@@ -25,16 +25,15 @@ export function YearSummaryScreen({ snap }: { snap: PlayerSnapshot }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Free credits" value={snap.you.freeAllocation ?? 0} unit="cr" />
         <StatCard
-          label="Bought (reg + market)"
+          label="Net traded"
           value={
-            Math.round(
-              ((snap.you.regulatorGranted ?? 0) + (snap.you.secondaryBought ?? 0)) * 10,
-            ) / 10
+            snap.you.myTrades.reduce(
+              (s, t) => s + (t.buyerId === snap.you.id ? t.qty : -t.qty),
+              0,
+            )
           }
           unit="cr"
-          hint={
-            snap.you.settlement ? `cost ${snap.you.settlement.purchaseCost}` : undefined
-          }
+          hint={snap.you.settlement ? `spent ${snap.you.settlement.purchaseCost}` : undefined}
         />
         <StatCard label="Held at close" value={snap.you.creditsHeld ?? 0} unit="cr" />
         <StatCard

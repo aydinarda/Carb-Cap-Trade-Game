@@ -39,8 +39,6 @@ export function ModePicker({ capMode, compact }: { capMode: CapMode | null; comp
 /** Credit price + penalty rate + per-industry benchmarks — editable in the lobby and between years. */
 export function SettingsPanel({ config }: { config: SessionConfig }) {
   const { hostAction } = useGame()
-  const [regulatorPrice, setRegulatorPrice] = useState(String(config.regulatorPrice))
-  const [sellPrice, setSellPrice] = useState(String(config.sellPrice))
   const [penalty, setPenalty] = useState(String(config.penaltyRate))
   const [benchmark, setBenchmark] = useState<Record<string, string>>(() =>
     Object.fromEntries(Object.entries(config.benchmark).map(([k, v]) => [k, String(v)])),
@@ -49,21 +47,14 @@ export function SettingsPanel({ config }: { config: SessionConfig }) {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    setRegulatorPrice(String(config.regulatorPrice))
-    setSellPrice(String(config.sellPrice))
     setPenalty(String(config.penaltyRate))
     setAuctionCapRatio(String(config.auctionCapRatio))
     setBenchmark(Object.fromEntries(Object.entries(config.benchmark).map(([k, v]) => [k, String(v)])))
-  }, [config.regulatorPrice, config.sellPrice, config.penaltyRate, config.auctionCapRatio, config.benchmark])
-
-  const priceHigh = Number(penalty) <= Number(regulatorPrice)
-  const arbitrage = Number(sellPrice) > Number(regulatorPrice)
+  }, [config.penaltyRate, config.auctionCapRatio, config.benchmark])
 
   const save = async () => {
     setBusy(true)
     const ok = await hostAction('host:updateSettings', {
-      regulatorPrice: Number(regulatorPrice),
-      sellPrice: Number(sellPrice),
       penaltyRate: Number(penalty),
       auctionCapRatio: Number(auctionCapRatio),
       benchmark: Object.fromEntries(
@@ -98,21 +89,8 @@ export function SettingsPanel({ config }: { config: SessionConfig }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {field('Buy price', regulatorPrice, setRegulatorPrice, 'cost per credit bought')}
-      {field('Sell price', sellPrice, setSellPrice, 'income per credit sold back')}
-      {field('Penalty rate', penalty, setPenalty, 'cost per tCO₂ uncovered')}
+      {field('Penalty rate', penalty, setPenalty, 'cost per tCO₂ uncovered — market price ceiling')}
       {field('Auction supply ratio', auctionCapRatio, setAuctionCapRatio, '× baseline (auctioning; ≤1 = scarcer)')}
-      {priceHigh && (
-        <p className="text-[10px] text-destructive font-mono">
-          Penalty rate should exceed the buy price, or covering costs more than defaulting.
-        </p>
-      )}
-      {arbitrage && (
-        <p className="text-[10px] text-accent font-mono">
-          ⚠ Sell price &gt; buy price: buy-low/sell-high arbitrage is possible (buying is
-          unlimited, so profits can run away). Intentional? Useful to demonstrate arbitrage.
-        </p>
-      )}
       <div className="pt-1 mt-1 border-t border-border">
         <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-2">
           Benchmark free credits (benchmarking mode)

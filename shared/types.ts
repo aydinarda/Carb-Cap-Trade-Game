@@ -26,13 +26,47 @@ export interface Player extends PlayerProfile {
   optimalScore: number
 }
 
+export type OrderSide = 'buy' | 'sell'
+
+export interface Order {
+  id: string
+  playerId: string
+  side: OrderSide
+  qty: number
+  remaining: number
+  price: number
+  status: 'open' | 'filled' | 'cancelled'
+  seq: number // placement order, for time priority
+}
+
+export interface Trade {
+  id: string
+  buyerId: string
+  sellerId: string
+  qty: number
+  price: number
+  seq: number
+}
+
+/** Live order-book market view (shared by players and host). */
+export interface MarketView {
+  bids: Order[] // open buys, best (highest price) first
+  asks: Order[] // open sells, best (lowest price) first
+  trades: Trade[] // most recent first
+  lastPrice: number | null
+  bestBid: number | null
+  bestAsk: number | null
+  vwap: number | null
+  volume: number
+}
+
 export interface PlayerSettlement {
   shortage: number
   /** Cost of the emission cuts the company invested in this year. */
   abatementCost: number
-  /** (regulatorGranted + secondaryBought) × regulatorPrice for the year. */
+  /** Cap-stage cost (auction) + cash spent buying in the market. */
   purchaseCost: number
-  /** secondarySold × sellPrice — income from selling credits back. */
+  /** Cash earned selling in the market. */
   sellIncome: number
   /** shortage × penaltyRate. */
   penaltyCost: number
@@ -43,17 +77,14 @@ export interface PlayerSettlement {
 export interface YearRecord {
   year: number
   freeAllocation: Record<string, number>
-  /** Credits each player asked to buy from the regulator (cap stage). */
-  regulatorRequest: Record<string, number>
-  /** Credits actually granted after pro-rata against the pool. */
+  /** Credits acquired at the cap stage: auction award (auctioning) or 0 (G/B). */
   regulatorGranted: Record<string, number>
-  /** Yearly regulator pool = Σbaseline − Σ freeAllocation. */
+  /** Auctioning mode: the auction supply (= the cap). Unused for G/B. */
   regulatorPool: number
   realized: Record<string, number>
-  /** Credits bought at the fixed price in the trade stage (unlimited). */
-  secondaryBought: Record<string, number>
-  /** Credits sold back at the sell price in the trade stage. */
-  secondarySold: Record<string, number>
+  /** Continuous order-book market: resting/filled orders and executed trades. */
+  orders: Order[]
+  trades: Trade[]
   /** Fraction of expected emissions each company chose to abate (0..1). */
   abatement: Record<string, number>
   /** Auctioning mode: each company's sealed bid at the cap stage. */
@@ -68,10 +99,6 @@ export interface SessionConfig {
   freeCreditRatio: number
   historyWindow: number
   baselineYear: number
-  /** Fixed price per credit bought (regulator cap stage + secondary market). Real cost. */
-  regulatorPrice: number
-  /** Income per credit sold back in the trade stage. */
-  sellPrice: number
   /** Cost per tCO2 of emissions left uncovered at settlement. */
   penaltyRate: number
   /** Benchmarking mode: free credits per company, by industry. */
@@ -112,19 +139,17 @@ export interface YouView {
   emissions: Record<number, number>
   score: number
   freeAllocation: number | null
-  regulatorRequest: number | null
   regulatorGranted: number | null
   /** Auctioning mode: this company's submitted bid. */
   auctionBid: { qty: number; price: number } | null
   /** Auctioning mode: credits won at the auction (= regulatorGranted). */
   auctionAward: number | null
-  /** Credits bought at the fixed price in the trade stage. */
-  secondaryBought: number | null
-  /** Credits sold back in the trade stage. */
-  secondarySold: number | null
+  /** This company's own orders and executed trades in the market. */
+  myOrders: Order[]
+  myTrades: Trade[]
   /** Fraction of expected emissions this company chose to abate (0..1). */
   abatement: number | null
-  /** free + regulatorGranted + secondaryBought − secondarySold, this year. */
+  /** free + regulatorGranted + net traded, this year. */
   creditsHeld: number | null
   /** Mean emission players plan against; known from the cap stage on. */
   expectedEmission: number | null
@@ -153,18 +178,14 @@ export interface PlayerSnapshot {
   playerCount: number
   roster: PublicPlayerInfo[]
   freeCreditLimit: number | null
-  regulatorPool: number | null
-  regulatorRequestTotal: number | null
-  /** Per-player cap on a cap-stage request: (regulatorPool / playerCount) × 2. */
-  regulatorRequestCap: number
-  regulatorPrice: number
-  sellPrice: number
   /** This player's sector MAC coefficients, for live abatement-cost preview. */
   abatementCoeff: { a: number; b: number }
   /** Auctioning mode: total supply on offer this year (= the cap). */
   auctionSupply: number
   /** Auctioning mode: uniform clearing price, once the auction has closed. */
   auctionPrice: number | null
+  /** Live order-book market (visible during trade and once settled). */
+  market: MarketView | null
   classAggregate: ClassAggregate | null
   leaderboard: LeaderboardRow[] | null // visible from yearSummary on
   you: YouView
@@ -200,10 +221,9 @@ export interface HostPlayerRow extends PublicPlayerInfo {
   windowSum: number
   score: number
   freeAllocation: number | null
-  regulatorRequest: number | null
   regulatorGranted: number | null
-  secondaryBought: number | null
-  secondarySold: number | null
+  /** Net credits bought (+) or sold (−) in the market this year. */
+  traded: number | null
   abatement: number | null
   creditsHeld: number | null
   expectedEmission: number
@@ -219,8 +239,8 @@ export interface PlayerHistoryYear {
   realized: number | null
   free: number
   regulatorGranted: number
-  secondaryBought: number
-  secondarySold: number
+  /** Net credits traded in the market (bought − sold). */
+  traded: number
   abatement: number
   creditsHeld: number
   netPosition: number | null
@@ -242,6 +262,8 @@ export interface HostSnapshot {
   leaderboard: LeaderboardRow[]
   /** Auctioning mode: this year's clearing price (null before the auction closes). */
   auctionPrice: number | null
+  /** Live order-book market. */
+  market: MarketView | null
   /** Full year-by-year history per player (host-only). */
   playerHistory: Record<string, PlayerHistoryYear[]>
 }

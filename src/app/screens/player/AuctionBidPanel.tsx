@@ -17,12 +17,12 @@ export function AuctionBidPanel({ snap }: { snap: PlayerSnapshot }) {
   const cleared = snap.auctionPrice !== null
 
   const [qty, setQty] = useState<number>(committed?.qty ?? Math.round(expected))
-  const [price, setPrice] = useState<number>(committed?.price ?? snap.regulatorPrice)
+  const [price, setPrice] = useState<number>(committed?.price ?? 10)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     setQty(snap.you.auctionBid?.qty ?? Math.round(snap.you.expectedEmission ?? 0))
-    setPrice(snap.you.auctionBid?.price ?? snap.regulatorPrice)
+    setPrice(snap.you.auctionBid?.price ?? 10)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap.currentYear])
 

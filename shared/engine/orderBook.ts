@@ -1,0 +1,118 @@
+import type { MarketView, Order, OrderSide, Trade } from '../types'
+import { round1 } from './rng'
+
+/**
+ * Student-driven continuous double auction. Prices come entirely from the
+ * players' limit orders — there is no external price feed.
+ *
+ * Matching rules:
+ *  - an incoming buy fills against open asks with price ≤ its limit, cheapest first
+ *  - an incoming sell fills against open bids with price ≥ its limit, highest first
+ *  - ties break by time priority (lower seq first)
+ *  - the trade executes at the RESTING order's price
+ *  - partial fills leave the remainder resting in the book
+ *  - a player's order never matches their own resting orders (skipped, left intact)
+ */
+export function matchOrder(
+  orders: Order[],
+  incoming: Order,
+  makeTradeId: () => string,
+): { trades: Trade[] } {
+  const trades: Trade[] = []
+  const oppositeSide: OrderSide = incoming.side === 'buy' ? 'sell' : 'buy'
+
+  const crosses = (resting: Order) =>
+    incoming.side === 'buy' ? resting.price <= incoming.price : resting.price >= incoming.price
+
+  while (incoming.remaining > 0) {
+    const candidates = orders
+      .filter(
+        (o) =>
+          o.status === 'open' &&
+          o.side === oppositeSide &&
+          o.playerId !== incoming.playerId &&
+          o.remaining > 0 &&
+          crosses(o),
+      )
+      .sort((a, b) =>
+        incoming.side === 'buy'
+          ? a.price - b.price || a.seq - b.seq
+          : b.price - a.price || a.seq - b.seq,
+      )
+    const best = candidates[0]
+    if (!best) break
+
+    const qty = round1(Math.min(incoming.remaining, best.remaining))
+    best.remaining = round1(best.remaining - qty)
+    incoming.remaining = round1(incoming.remaining - qty)
+    if (best.remaining === 0) best.status = 'filled'
+    if (incoming.remaining === 0) incoming.status = 'filled'
+
+    trades.push({
+      id: makeTradeId(),
+      buyerId: incoming.side === 'buy' ? incoming.playerId : best.playerId,
+      sellerId: incoming.side === 'sell' ? incoming.playerId : best.playerId,
+      qty,
+      price: best.price,
+      seq: incoming.seq,
+    })
+  }
+
+  orders.push(incoming)
+  return { trades }
+}
+
+export function cancelOrder(orders: Order[], playerId: string, orderId: string): boolean {
+  const order = orders.find((o) => o.id === orderId && o.playerId === playerId)
+  if (!order || order.status !== 'open') return false
+  order.status = 'cancelled'
+  return true
+}
+
+/** Net credits bought minus sold via executed trades, per player. */
+export function tradedNet(trades: Trade[], playerId: string): number {
+  let net = 0
+  for (const t of trades) {
+    if (t.buyerId === playerId) net += t.qty
+    if (t.sellerId === playerId) net -= t.qty
+  }
+  return round1(net)
+}
+
+/** Cash a player spent buying and earned selling via executed trades. */
+export function tradedCash(trades: Trade[], playerId: string): { buyCash: number; sellCash: number } {
+  let buyCash = 0
+  let sellCash = 0
+  for (const t of trades) {
+    if (t.buyerId === playerId) buyCash += t.qty * t.price
+    if (t.sellerId === playerId) sellCash += t.qty * t.price
+  }
+  return { buyCash: round1(buyCash), sellCash: round1(sellCash) }
+}
+
+/** Total quantity a player still has resting in open sell orders. */
+export function openSellRemaining(orders: Order[], playerId: string): number {
+  return round1(
+    orders
+      .filter((o) => o.playerId === playerId && o.side === 'sell' && o.status === 'open')
+      .reduce((s, o) => s + o.remaining, 0),
+  )
+}
+
+export function buildMarketView(orders: Order[], trades: Trade[]): MarketView {
+  const open = orders.filter((o) => o.status === 'open' && o.remaining > 0)
+  const bids = open.filter((o) => o.side === 'buy').sort((a, b) => b.price - a.price || a.seq - b.seq)
+  const asks = open.filter((o) => o.side === 'sell').sort((a, b) => a.price - b.price || a.seq - b.seq)
+  const volume = round1(trades.reduce((s, t) => s + t.qty, 0))
+  const notional = trades.reduce((s, t) => s + t.qty * t.price, 0)
+  return {
+    bids,
+    asks,
+    trades: [...trades].reverse(),
+    lastPrice: trades.length > 0 ? trades[trades.length - 1].price : null,
+    bestBid: bids[0]?.price ?? null,
+    bestAsk: asks[0]?.price ?? null,
+    vwap: volume > 0 ? Math.round((notional / volume) * 100) / 100 : null,
+    volume,
+  }
+}

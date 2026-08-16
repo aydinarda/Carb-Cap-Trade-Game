@@ -44,12 +44,7 @@ export function EmissionsRevealScreen({ snap }: { snap: PlayerSnapshot }) {
           label="Credits held"
           value={cover}
           unit="cr"
-          hint={
-            snap.you.regulatorRequest !== null &&
-            (snap.you.regulatorGranted ?? 0) < snap.you.regulatorRequest
-              ? `regulator pro-rated: got ${snap.you.regulatorGranted} of ${snap.you.regulatorRequest}`
-              : 'free + regulator'
-          }
+          hint={snap.capMode === 'auctioning' ? 'won at auction' : 'free allocation'}
         />
         <StatCard label="Expected" value={expected} unit="tCO₂" tone="accent" />
         <StatCard

@@ -1,5 +1,5 @@
 import { INDUSTRY_NAMES } from '../shared/constants'
-import { expectedEmission, windowSum } from '../shared/engine'
+import { buildMarketView, expectedEmission, tradedNet, windowSum } from '../shared/engine'
 import type {
   ClassAggregate,
   HostSnapshot,
@@ -80,15 +80,12 @@ function classAggregate(session: Session): ClassAggregate {
 
   const settlement = record?.settlement
   const auctioning = state.capMode === 'auctioning'
-  // Under auctioning the cap-stage input is bids, not regulator requests.
-  const capDemand = record
-    ? auctioning
+  // Only auctioning has a cap-stage input (sealed bids); G/B just get free credits.
+  const capDemand =
+    record && auctioning
       ? round1(Object.values(record.auctionBid).reduce((a, b) => a + b.qty, 0))
-      : sum(record.regulatorRequest)
-    : null
-  const capSubmitted = record
-    ? Object.keys(auctioning ? record.auctionBid : record.regulatorRequest).length
-    : 0
+      : null
+  const capSubmitted = record && auctioning ? Object.keys(record.auctionBid).length : 0
 
   return {
     totalBaselineEmissions: totalBaseline,
@@ -134,18 +131,13 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     playerCount: state.players.length,
     roster: publicRoster(session),
     freeCreditLimit: state.freeCreditLimit !== null ? round1(state.freeCreditLimit) : null,
-    regulatorPool: record?.regulatorPool ?? null,
-    regulatorRequestTotal: record
-      ? round1(Object.values(record.regulatorRequest).reduce((a, b) => a + b, 0))
-      : null,
-    regulatorRequestCap: round1(
-      ((record?.regulatorPool ?? 0) / Math.max(1, state.players.length)) * 2,
-    ),
-    regulatorPrice: state.config.regulatorPrice,
-    sellPrice: state.config.sellPrice,
     abatementCoeff: state.config.abatement[player.industry],
     auctionSupply: state.capMode === 'auctioning' ? (record?.regulatorPool ?? 0) : 0,
     auctionPrice: record?.auctionPrice ?? null,
+    market:
+      record && (state.phase === 'trade' || settled)
+        ? buildMarketView(record.orders, record.trades)
+        : null,
     classAggregate: state.phase === 'lobby' ? null : classAggregate(session),
     leaderboard: settled ? leaderboard(session) : null,
     you: {
@@ -155,7 +147,6 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
       emissions: player.emissions,
       score: player.score,
       freeAllocation: record?.freeAllocation[player.id] ?? null,
-      regulatorRequest: record?.regulatorRequest[player.id] ?? null,
       regulatorGranted:
         record && Object.keys(record.regulatorGranted).length > 0
           ? (record.regulatorGranted[player.id] ?? 0)
@@ -165,8 +156,12 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
         record && record.auctionPrice !== null
           ? (record.regulatorGranted[player.id] ?? 0)
           : null,
-      secondaryBought: record?.secondaryBought[player.id] ?? null,
-      secondarySold: record?.secondarySold[player.id] ?? null,
+      myOrders: record
+        ? [...record.orders.filter((o) => o.playerId === player.id)].reverse()
+        : [],
+      myTrades: record
+        ? [...record.trades.filter((t) => t.buyerId === player.id || t.sellerId === player.id)].reverse()
+        : [],
       abatement: record?.abatement[player.id] ?? null,
       creditsHeld: record && revealed ? session.creditsHeld(player.id) : null,
       expectedEmission: record ? expectedEmission(player, state.currentYear) : null,
@@ -185,18 +180,16 @@ function buildPlayerHistory(session: Session): Record<string, PlayerHistoryYear[
     history[p.id] = years.map((y) => {
       const free = round1(y.freeAllocation[p.id] ?? 0)
       const granted = round1(y.regulatorGranted[p.id] ?? 0)
-      const bought = round1(y.secondaryBought[p.id] ?? 0)
-      const sold = round1(y.secondarySold[p.id] ?? 0)
+      const traded = tradedNet(y.trades, p.id)
       return {
         year: y.year,
         expected: round1(expectedEmission(p, y.year)),
         realized: y.realized[p.id] ?? null,
         free,
         regulatorGranted: granted,
-        secondaryBought: bought,
-        secondarySold: sold,
+        traded,
         abatement: round1(y.abatement[p.id] ?? 0),
-        creditsHeld: round1(free + granted + bought - sold),
+        creditsHeld: round1(free + granted + traded),
         netPosition: y.netPosition[p.id] ?? null,
         settlement: y.settlement?.[p.id] ?? null,
       }
@@ -222,6 +215,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
     classAggregate: classAggregate(session),
     leaderboard: leaderboard(session),
     auctionPrice: record?.auctionPrice ?? null,
+    market: record ? buildMarketView(record.orders, record.trades) : null,
     playerHistory: buildPlayerHistory(session),
     players: state.players.map((p) => ({
       id: p.id,
@@ -232,13 +226,11 @@ export function hostSnapshot(session: Session): HostSnapshot {
       baselineEmission: p.emissions[state.config.baselineYear] ?? 0,
       windowSum: round1(windowSum(p, state.currentYear, state.config.historyWindow)),
       freeAllocation: record?.freeAllocation[p.id] ?? null,
-      regulatorRequest: record?.regulatorRequest[p.id] ?? null,
       regulatorGranted:
         record && Object.keys(record.regulatorGranted).length > 0
           ? (record.regulatorGranted[p.id] ?? 0)
           : null,
-      secondaryBought: record?.secondaryBought[p.id] ?? null,
-      secondarySold: record?.secondarySold[p.id] ?? null,
+      traded: record ? tradedNet(record.trades, p.id) : null,
       abatement: record?.abatement[p.id] ?? null,
       creditsHeld: record ? session.creditsHeld(p.id) : null,
       expectedEmission: round1(expectedEmission(p, state.currentYear)),
