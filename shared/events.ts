@@ -1,5 +1,5 @@
 import type { Industry } from './constants'
-import type { CapMode, OrderSide, Phase, PlayerProfile, Snapshot } from './types'
+import type { BotType, CapMode, OrderSide, Phase, PlayerProfile, Snapshot } from './types'
 
 export type Ack<T = unknown> = (
   response: ({ ok: true } & T) | { ok: false; error: string },
@@ -28,6 +28,10 @@ export interface ClientToServerEvents {
   'host:advanceYear': (payload: Record<string, never>, ack: Ack) => void
   'host:endGame': (payload: Record<string, never>, ack: Ack) => void
   'host:kickPlayer': (payload: { playerId: string }, ack: Ack) => void
+  /** Lobby only: add N backend bots of one archetype (auctioning mode). */
+  'host:addBots': (payload: { botType: BotType; count: number }, ack: Ack) => void
+  /** Lobby only: remove one bot by id. */
+  'host:removeBot': (payload: { playerId: string }, ack: Ack) => void
   'player:join': (
     payload: { roomCode: string; name: string; industry: Industry },
     ack: Ack<{ playerId: string; token: string; profile: PlayerProfile }>,

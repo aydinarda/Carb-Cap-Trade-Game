@@ -47,6 +47,14 @@ export const MODE_LABELS = {
   },
 } as const
 
+/** Backend bot archetype labels (auctioning mode). */
+export const BOT_LABELS: Record<'compliance' | 'marketMaker' | 'speculator' | 'noise', string> = {
+  compliance: 'Compliance',
+  marketMaker: 'Market maker',
+  speculator: 'Speculator',
+  noise: 'Noise',
+}
+
 /** Floating background circles carried over from the original prototype. */
 export function EcoDots({ className }: { className?: string }) {
   return (

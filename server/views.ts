@@ -21,23 +21,40 @@ function publicRoster(session: Session): PublicPlayerInfo[] {
     name: p.name,
     industry: p.industry,
     connected: p.connected,
+    isBot: p.isBot,
+    botType: p.botType,
   }))
+}
+
+/** Pure-trader bots have ~0 emissions, so the skill-vs-optimum metric is meaningless. */
+function isPureTrader(p: Session['state']['players'][number]): boolean {
+  return !!p.isBot && (p.botType === 'marketMaker' || p.botType === 'speculator')
 }
 
 function leaderboard(session: Session): LeaderboardRow[] {
   const { baselineYear } = session.state.config
-  const normalized = (p: Session['state']['players'][number]) => {
+  const skill = (p: Session['state']['players'][number]) => {
     const baseline = p.emissions[baselineYear] ?? 0
-    return baseline > 0 ? round1((p.score - p.optimalScore) / baseline) : p.score - p.optimalScore
+    return baseline > 0 ? round1((p.score - p.optimalScore) / baseline) : round1(p.score - p.optimalScore)
   }
+  // Emitters ranked by skill; pure-trader bots ranked by raw P&L and pushed to the end.
+  const metric = (p: Session['state']['players'][number]) =>
+    isPureTrader(p) ? round1(p.score) : skill(p)
   return [...session.state.players]
-    .sort((a, b) => normalized(a) - normalized(b))
+    .sort((a, b) => {
+      const ta = isPureTrader(a)
+      const tb = isPureTrader(b)
+      if (ta !== tb) return ta ? 1 : -1
+      return metric(a) - metric(b)
+    })
     .map((p) => ({
       id: p.id,
       name: p.name,
       industry: p.industry,
       score: p.score,
-      normalizedScore: normalized(p),
+      normalizedScore: metric(p),
+      isBot: p.isBot,
+      botType: p.botType,
     }))
 }
 
@@ -225,6 +242,8 @@ export function hostSnapshot(session: Session): HostSnapshot {
       name: p.name,
       industry: p.industry,
       connected: p.connected,
+      isBot: p.isBot,
+      botType: p.botType,
       score: p.score,
       baselineEmission: p.emissions[state.config.baselineYear] ?? 0,
       windowSum: round1(windowSum(p, state.currentYear, state.config.historyWindow)),

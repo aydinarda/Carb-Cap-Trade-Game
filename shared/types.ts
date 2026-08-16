@@ -2,6 +2,9 @@ import type { Industry } from './constants'
 
 export type CapMode = 'grandfathering' | 'benchmarking' | 'auctioning'
 
+/** Backend bot archetypes (auctioning mode). See server/bots/. */
+export type BotType = 'compliance' | 'marketMaker' | 'speculator' | 'noise'
+
 export type Phase =
   | 'lobby' // registration open, players joining and picking industries
   | 'cap' // players request extra credits from the regulator pool
@@ -30,6 +33,10 @@ export interface Player extends PlayerProfile {
    * next year's holdings; monetized at the final market price when the game ends.
    */
   bankedCredits: number
+  /** Backend bot (no socket). Undefined for human players. */
+  isBot?: boolean
+  /** Which archetype this bot plays (only set when isBot). */
+  botType?: BotType
 }
 
 export type OrderSide = 'buy' | 'sell'
@@ -137,6 +144,8 @@ export interface PublicPlayerInfo {
   name: string
   industry: Industry
   connected: boolean
+  isBot?: boolean
+  botType?: BotType
 }
 
 /** What a player knows about themself in the current year. */
@@ -175,8 +184,14 @@ export interface LeaderboardRow {
   industry: Industry
   /** Raw cumulative cost. */
   score: number
-  /** (score − optimalScore) / baseline — skill vs the company's own optimum; lowest wins. */
+  /**
+   * Emitters: (score − optimalScore) / baseline — skill vs own optimum, lowest wins.
+   * Pure-trader bots (MM/speculator): raw cumulative P&L (skill-vs-optimum is
+   * meaningless for a ~0-emission financial player); they sort after the emitters.
+   */
   normalizedScore: number
+  isBot?: boolean
+  botType?: BotType
 }
 
 export interface PlayerSnapshot {

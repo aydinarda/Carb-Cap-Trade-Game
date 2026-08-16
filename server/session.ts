@@ -32,7 +32,30 @@ import {
   tradedNet,
   type Rng,
 } from '../shared/engine'
-import type { CapMode, GameState, Order, OrderSide, Player, YearRecord } from '../shared/types'
+import type {
+  BotType,
+  CapMode,
+  GameState,
+  Order,
+  OrderSide,
+  Player,
+  PlayerProfile,
+  YearRecord,
+} from '../shared/types'
+
+const BOT_LABELS: Record<BotType, string> = {
+  compliance: 'Firm-Bot',
+  marketMaker: 'MM-Bot',
+  speculator: 'Spec-Bot',
+  noise: 'Noise-Bot',
+}
+
+/** Near-zero emission history for pure-trader bots (financial players). */
+function flatTinyHistory(industry: Industry): PlayerProfile {
+  const emissions: Record<number, number> = {}
+  for (let y = 1; y <= HISTORY_WINDOW; y++) emissions[y] = 0.1
+  return { industry, emissions }
+}
 
 const roomCodeAlphabet = customAlphabet('ABCDEFGHJKMNPQRSTUVWXYZ23456789', 4)
 
@@ -147,6 +170,40 @@ export class Session {
     const token = nanoid()
     this.playerTokens.set(token, player.id)
     return { player, token }
+  }
+
+  /** Lobby only: add a backend bot (no socket/token). Emitter archetypes get a real
+   * history; pure-trader archetypes get a near-zero one (financial players). */
+  addBot(botType: BotType, industry?: Industry): Player {
+    this.requirePhase('lobby')
+    if (this.state.players.length >= MAX_PLAYERS) {
+      throw new GameError('FULL', 'This session is full.')
+    }
+    const ind = industry ?? INDUSTRY_NAMES[Math.floor(this.rng.uniform(0, INDUSTRY_NAMES.length))]
+    const isEmitter = botType === 'compliance' || botType === 'noise'
+    const profile = isEmitter ? generateHistoryForIndustry(ind, this.rng) : flatTinyHistory(ind)
+    const n = this.state.players.filter((p) => p.botType === botType).length + 1
+    const player: Player = {
+      id: `P${this.state.players.length + 1}`,
+      name: `${BOT_LABELS[botType]} ${n}`,
+      connected: true,
+      score: 0,
+      optimalScore: 0,
+      bankedCredits: 0,
+      isBot: true,
+      botType,
+      ...profile,
+    }
+    this.state.players.push(player)
+    return player
+  }
+
+  /** Lobby only: remove a bot by id (reuses kickPlayer's splice + P# renumber). */
+  removeBot(playerId: string) {
+    this.requirePhase('lobby')
+    const bot = this.state.players.find((p) => p.id === playerId)
+    if (!bot || !bot.isBot) throw new GameError('NO_BOT', 'Bot not found.')
+    this.kickPlayer(playerId)
   }
 
   /** Allowed in the lobby AND between years — mode switches take effect next year. */
@@ -480,6 +537,11 @@ export class SessionStore {
 
   get(roomCode: string): Session | undefined {
     return this.byCode.get(roomCode.toUpperCase())
+  }
+
+  /** All live sessions — used by the bot driver to tick each room. */
+  activeSessions(): Session[] {
+    return [...this.byCode.values()]
   }
 
   findByHostToken(token: string): Session | undefined {

@@ -1,4 +1,4 @@
-import { AlertTriangle, Construction, Gavel, Leaf, Trophy, TrendingDown, TrendingUp } from 'lucide-react'
+import { AlertTriangle, Bot, Construction, Gavel, Leaf, Trophy, TrendingDown, TrendingUp } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { Industry } from '@shared/constants'
 import type {
@@ -8,7 +8,7 @@ import type {
   PlayerSettlement,
   PublicPlayerInfo,
 } from '@shared/types'
-import { cn, INDUSTRY_META, MODE_LABELS } from './theme'
+import { BOT_LABELS, cn, INDUSTRY_META, MODE_LABELS } from './theme'
 
 export function IndustryBadge({ industry, size = 'md' }: { industry: Industry; size?: 'sm' | 'md' }) {
   const meta = INDUSTRY_META[industry]
@@ -209,14 +209,32 @@ export function LeaderboardTable({
               {i === 0 ? <Trophy size={14} className="text-accent inline" /> : i + 1}
             </span>
             <span className="font-mono font-bold w-9">{row.id}</span>
-            <span className="flex-1 truncate text-foreground">{row.name}</span>
-            <span style={{ color: meta.color }}>{meta.icon}</span>
+            <span className="flex-1 truncate text-foreground inline-flex items-center gap-1.5">
+              {row.isBot && <Bot size={12} className="text-accent shrink-0" />}
+              {row.name}
+              {row.isBot && row.botType && (
+                <span className="text-[9px] font-mono uppercase tracking-wider text-accent/80">
+                  {BOT_LABELS[row.botType]}
+                </span>
+              )}
+            </span>
+            {row.isBot ? (
+              <span className="text-[10px]" style={{ color: meta.color }} title="bot (cosmetic sector)">
+                🤖
+              </span>
+            ) : (
+              <span style={{ color: meta.color }}>{meta.icon}</span>
+            )}
             <span
               className={cn(
                 'font-mono font-bold w-20 text-right',
                 row.normalizedScore <= 0.05 ? 'text-primary' : 'text-foreground',
               )}
-              title="cost above your own optimum, per baseline tonne — lower is better"
+              title={
+                row.isBot
+                  ? 'raw cumulative P&L (skill metric N/A for bots)'
+                  : 'cost above your own optimum, per baseline tonne — lower is better'
+              }
             >
               {row.normalizedScore.toLocaleString()}
             </span>

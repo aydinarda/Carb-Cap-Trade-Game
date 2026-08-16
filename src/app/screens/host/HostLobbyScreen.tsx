@@ -1,6 +1,6 @@
-import { Play, Users, X } from 'lucide-react'
+import { Bot, Play, Plus, Users, X } from 'lucide-react'
 import { useState } from 'react'
-import type { HostSnapshot } from '@shared/types'
+import type { BotType, HostSnapshot } from '@shared/types'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,16 +13,26 @@ import {
   AlertDialogTrigger,
 } from '../../components/ui/alert-dialog'
 import { Button } from '../../components/ui/button'
+import { Input } from '../../components/ui/input'
 import { ConnectionDot, IndustryBadge, WarningBanner } from '../../components/game/cards'
-import { MODE_LABELS } from '../../components/game/theme'
+import { BOT_LABELS, MODE_LABELS } from '../../components/game/theme'
 import { useGame } from '../../net/GameContext'
 import { ModePicker, SettingsPanel } from './HostControls'
+
+const BOT_TYPES: BotType[] = ['compliance', 'marketMaker', 'speculator', 'noise']
 
 export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
   const { hostAction } = useGame()
   const [busy, setBusy] = useState(false)
+  const [botType, setBotType] = useState<BotType>('compliance')
+  const [botCount, setBotCount] = useState('3')
   const mode = snap.capMode ? MODE_LABELS[snap.capMode] : null
   const joinUrl = `${window.location.origin}/`
+
+  const addBots = () => {
+    const count = Math.max(1, Math.min(20, Math.floor(Number(botCount) || 1)))
+    void hostAction('host:addBots', { botType, count })
+  }
 
   const start = async () => {
     setBusy(true)
@@ -63,15 +73,29 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
             <div className="flex flex-col divide-y divide-border">
               {snap.players.map((p) => (
                 <div key={p.id} className="flex items-center gap-3 py-2">
-                  <ConnectionDot connected={p.connected} />
+                  {p.isBot ? (
+                    <Bot size={13} className="text-accent shrink-0" />
+                  ) : (
+                    <ConnectionDot connected={p.connected} />
+                  )}
                   <span className="font-mono font-bold text-sm text-foreground w-9">{p.id}</span>
                   <span className="text-sm text-foreground flex-1 truncate">{p.name}</span>
-                  <IndustryBadge industry={p.industry} size="sm" />
+                  {p.isBot && p.botType ? (
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-accent border border-accent/40 rounded-full px-2 py-0.5">
+                      {BOT_LABELS[p.botType]}
+                    </span>
+                  ) : (
+                    <IndustryBadge industry={p.industry} size="sm" />
+                  )}
                   <span className="text-xs font-mono text-muted-foreground w-20 text-right">
-                    {p.baselineEmission.toLocaleString()} tCO₂
+                    {p.isBot ? '—' : `${p.baselineEmission.toLocaleString()} tCO₂`}
                   </span>
                   <button
-                    onClick={() => void hostAction('host:kickPlayer', { playerId: p.id })}
+                    onClick={() =>
+                      void hostAction(p.isBot ? 'host:removeBot' : 'host:kickPlayer', {
+                        playerId: p.id,
+                      })
+                    }
                     className="text-muted-foreground hover:text-destructive transition-colors"
                     title={`Remove ${p.name}`}
                   >
@@ -100,6 +124,51 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
           </div>
           <SettingsPanel config={snap.config} />
         </div>
+
+        {/* Add bots (auctioning only) */}
+        {snap.capMode === 'auctioning' && (
+          <div className="rounded-xl border border-accent/30 bg-accent/5 p-5">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
+              <Bot size={12} className="text-accent" />
+              Add market bots
+            </div>
+            <div className="flex items-end gap-2">
+              <div className="flex flex-col gap-1 flex-1">
+                <label className="text-[10px] font-mono uppercase text-muted-foreground">Type</label>
+                <select
+                  value={botType}
+                  onChange={(e) => setBotType(e.target.value as BotType)}
+                  className="h-9 rounded-md border border-border bg-background px-2 text-sm font-mono"
+                >
+                  {BOT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {BOT_LABELS[t]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1 w-16">
+                <label className="text-[10px] font-mono uppercase text-muted-foreground">Count</label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={botCount}
+                  onChange={(e) => setBotCount(e.target.value)}
+                  className="font-mono"
+                />
+              </div>
+              <Button variant="outline" onClick={addBots} className="font-bold">
+                <Plus size={14} /> Add
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground font-mono mt-2">
+              Bots bid in the auction and trade in the order book (auctioning mode). Compliance
+              anchors price to fundamentals; market makers add liquidity; speculators &amp; noise add
+              realism.
+            </p>
+          </div>
+        )}
 
         {/* Class baseline */}
         <div className="rounded-xl border border-border bg-card/70 p-5">

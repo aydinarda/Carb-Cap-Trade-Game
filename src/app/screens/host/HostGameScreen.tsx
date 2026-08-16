@@ -1,5 +1,6 @@
 import {
   ArrowRight,
+  Bot,
   Eye,
   EyeOff,
   Flag,
@@ -260,7 +261,11 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                   <tr key={p.id}>
                     <td className="py-2 pr-3 font-mono">
                       <span className="inline-flex items-center gap-2">
-                        <ConnectionDot connected={p.connected} />
+                        {p.isBot ? (
+                          <Bot size={12} className="text-accent shrink-0" />
+                        ) : (
+                          <ConnectionDot connected={p.connected} />
+                        )}
                         <span className="font-bold">{p.id}</span> {p.name}
                       </span>
                     </td>

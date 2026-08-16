@@ -16,7 +16,7 @@ function roomAll(code: string) {
 }
 
 /** Push role-scoped snapshots to every connected socket of a session. */
-async function broadcast(io: IO, session: Session) {
+export async function broadcast(io: IO, session: Session) {
   const sockets = (await io.in(roomAll(session.state.roomCode)).fetchSockets()) as unknown as AppSocket[]
   for (const socket of sockets) {
     emitSnapshot(socket, session)
@@ -127,6 +127,13 @@ export function registerSockets(io: IO) {
       hostAction(io, socket, ack, (s) => s.endGame()))
     socket.on('host:kickPlayer', ({ playerId }, ack) =>
       hostAction(io, socket, ack, (s) => s.kickPlayer(playerId)))
+    socket.on('host:addBots', ({ botType, count }, ack) =>
+      hostAction(io, socket, ack, (s) => {
+        const n = Math.max(1, Math.min(20, Math.floor(Number(count) || 1)))
+        for (let i = 0; i < n; i++) s.addBot(botType)
+      }))
+    socket.on('host:removeBot', ({ playerId }, ack) =>
+      hostAction(io, socket, ack, (s) => s.removeBot(playerId)))
 
     socket.on('player:join', ({ roomCode, name, industry }, ack) => {
       try {

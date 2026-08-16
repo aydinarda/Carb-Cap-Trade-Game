@@ -5,8 +5,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Server } from 'socket.io'
 import type { ClientToServerEvents, ServerToClientEvents } from '../shared/events'
+import { BotManager } from './bots/BotManager'
 import { PORT } from './config'
-import { registerSockets } from './sockets'
+import { broadcast, registerSockets, store } from './sockets'
 
 const app = express()
 const httpServer = createServer(app)
@@ -21,6 +22,9 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
 })
 
 registerSockets(io)
+
+// Backend bots (auctioning mode) run on a slow global tick.
+new BotManager(io, store, broadcast).start()
 
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true })

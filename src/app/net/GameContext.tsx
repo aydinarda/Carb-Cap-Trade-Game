@@ -53,7 +53,9 @@ interface GameContextValue {
       | 'host:closeTrade'
       | 'host:advanceYear'
       | 'host:endGame'
-      | 'host:kickPlayer',
+      | 'host:kickPlayer'
+      | 'host:addBots'
+      | 'host:removeBot',
     payload?: Record<string, unknown>,
   ) => Promise<boolean>
   submitBid: (qty: number, price: number) => Promise<boolean>
