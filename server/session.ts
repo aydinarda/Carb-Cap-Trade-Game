@@ -4,6 +4,7 @@ import {
   DEFAULT_ABATEMENT,
   DEFAULT_AUCTION_CAP_RATIO,
   DEFAULT_BENCHMARK,
+  DEFAULT_CAP_REDUCTION_FACTOR,
   DEFAULT_PENALTY_RATE,
   FIRST_GAME_YEAR,
   FREE_CREDIT_RATIO,
@@ -99,6 +100,7 @@ export class Session {
           INDUSTRY_NAMES.map((i) => [i, { ...DEFAULT_ABATEMENT[i] }]),
         ) as Record<Industry, { a: number; b: number }>,
         auctionCapRatio: DEFAULT_AUCTION_CAP_RATIO,
+        capReductionFactor: DEFAULT_CAP_REDUCTION_FACTOR,
       },
       freeCreditLimit: null,
     }
@@ -142,6 +144,24 @@ export class Session {
         (record.carriedIn[playerId] ?? 0) +
         tradedNet(record.trades, playerId),
     )
+  }
+
+  /**
+   * Most recent SETTLED year's discovered market price (VWAP → last → auction),
+   * or null before any year has traded. Used as the reference the bots anchor to
+   * and shown to players as the previous round's price signal.
+   */
+  previousMarketPrice(): number | null {
+    const completed = Object.values(this.state.years)
+      .filter((y) => y.year !== this.state.currentYear && Object.keys(y.realized).length > 0)
+      .sort((a, b) => b.year - a.year)
+    for (const y of completed) {
+      const mv = buildMarketView(y.orders, y.trades)
+      if (mv.vwap !== null) return mv.vwap
+      if (mv.lastPrice !== null) return mv.lastPrice
+      if (y.auctionPrice) return y.auctionPrice
+    }
+    return null
   }
 
   // ---- lobby ----
@@ -215,6 +235,7 @@ export class Session {
   updateSettings(settings: {
     penaltyRate?: number
     auctionCapRatio?: number
+    capReductionFactor?: number
     benchmark?: Partial<Record<Industry, number>>
     abatement?: Partial<Record<Industry, { a: number; b: number }>>
   }) {
@@ -226,6 +247,14 @@ export class Session {
         throw new GameError('BAD_SETTING', `${key} must be a non-negative number.`)
       }
       this.state.config[key] = round1(value)
+    }
+    // Reduction factor needs finer precision than 1 dp (0.97 must not round to 1.0).
+    if (settings.capReductionFactor !== undefined) {
+      const v = settings.capReductionFactor
+      if (!Number.isFinite(v) || v <= 0 || v > 1) {
+        throw new GameError('BAD_SETTING', 'capReductionFactor must be in (0, 1].')
+      }
+      this.state.config.capReductionFactor = Math.round(v * 1000) / 1000
     }
     if (settings.benchmark) {
       for (const [industry, value] of Object.entries(settings.benchmark)) {
@@ -309,9 +338,12 @@ export class Session {
     // Only auctioning issues priced allowances (the auction cap). G/B just hand out
     // free credits; the rest of the cap simply isn't created, so the total in
     // circulation is fixed and the secondary market only redistributes it.
+    // Auction supply shrinks each year by the reduction factor (EU-ETS LRF): a
+    // deliberately tightening cap that makes allowances scarcer over time.
+    const reduction = Math.pow(this.state.config.capReductionFactor, year - FIRST_GAME_YEAR)
     const pool =
       this.state.capMode === 'auctioning'
-        ? round1(this.state.config.auctionCapRatio * this.totalBaseline())
+        ? round1(this.state.config.auctionCapRatio * this.totalBaseline() * reduction)
         : 0
     // Carry each company's banked surplus / make-good debt into this year's holdings.
     const carriedIn = Object.fromEntries(

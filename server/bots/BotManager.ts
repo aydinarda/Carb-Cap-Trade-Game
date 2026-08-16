@@ -6,7 +6,7 @@ import * as compliance from './compliance'
 import * as marketMaker from './marketMaker'
 import * as noise from './noise'
 import * as speculator from './speculator'
-import { BOT_TICK_MS, type BotCtx, type BotRuntime, type BotType } from './types'
+import { BOT_TICK_MS, SIGMA, type BotCtx, type BotRuntime, type BotType } from './types'
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents>
 type Broadcast = (io: IO, session: Session) => void | Promise<void>
@@ -80,7 +80,10 @@ export class BotManager {
         if (phase === 'cap' && record.auctionBid[bot.id] !== undefined) continue
         const arch = ARCHETYPES[bot.botType as BotType]
         if (!arch) continue
-        const ctx: BotCtx = { session, bot, rng, rt: this.rtFor(session.state.roomCode, bot.id) }
+        const rt = this.rtFor(session.state.roomCode, bot.id)
+        // Draw this bot's persistent personality bias once (type-specific dispersion).
+        if (rt.bias === undefined) rt.bias = rng.normal(0, SIGMA[bot.botType as BotType])
+        const ctx: BotCtx = { session, bot, rng, rt }
         try {
           acted = (phase === 'cap' ? arch.auction : arch.trade)(ctx) || acted
         } catch (e) {

@@ -247,6 +247,17 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
           </motion.div>
         )}
 
+        {snap.prevMarketPrice !== null && (
+          <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-2 flex items-center justify-between">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+              Last round settled at
+            </span>
+            <span className="text-lg font-black font-mono text-primary">
+              {r1(snap.prevMarketPrice)}
+            </span>
+          </div>
+        )}
+
         {market && <MarketTicker market={market} />}
 
         {market && (

@@ -1,5 +1,5 @@
 import { buildMarketView } from '../../shared/engine'
-import { tryPlace, trySell, trySubmitBid } from './helpers'
+import { disperse, referencePrice, tryPlace, trySell, trySubmitBid } from './helpers'
 import { MOM_EPS, SPEC_INIT_INV, SPEC_SIZE, type BotCtx } from './types'
 
 /**
@@ -33,5 +33,8 @@ export function trade(ctx: BotCtx): boolean {
 export function auction(ctx: BotCtx): boolean {
   const { session, bot } = ctx
   const P = session.state.config.penaltyRate
-  return trySubmitBid(session, bot.id, SPEC_INIT_INV, 0.5 * P) // modest inventory to trade later
+  // Anchor to the discovered price (not a static 0.5·P) so the clearing tracks the
+  // market year to year; disperse by personality so speculators don't tie.
+  const price = disperse(referencePrice(session), ctx.rt.bias ?? 0, P)
+  return trySubmitBid(session, bot.id, SPEC_INIT_INV, price)
 }

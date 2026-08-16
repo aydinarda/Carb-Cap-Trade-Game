@@ -13,7 +13,7 @@ export const MM_SPREAD_FRAC = 0.06 // half-spread as a fraction of perceived val
 export const MM_SKEW = 0.008 // price shift per unit of inventory deviation from target
 export const MM_SKEW_CAP_FRAC = 0.4 // skew is clamped to ±(this × penaltyRate)
 export const MM_INV_FRAC = 0.18 // auction target inventory = this × auction supply
-export const MM_AUCTION_PRICE_FRAC = 0.9 // auction bid price = this × penaltyRate (aggressive)
+export const MM_AUCTION_AGGR = 1.3 // auction bid = this × reference price (above it, to win), capped at P
 export const MM_QUOTE_SIZE = 15 // resting quote size each side
 
 // --- Speculator (momentum) ---
@@ -30,9 +30,23 @@ export const NOISE_PRICE_JITTER = 0.25 // ±fraction on price
 /** Per-order quantity cap so bots work positions gradually (human pacing). */
 export const MAX_STEP = 40
 
+/**
+ * Per-archetype pricing dispersion (std dev, as a fraction of value). Each bot draws
+ * a persistent personality bias ~ N(0, SIGMA[type]) once, so two bots of the same
+ * type don't submit identical prices — their bids spread across the price axis.
+ */
+export const SIGMA: Record<BotType, number> = {
+  compliance: 0.05,
+  marketMaker: 0.08,
+  speculator: 0.12,
+  noise: 0.2,
+}
+
 /** Ephemeral per-bot runtime, kept in the BotManager — never serialized into GameState. */
 export interface BotRuntime {
   lastSeenPrice?: number
+  /** Persistent personality price bias (drawn once from N(0, SIGMA[type])). */
+  bias?: number
 }
 
 /** Everything an archetype's advance() needs. */

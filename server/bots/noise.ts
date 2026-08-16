@@ -1,5 +1,5 @@
 import { buildMarketView, expectedEmission, optimalAbatement } from '../../shared/engine'
-import { anchorValue, clamp, tryPlace, trySell, trySubmitBid } from './helpers'
+import { anchorValue, clamp, referencePrice, tryPlace, trySell, trySubmitBid } from './helpers'
 import { NOISE_ERR, NOISE_PRICE_JITTER, NOISE_SIZE, NOISE_SKIP, type BotCtx } from './types'
 
 /**
@@ -16,7 +16,7 @@ export function trade(ctx: BotCtx): boolean {
   const P = session.state.config.penaltyRate
   const coeff = session.state.config.abatement[bot.industry]
   const mv = buildMarketView(record.orders, record.trades)
-  const anchor = anchorValue(mv, P)
+  const anchor = anchorValue(mv, referencePrice(session))
   const rStar = optimalAbatement(coeff, anchor)
   const fair = Math.min(P, coeff.a + coeff.b * rStar)
   const expected = expectedEmission(bot, record.year)
@@ -25,7 +25,9 @@ export function trade(ctx: BotCtx): boolean {
 
   let side: 'buy' | 'sell' = need > 0 ? 'buy' : 'sell'
   if (rng.next() < NOISE_ERR) side = side === 'buy' ? 'sell' : 'buy' // occasional wrong side
-  const price = clamp(fair * (1 + rng.uniform(-NOISE_PRICE_JITTER, NOISE_PRICE_JITTER)), 0.1, P)
+  // Persistent personality bias + per-tick jitter → erratic but centred on value.
+  const bias = ctx.rt.bias ?? 0
+  const price = clamp(fair * (1 + bias + rng.uniform(-NOISE_PRICE_JITTER, NOISE_PRICE_JITTER)), 0.1, P)
   const qty = NOISE_SIZE * rng.uniform(0.5, 1.5)
 
   if (side === 'sell') return trySell(session, record, bot.id, qty, price)
@@ -35,9 +37,8 @@ export function trade(ctx: BotCtx): boolean {
 export function auction(ctx: BotCtx): boolean {
   const { session, bot, rng } = ctx
   const P = session.state.config.penaltyRate
-  const coeff = session.state.config.abatement[bot.industry]
-  const rStar = optimalAbatement(coeff, P)
-  const fair = Math.min(P, coeff.a + coeff.b * rStar)
-  const price = fair * (1 + rng.uniform(-0.2, 0.2))
+  // Anchored to the discovered price (an allowance's resale value), with noise.
+  const ref = referencePrice(session)
+  const price = clamp(ref * (1 + (ctx.rt.bias ?? 0) + rng.uniform(-0.1, 0.1)), 0.1, P)
   return trySubmitBid(session, bot.id, NOISE_SIZE, price) // small auction buy
 }

@@ -27,6 +27,7 @@ export const EMISSION_VOLATILITY = 0.08
 // Host-adjustable defaults
 export const DEFAULT_PENALTY_RATE = 20 // cost per tCO2 left uncovered — the effective ceiling on the market price
 export const DEFAULT_AUCTION_CAP_RATIO = 1.0 // auctioning supply = this × Σbaseline; host-tunable (lower = scarcer, stronger price signal)
+export const DEFAULT_CAP_REDUCTION_FACTOR = 0.97 // auction supply shrinks by this factor each year (EU-ETS LRF); 0.97 = −3%/yr, 1 = flat
 
 /**
  * Benchmarking free allocation: every company in an industry gets this many

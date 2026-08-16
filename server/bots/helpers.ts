@@ -5,14 +5,31 @@ import { MAX_STEP } from './types'
 
 export const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
 
-/** Perceived value / mid the bots price around when the book is thin. */
-export function marketMid(mv: MarketView, penaltyRate: number): number {
-  return mv.lastPrice ?? mv.vwap ?? penaltyRate / 2
+/**
+ * The reference price the bots anchor to this year: the previous settled year's
+ * discovered market price, or half the penalty as a neutral first-year default.
+ */
+export function referencePrice(session: Session): number {
+  return session.previousMarketPrice() ?? session.state.config.penaltyRate / 2
 }
 
-/** Perceived fair value for a market view (VWAP-anchored). */
-export function anchorValue(mv: MarketView, penaltyRate: number): number {
-  return mv.vwap ?? mv.lastPrice ?? penaltyRate / 2
+/** Apply a bot's personality bias to a price and clamp it into (0.1, penaltyRate]. */
+export function disperse(price: number, bias: number, penaltyRate: number): number {
+  return round1(clamp(price * (1 + bias), 0.1, penaltyRate))
+}
+
+/**
+ * Perceived value / mid the bots price around. Falls back to `ref` (the previous
+ * round's discovered price) when the book is still empty, so a fresh year's quotes
+ * start near last year's price instead of collapsing to P/2.
+ */
+export function marketMid(mv: MarketView, ref: number): number {
+  return mv.lastPrice ?? mv.vwap ?? ref
+}
+
+/** Perceived fair value for a market view (VWAP-anchored), falling back to `ref`. */
+export function anchorValue(mv: MarketView, ref: number): number {
+  return mv.vwap ?? mv.lastPrice ?? ref
 }
 
 /** Credits a bot can still offer without shorting (held minus its open asks). */

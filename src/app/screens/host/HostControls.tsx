@@ -44,19 +44,22 @@ export function SettingsPanel({ config }: { config: SessionConfig }) {
     Object.fromEntries(Object.entries(config.benchmark).map(([k, v]) => [k, String(v)])),
   )
   const [auctionCapRatio, setAuctionCapRatio] = useState(String(config.auctionCapRatio))
+  const [capReduction, setCapReduction] = useState(String(config.capReductionFactor))
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     setPenalty(String(config.penaltyRate))
     setAuctionCapRatio(String(config.auctionCapRatio))
+    setCapReduction(String(config.capReductionFactor))
     setBenchmark(Object.fromEntries(Object.entries(config.benchmark).map(([k, v]) => [k, String(v)])))
-  }, [config.penaltyRate, config.auctionCapRatio, config.benchmark])
+  }, [config.penaltyRate, config.auctionCapRatio, config.capReductionFactor, config.benchmark])
 
   const save = async () => {
     setBusy(true)
     const ok = await hostAction('host:updateSettings', {
       penaltyRate: Number(penalty),
       auctionCapRatio: Number(auctionCapRatio),
+      capReductionFactor: Number(capReduction),
       benchmark: Object.fromEntries(
         Object.entries(benchmark).map(([k, v]) => [k, Number(v)]),
       ),
@@ -91,6 +94,7 @@ export function SettingsPanel({ config }: { config: SessionConfig }) {
     <div className="flex flex-col gap-3">
       {field('Penalty rate', penalty, setPenalty, 'cost per tCO₂ uncovered — market price ceiling')}
       {field('Auction supply ratio', auctionCapRatio, setAuctionCapRatio, '× baseline (auctioning; ≤1 = scarcer)')}
+      {field('Cap reduction / year', capReduction, setCapReduction, 'auction supply × this each year (EU-ETS LRF; 0.97 = −3%/yr)')}
       <div className="pt-1 mt-1 border-t border-border">
         <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-2">
           Benchmark free credits (benchmarking mode)

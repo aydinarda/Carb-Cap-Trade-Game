@@ -4,13 +4,15 @@ import {
   botAvgCost,
   cancelAllOrders,
   clamp,
+  disperse,
+  referencePrice,
   sellCapacity,
   tryPlace,
   trySell,
   trySubmitBid,
 } from './helpers'
 import {
-  MM_AUCTION_PRICE_FRAC,
+  MM_AUCTION_AGGR,
   MM_INV_FRAC,
   MM_MIN_MARGIN,
   MM_QUOTE_SIZE,
@@ -37,7 +39,7 @@ export function trade(ctx: BotCtx): boolean {
   cancelAllOrders(session, record, bot.id)
   const mv = buildMarketView(record.orders, record.trades)
 
-  const anchor = anchorValue(mv, P)
+  const anchor = anchorValue(mv, referencePrice(session)) * (1 + (ctx.rt.bias ?? 0)) // personality-shifted value
   const margin = Math.max(MM_MIN_MARGIN, MM_SPREAD_FRAC * anchor)
   const target = MM_INV_FRAC * record.regulatorPool
   const held = session.creditsHeld(bot.id)
@@ -75,5 +77,7 @@ export function auction(ctx: BotCtx): boolean {
   const P = session.state.config.penaltyRate
   const target = MM_INV_FRAC * record.regulatorPool // deep inventory to two-side the market
   if (target <= 0) return false
-  return trySubmitBid(session, bot.id, target, MM_AUCTION_PRICE_FRAC * P)
+  // Bid above the discovered reference (to win inventory), capped at P and dispersed.
+  const price = disperse(Math.min(P, referencePrice(session) * MM_AUCTION_AGGR), ctx.rt.bias ?? 0, P)
+  return trySubmitBid(session, bot.id, target, price)
 }

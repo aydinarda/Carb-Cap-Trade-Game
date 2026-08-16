@@ -151,6 +151,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     abatementCoeff: state.config.abatement[player.industry],
     auctionSupply: state.capMode === 'auctioning' ? (record?.regulatorPool ?? 0) : 0,
     auctionPrice: record?.auctionPrice ?? null,
+    prevMarketPrice: session.previousMarketPrice(),
     market:
       record && (state.phase === 'trade' || settled)
         ? buildMarketView(record.orders, record.trades)
@@ -235,6 +236,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
     classAggregate: classAggregate(session),
     leaderboard: leaderboard(session),
     auctionPrice: record?.auctionPrice ?? null,
+    prevMarketPrice: session.previousMarketPrice(),
     market: record ? buildMarketView(record.orders, record.trades) : null,
     playerHistory: buildPlayerHistory(session),
     players: state.players.map((p) => ({

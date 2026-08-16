@@ -122,6 +122,8 @@ export interface SessionConfig {
   abatement: Record<Industry, { a: number; b: number }>
   /** Auctioning supply = auctionCapRatio × Σbaseline (host-tunable, ≤ 1 = scarcer). */
   auctionCapRatio: number
+  /** Auction supply shrinks by this factor each year (EU-ETS LRF); 1 = flat. */
+  capReductionFactor: number
 }
 
 export interface GameState {
@@ -209,6 +211,8 @@ export interface PlayerSnapshot {
   auctionSupply: number
   /** Auctioning mode: uniform clearing price, once the auction has closed. */
   auctionPrice: number | null
+  /** Previous settled year's discovered market price (VWAP) — a price signal. */
+  prevMarketPrice: number | null
   /** Live order-book market (visible during trade and once settled). */
   market: MarketView | null
   classAggregate: ClassAggregate | null
@@ -291,6 +295,8 @@ export interface HostSnapshot {
   leaderboard: LeaderboardRow[]
   /** Auctioning mode: this year's clearing price (null before the auction closes). */
   auctionPrice: number | null
+  /** Previous settled year's discovered market price (VWAP) — a price signal. */
+  prevMarketPrice: number | null
   /** Live order-book market. */
   market: MarketView | null
   /** Full year-by-year history per player (host-only). */

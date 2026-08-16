@@ -61,8 +61,6 @@ export const DEFAULT_CONFIG = {
   freeCreditRatio: 0.8,
   historyWindow: 10,
   baselineYear: 10,
-  regulatorPrice: 10,
-  sellPrice: 10,
   penaltyRate: 20,
   benchmark: {
     'Power & Utilities': 800,
@@ -77,4 +75,5 @@ export const DEFAULT_CONFIG = {
     Transport: { a: 5, b: 20 },
   },
   auctionCapRatio: 1.0,
+  capReductionFactor: 1.0,
 }

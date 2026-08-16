@@ -18,6 +18,7 @@ export interface ClientToServerEvents {
       benchmark?: Partial<Record<Industry, number>>
       abatement?: Partial<Record<Industry, { a: number; b: number }>>
       auctionCapRatio?: number
+      capReductionFactor?: number
     },
     ack: Ack,
   ) => void

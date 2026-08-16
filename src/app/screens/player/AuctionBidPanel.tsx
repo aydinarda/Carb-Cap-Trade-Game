@@ -16,13 +16,14 @@ export function AuctionBidPanel({ snap }: { snap: PlayerSnapshot }) {
   const committed = snap.you.auctionBid
   const cleared = snap.auctionPrice !== null
 
+  const priceAnchor = snap.prevMarketPrice ?? 10
   const [qty, setQty] = useState<number>(committed?.qty ?? Math.round(expected))
-  const [price, setPrice] = useState<number>(committed?.price ?? 10)
+  const [price, setPrice] = useState<number>(committed?.price ?? r1(priceAnchor))
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     setQty(snap.you.auctionBid?.qty ?? Math.round(snap.you.expectedEmission ?? 0))
-    setPrice(snap.you.auctionBid?.price ?? 10)
+    setPrice(snap.you.auctionBid?.price ?? r1(snap.prevMarketPrice ?? 10))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap.currentYear])
 
@@ -67,16 +68,28 @@ export function AuctionBidPanel({ snap }: { snap: PlayerSnapshot }) {
           <Gavel size={12} className="text-accent" />
           Auction — sealed bid, Year {snap.currentYear}
         </div>
-        <span className="text-xs font-mono text-accent border border-accent/30 rounded-full px-2 py-0.5">
-          supply {snap.auctionSupply.toLocaleString()} cr
-        </span>
+        <div className="flex items-center gap-2">
+          {snap.prevMarketPrice !== null && (
+            <span className="text-xs font-mono text-primary border border-primary/30 rounded-full px-2 py-0.5">
+              last round ≈ {r1(snap.prevMarketPrice)}
+            </span>
+          )}
+          <span className="text-xs font-mono text-accent border border-accent/30 rounded-full px-2 py-0.5">
+            supply {snap.auctionSupply.toLocaleString()} cr
+          </span>
+        </div>
       </div>
 
       <WarningBanner>
         No free credits — you buy allowances at auction. Bid a quantity and the max price you
         will pay. Highest bidders win the supply; <strong>everyone pays the single clearing
-        price</strong> (the lowest winning bid). Your expected emission is{' '}
-        <strong>{expected} tCO₂</strong>.
+        price</strong> (the lowest winning bid).{' '}
+        {snap.prevMarketPrice !== null && (
+          <>
+            Last round settled around <strong>{r1(snap.prevMarketPrice)}</strong> — a price signal.{' '}
+          </>
+        )}
+        Your expected emission is <strong>{expected} tCO₂</strong>.
       </WarningBanner>
 
       <div className="grid grid-cols-2 gap-4 mt-5">

@@ -1,6 +1,6 @@
 import { buildMarketView, expectedEmission, optimalAbatement, round1 } from '../../shared/engine'
 import { GameError } from '../session'
-import { marketMid, tryPlace, trySell, trySubmitBid } from './helpers'
+import { disperse, marketMid, referencePrice, tryPlace, trySell, trySubmitBid } from './helpers'
 import type { BotCtx } from './types'
 
 /**
@@ -16,7 +16,7 @@ export function trade(ctx: BotCtx): boolean {
   const P = session.state.config.penaltyRate
   const coeff = session.state.config.abatement[bot.industry]
   const mv = buildMarketView(record.orders, record.trades)
-  const mid = marketMid(mv, P)
+  const mid = marketMid(mv, referencePrice(session))
   const rStar = optimalAbatement(coeff, mid)
   try {
     session.setAbatement(bot.id, rStar)
@@ -24,6 +24,7 @@ export function trade(ctx: BotCtx): boolean {
     if (!(e instanceof GameError)) throw e
   }
   const fair = Math.min(P, coeff.a + coeff.b * rStar)
+  const fairB = disperse(fair, ctx.rt.bias ?? 0, P) // personality-shifted fair value
   const expected = expectedEmission(bot, record.year)
   const held = session.creditsHeld(bot.id)
   const need = round1(expected * (1 - rStar) - held)
@@ -32,14 +33,14 @@ export function trade(ctx: BotCtx): boolean {
     if (mv.bestAsk !== null && mv.bestAsk < fair) {
       return tryPlace(session, bot.id, 'buy', need, mv.bestAsk) // lift a cheap ask
     }
-    return tryPlace(session, bot.id, 'buy', need, fair - 0.1) // rest a bid at fair
+    return tryPlace(session, bot.id, 'buy', need, fairB - 0.1) // rest a bid at fair
   }
   if (need < -0.5) {
     const surplus = -need
     if (mv.bestBid !== null && mv.bestBid > fair) {
       return trySell(session, record, bot.id, surplus, mv.bestBid) // hit a rich bid
     }
-    return trySell(session, record, bot.id, surplus, fair + 0.1)
+    return trySell(session, record, bot.id, surplus, fairB + 0.1)
   }
   return false
 }
@@ -50,11 +51,14 @@ export function auction(ctx: BotCtx): boolean {
   if (!record) return false
   const P = session.state.config.penaltyRate
   const coeff = session.state.config.abatement[bot.industry]
-  const rStar = optimalAbatement(coeff, P)
-  const fair = Math.min(P, coeff.a + coeff.b * rStar)
+  const ref = referencePrice(session)
+  // Abate to the market-implied point; the residual is what it still needs to buy.
+  const rStar = optimalAbatement(coeff, ref)
   const expected = expectedEmission(bot, record.year)
   const held = session.creditsHeld(bot.id)
   const residual = round1(expected * (1 - rStar) - held)
   if (residual <= 0) return false
-  return trySubmitBid(session, bot.id, residual, fair)
+  // An allowance is a tradeable asset worth ~the market price — bid at the reference,
+  // not the private MAC, so the clearing price tracks the discovered price.
+  return trySubmitBid(session, bot.id, residual, disperse(Math.min(P, ref), ctx.rt.bias ?? 0, P))
 }
