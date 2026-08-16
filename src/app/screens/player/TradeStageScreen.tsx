@@ -1,4 +1,4 @@
-import { ArrowRightLeft, BookOpen, Gavel, History, Leaf, Send } from 'lucide-react'
+import { AlertTriangle, ArrowRightLeft, BookOpen, Gavel, History, Landmark, Leaf, Send } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
@@ -23,6 +23,7 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   const rawExpected = snap.you.expectedEmission ?? 0
   const held = snap.you.creditsHeld ?? 0
   const committedAbate = snap.you.abatement ?? 0
+  const banked = snap.you.banked ?? 0
 
   const [abateFrac, setAbateFrac] = useState(committedAbate)
   const [side, setSide] = useState<OrderSide>('buy')
@@ -65,7 +66,7 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
       <div className="flex flex-col gap-5">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatCard label="Expected (after cuts)" value={postExpected} unit="tCO₂" tone="accent" />
-          <StatCard label="Credits held" value={held} unit="cr" hint="free/auction ± trades" />
+          <StatCard label="Credits held" value={held} unit="cr" hint="free/auction/banked ± trades" />
           <StatCard
             label={short ? 'Short' : 'Covered'}
             value={Math.abs(gap)}
@@ -76,10 +77,40 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
           <StatCard label="Market price" value={marketPrice ?? '—'} hint="last / vwap" />
         </div>
 
+        {banked !== 0 && (
+          <div
+            className={cn(
+              'rounded-xl border p-3 flex items-center gap-2.5 text-sm font-mono',
+              banked > 0
+                ? 'border-primary/40 bg-primary/5 text-primary'
+                : 'border-destructive/40 bg-destructive/5 text-destructive',
+            )}
+          >
+            {banked > 0 ? (
+              <>
+                <Landmark size={15} className="shrink-0" />
+                <span>
+                  <strong>Banked +{r1(banked)}</strong> credits carried from last year — already in
+                  your holdings.
+                </span>
+              </>
+            ) : (
+              <>
+                <AlertTriangle size={15} className="shrink-0" />
+                <span>
+                  <strong>Make-good debt {r1(banked)}</strong> carried from last year — you must
+                  cover it on top of this year&apos;s emissions, or pay the penalty again.
+                </span>
+              </>
+            )}
+          </div>
+        )}
+
         <WarningBanner>
           No fixed price — you trade with other companies. Place limit <strong>bids</strong> (buy)
-          and <strong>asks</strong> (sell); orders match by best price. You can only sell credits
-          you hold (no shorting). The price emerges from the class. Uncovered tCO₂ pays the penalty.
+          and <strong>asks</strong> (sell); orders match by best price, no shorting. Uncovered tCO₂
+          pays the <strong>penalty</strong> — and still carries forward as a make-good debt. Surplus
+          credits are <strong>banked</strong> for next year (cashed out at game end).
         </WarningBanner>
 
         {/* Abatement */}

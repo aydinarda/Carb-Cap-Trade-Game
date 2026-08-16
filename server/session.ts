@@ -106,13 +106,17 @@ export class Session {
     )
   }
 
-  /** Credits a player holds: free + cap-stage (auction) + net traded in the market. */
+  /**
+   * Credits a player holds: free + cap-stage (auction) + carry banked from prior
+   * years (or minus a make-good debt) + net traded in the market.
+   */
   creditsHeld(playerId: string): number {
     const record = this.currentYearRecord()
     if (!record) return 0
     return round1(
       (record.freeAllocation[playerId] ?? 0) +
         (record.regulatorGranted[playerId] ?? 0) +
+        (record.carriedIn[playerId] ?? 0) +
         tradedNet(record.trades, playerId),
     )
   }
@@ -136,6 +140,7 @@ export class Session {
       connected: true,
       score: 0,
       optimalScore: 0,
+      bankedCredits: 0,
       ...profile,
     }
     this.state.players.push(player)
@@ -251,11 +256,16 @@ export class Session {
       this.state.capMode === 'auctioning'
         ? round1(this.state.config.auctionCapRatio * this.totalBaseline())
         : 0
+    // Carry each company's banked surplus / make-good debt into this year's holdings.
+    const carriedIn = Object.fromEntries(
+      this.state.players.map((p) => [p.id, round1(p.bankedCredits)]),
+    )
     this.state.years[year] = {
       year,
       freeAllocation,
       regulatorGranted: {},
       regulatorPool: pool,
+      carriedIn,
       realized: {},
       orders: [],
       trades: [],
@@ -332,6 +342,10 @@ export class Session {
     for (const player of this.state.players) {
       player.score = round1(player.score + (settlement[player.id]?.yearCost ?? 0))
       player.optimalScore = round1(player.optimalScore + (optimal[player.id] ?? 0))
+      // EU-ETS carry: the year's net position rolls forward — surplus is banked,
+      // an uncovered shortfall becomes a make-good debt (on top of the penalty just
+      // charged). It adjusts next year's holdings via carriedIn.
+      player.bankedCredits = round1((held[player.id] ?? 0) - (record.realized[player.id] ?? 0))
     }
     this.state.phase = 'yearSummary'
   }
@@ -342,7 +356,30 @@ export class Session {
   }
 
   endGame() {
+    // Settle leftover EU-ETS carry at the final market price: banked allowances are
+    // cashed out (income → lower cost), a remaining make-good debt must be bought
+    // back (cost → higher cost). After this the carry is closed.
+    const finalPrice = this.finalReferencePrice()
+    for (const player of this.state.players) {
+      if (player.bankedCredits !== 0) {
+        player.score = round1(player.score - player.bankedCredits * finalPrice)
+        player.bankedCredits = 0
+      }
+    }
     this.state.phase = 'ended'
+  }
+
+  /** Most recent completed year's market VWAP; falls back to auction price / penalty. */
+  private finalReferencePrice(): number {
+    const completed = Object.values(this.state.years)
+      .filter((y) => Object.keys(y.realized).length > 0)
+      .sort((a, b) => b.year - a.year)
+    for (const y of completed) {
+      const vwap = buildMarketView(y.orders, y.trades).vwap
+      if (vwap !== null) return vwap
+      if (y.auctionPrice) return y.auctionPrice
+    }
+    return this.state.config.penaltyRate
   }
 
   // ---- player actions ----

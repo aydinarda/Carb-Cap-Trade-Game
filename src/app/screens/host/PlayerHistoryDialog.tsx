@@ -44,6 +44,7 @@ export function PlayerHistoryDialog({
                 <th className="py-2 pr-3 font-normal text-right">Realized</th>
                 <th className="py-2 pr-3 font-normal text-right">Free</th>
                 <th className="py-2 pr-3 font-normal text-right">Auction</th>
+                <th className="py-2 pr-3 font-normal text-right">Banked</th>
                 <th className="py-2 pr-3 font-normal text-right">Traded</th>
                 <th className="py-2 pr-3 font-normal text-right">Cut</th>
                 <th className="py-2 pr-3 font-normal text-right">Held</th>
@@ -58,6 +59,7 @@ export function PlayerHistoryDialog({
                   <td className="py-2 pr-3 text-right text-accent">{num(r.realized)}</td>
                   <td className="py-2 pr-3 text-right">{num(r.free)}</td>
                   <td className="py-2 pr-3 text-right">{num(r.regulatorGranted)}</td>
+                  <td className="py-2 pr-3 text-right">{r.banked ? num(r.banked) : '—'}</td>
                   <td className="py-2 pr-3 text-right">{num(r.traded)}</td>
                   <td className="py-2 pr-3 text-right">{Math.round(r.abatement * 100)}%</td>
                   <td className="py-2 pr-3 text-right">{num(r.creditsHeld)}</td>

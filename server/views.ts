@@ -163,6 +163,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
         ? [...record.trades.filter((t) => t.buyerId === player.id || t.sellerId === player.id)].reverse()
         : [],
       abatement: record?.abatement[player.id] ?? null,
+      banked: record ? round1(record.carriedIn[player.id] ?? 0) : null,
       creditsHeld: record && revealed ? session.creditsHeld(player.id) : null,
       expectedEmission: record ? expectedEmission(player, state.currentYear) : null,
       realized: settled ? (record?.realized[player.id] ?? null) : null,
@@ -180,6 +181,7 @@ function buildPlayerHistory(session: Session): Record<string, PlayerHistoryYear[
     history[p.id] = years.map((y) => {
       const free = round1(y.freeAllocation[p.id] ?? 0)
       const granted = round1(y.regulatorGranted[p.id] ?? 0)
+      const carriedIn = round1(y.carriedIn[p.id] ?? 0)
       const traded = tradedNet(y.trades, p.id)
       return {
         year: y.year,
@@ -189,7 +191,8 @@ function buildPlayerHistory(session: Session): Record<string, PlayerHistoryYear[
         regulatorGranted: granted,
         traded,
         abatement: round1(y.abatement[p.id] ?? 0),
-        creditsHeld: round1(free + granted + traded),
+        banked: carriedIn,
+        creditsHeld: round1(free + granted + carriedIn + traded),
         netPosition: y.netPosition[p.id] ?? null,
         settlement: y.settlement?.[p.id] ?? null,
       }
@@ -232,6 +235,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
           : null,
       traded: record ? tradedNet(record.trades, p.id) : null,
       abatement: record?.abatement[p.id] ?? null,
+      banked: record ? round1(record.carriedIn[p.id] ?? 0) : null,
       creditsHeld: record ? session.creditsHeld(p.id) : null,
       expectedEmission: round1(expectedEmission(p, state.currentYear)),
       realized: record?.realized[p.id] ?? null,

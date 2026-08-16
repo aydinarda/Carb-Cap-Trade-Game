@@ -24,6 +24,12 @@ export interface Player extends PlayerProfile {
   score: number
   /** Cumulative best-achievable cost — the per-company optimum benchmark. */
   optimalScore: number
+  /**
+   * EU-ETS carry balance rolled between years: positive = allowances banked from a
+   * surplus year; negative = a make-good debt from an uncovered year. Added to the
+   * next year's holdings; monetized at the final market price when the game ends.
+   */
+  bankedCredits: number
 }
 
 export type OrderSide = 'buy' | 'sell'
@@ -81,6 +87,8 @@ export interface YearRecord {
   regulatorGranted: Record<string, number>
   /** Auctioning mode: the auction supply (= the cap). Unused for G/B. */
   regulatorPool: number
+  /** EU-ETS carry banked (+) or owed (−) coming INTO this year, per company. */
+  carriedIn: Record<string, number>
   realized: Record<string, number>
   /** Continuous order-book market: resting/filled orders and executed trades. */
   orders: Order[]
@@ -149,7 +157,9 @@ export interface YouView {
   myTrades: Trade[]
   /** Fraction of expected emissions this company chose to abate (0..1). */
   abatement: number | null
-  /** free + regulatorGranted + net traded, this year. */
+  /** EU-ETS carry into this year: banked allowances (+) or make-good debt (−). */
+  banked: number | null
+  /** free + regulatorGranted + banked + net traded, this year. */
   creditsHeld: number | null
   /** Mean emission players plan against; known from the cap stage on. */
   expectedEmission: number | null
@@ -225,6 +235,8 @@ export interface HostPlayerRow extends PublicPlayerInfo {
   /** Net credits bought (+) or sold (−) in the market this year. */
   traded: number | null
   abatement: number | null
+  /** EU-ETS carry into this year: banked (+) or debt (−). */
+  banked: number | null
   creditsHeld: number | null
   expectedEmission: number
   realized: number | null
@@ -242,6 +254,8 @@ export interface PlayerHistoryYear {
   /** Net credits traded in the market (bought − sold). */
   traded: number
   abatement: number
+  /** EU-ETS carry into this year: banked (+) or debt (−). */
+  banked: number
   creditsHeld: number
   netPosition: number | null
   settlement: PlayerSettlement | null

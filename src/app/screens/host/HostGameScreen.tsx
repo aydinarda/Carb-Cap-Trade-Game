@@ -246,6 +246,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                   <th className="py-2 pr-3 font-normal">Industry</th>
                   <th className="py-2 pr-3 font-normal text-right">Free</th>
                   <th className="py-2 pr-3 font-normal text-right">Auction</th>
+                  <th className="py-2 pr-3 font-normal text-right">Banked</th>
                   <th className="py-2 pr-3 font-normal text-right">Traded</th>
                   <th className="py-2 pr-3 font-normal text-right">Held</th>
                   <th className="py-2 pr-3 font-normal text-right">Expected</th>
@@ -271,6 +272,18 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                     </td>
                     <td className="py-2 pr-3 font-mono text-right">
                       {p.regulatorGranted?.toLocaleString() ?? '—'}
+                    </td>
+                    <td
+                      className={cn(
+                        'py-2 pr-3 font-mono text-right',
+                        p.banked !== null && p.banked > 0 && 'text-primary',
+                        p.banked !== null && p.banked < 0 && 'text-destructive',
+                        (p.banked === null || p.banked === 0) && 'text-muted-foreground',
+                      )}
+                    >
+                      {p.banked
+                        ? `${p.banked > 0 ? '+' : ''}${p.banked.toLocaleString()}`
+                        : '—'}
                     </td>
                     <td className="py-2 pr-3 font-mono text-right">
                       {p.traded !== null

@@ -12,7 +12,9 @@ import { round1 } from './rng'
  *  - yearCost = abatementCost + purchaseCost − sellIncome + penaltyCost, added to
  *    the cumulative score. Can be negative for a clean company that sells surplus.
  *
- * The penalty rate is the effective ceiling on the market price.
+ * The penalty is a real EU-ETS fine, not a price ceiling: the uncovered shortfall
+ * ALSO carries forward as a make-good debt (handled in the session), so defaulting
+ * costs the fine now plus buying the missing allowances later.
  */
 export function settleYear(
   realized: Record<string, number>,

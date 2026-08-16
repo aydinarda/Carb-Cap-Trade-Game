@@ -23,7 +23,16 @@ function player(
   yearsDescending.forEach((value, i) => {
     emissions[10 - i] = value
   })
-  return { id, name: id, industry, emissions, connected: true, score: 0, optimalScore: 0 }
+  return {
+    id,
+    name: id,
+    industry,
+    emissions,
+    connected: true,
+    score: 0,
+    optimalScore: 0,
+    bankedCredits: 0,
+  }
 }
 
 export const XLSX_PLAYERS: {

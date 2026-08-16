@@ -1,11 +1,16 @@
-import { Flag, PartyPopper, Trophy } from 'lucide-react'
+import { AlertTriangle, Flag, Landmark, PartyPopper, Trophy } from 'lucide-react'
 import type { PlayerSnapshot } from '@shared/types'
 import { LeaderboardTable, SettlementCard, StatCard } from '../../components/game/cards'
 import { ClassYearChart, EmissionHistoryChart } from '../../components/game/charts'
+import { cn } from '../../components/game/theme'
+
+const r1 = (n: number) => Math.round(n * 10) / 10
 
 export function YearSummaryScreen({ snap }: { snap: PlayerSnapshot }) {
   const ended = snap.phase === 'ended'
   const agg = snap.classAggregate
+  // Carry after this year = held − realized = −netPosition. + banked, − make-good debt.
+  const carry = snap.you.netPosition !== null ? r1(-snap.you.netPosition) : 0
 
   return (
     <div className="flex flex-col gap-5">
@@ -20,6 +25,39 @@ export function YearSummaryScreen({ snap }: { snap: PlayerSnapshot }) {
 
       {snap.you.settlement && (
         <SettlementCard settlement={snap.you.settlement} scoreTotal={snap.you.score} />
+      )}
+
+      {snap.you.settlement && carry !== 0 && (
+        <div
+          className={cn(
+            'rounded-xl border p-3 flex items-center gap-2.5 text-sm font-mono',
+            carry > 0
+              ? 'border-primary/40 bg-primary/5 text-primary'
+              : 'border-destructive/40 bg-destructive/5 text-destructive',
+          )}
+        >
+          {carry > 0 ? (
+            <>
+              <Landmark size={15} className="shrink-0" />
+              <span>
+                <strong>Banked +{carry}</strong> credits.{' '}
+                {ended
+                  ? 'Cashed out at the final market price.'
+                  : 'Carried into next year — already counts toward your holdings.'}
+              </span>
+            </>
+          ) : (
+            <>
+              <AlertTriangle size={15} className="shrink-0" />
+              <span>
+                <strong>Make-good debt {carry}</strong>.{' '}
+                {ended
+                  ? 'Bought back at the final market price.'
+                  : "Carried into next year on top of the penalty — cover it or you'll be fined again."}
+              </span>
+            </>
+          )}
+        </div>
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
