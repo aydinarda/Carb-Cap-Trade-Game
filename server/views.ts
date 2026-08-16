@@ -79,14 +79,24 @@ function classAggregate(session: Session): ClassAggregate {
     }))
 
   const settlement = record?.settlement
+  const auctioning = state.capMode === 'auctioning'
+  // Under auctioning the cap-stage input is bids, not regulator requests.
+  const capDemand = record
+    ? auctioning
+      ? round1(Object.values(record.auctionBid).reduce((a, b) => a + b.qty, 0))
+      : sum(record.regulatorRequest)
+    : null
+  const capSubmitted = record
+    ? Object.keys(auctioning ? record.auctionBid : record.regulatorRequest).length
+    : 0
 
   return {
     totalBaselineEmissions: totalBaseline,
     freeCreditLimit: state.freeCreditLimit !== null ? round1(state.freeCreditLimit) : null,
     totalFreeAllocation: record ? sum(record.freeAllocation) : null,
-    totalRegulatorRequests: record ? sum(record.regulatorRequest) : null,
+    totalRegulatorRequests: capDemand,
     totalRegulatorGranted: record ? sum(record.regulatorGranted) : null,
-    submittedCount: record ? Object.keys(record.regulatorRequest).length : 0,
+    submittedCount: capSubmitted,
     totalExpected: record
       ? round1(players.reduce((s, p) => s + expectedEmission(p, state.currentYear), 0))
       : null,
@@ -134,6 +144,8 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     regulatorPrice: state.config.regulatorPrice,
     sellPrice: state.config.sellPrice,
     abatementCoeff: state.config.abatement[player.industry],
+    auctionSupply: state.capMode === 'auctioning' ? (record?.regulatorPool ?? 0) : 0,
+    auctionPrice: record?.auctionPrice ?? null,
     classAggregate: state.phase === 'lobby' ? null : classAggregate(session),
     leaderboard: settled ? leaderboard(session) : null,
     you: {
@@ -146,6 +158,11 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
       regulatorRequest: record?.regulatorRequest[player.id] ?? null,
       regulatorGranted:
         record && Object.keys(record.regulatorGranted).length > 0
+          ? (record.regulatorGranted[player.id] ?? 0)
+          : null,
+      auctionBid: record?.auctionBid[player.id] ?? null,
+      auctionAward:
+        record && record.auctionPrice !== null
           ? (record.regulatorGranted[player.id] ?? 0)
           : null,
       secondaryBought: record?.secondaryBought[player.id] ?? null,
@@ -204,6 +221,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
     config: state.config,
     classAggregate: classAggregate(session),
     leaderboard: leaderboard(session),
+    auctionPrice: record?.auctionPrice ?? null,
     playerHistory: buildPlayerHistory(session),
     players: state.players.map((p) => ({
       id: p.id,

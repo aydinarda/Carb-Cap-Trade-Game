@@ -45,14 +45,16 @@ export function SettingsPanel({ config }: { config: SessionConfig }) {
   const [benchmark, setBenchmark] = useState<Record<string, string>>(() =>
     Object.fromEntries(Object.entries(config.benchmark).map(([k, v]) => [k, String(v)])),
   )
+  const [auctionCapRatio, setAuctionCapRatio] = useState(String(config.auctionCapRatio))
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     setRegulatorPrice(String(config.regulatorPrice))
     setSellPrice(String(config.sellPrice))
     setPenalty(String(config.penaltyRate))
+    setAuctionCapRatio(String(config.auctionCapRatio))
     setBenchmark(Object.fromEntries(Object.entries(config.benchmark).map(([k, v]) => [k, String(v)])))
-  }, [config.regulatorPrice, config.sellPrice, config.penaltyRate, config.benchmark])
+  }, [config.regulatorPrice, config.sellPrice, config.penaltyRate, config.auctionCapRatio, config.benchmark])
 
   const priceHigh = Number(penalty) <= Number(regulatorPrice)
   const arbitrage = Number(sellPrice) > Number(regulatorPrice)
@@ -63,6 +65,7 @@ export function SettingsPanel({ config }: { config: SessionConfig }) {
       regulatorPrice: Number(regulatorPrice),
       sellPrice: Number(sellPrice),
       penaltyRate: Number(penalty),
+      auctionCapRatio: Number(auctionCapRatio),
       benchmark: Object.fromEntries(
         Object.entries(benchmark).map(([k, v]) => [k, Number(v)]),
       ),
@@ -98,6 +101,7 @@ export function SettingsPanel({ config }: { config: SessionConfig }) {
       {field('Buy price', regulatorPrice, setRegulatorPrice, 'cost per credit bought')}
       {field('Sell price', sellPrice, setSellPrice, 'income per credit sold back')}
       {field('Penalty rate', penalty, setPenalty, 'cost per tCO₂ uncovered')}
+      {field('Auction supply ratio', auctionCapRatio, setAuctionCapRatio, '× baseline (auctioning; ≤1 = scarcer)')}
       {priceHigh && (
         <p className="text-[10px] text-destructive font-mono">
           Penalty rate should exceed the buy price, or covering costs more than defaulting.

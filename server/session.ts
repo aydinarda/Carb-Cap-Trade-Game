@@ -2,6 +2,7 @@ import { customAlphabet, nanoid } from 'nanoid'
 import {
   BASELINE_YEAR,
   DEFAULT_ABATEMENT,
+  DEFAULT_AUCTION_CAP_RATIO,
   DEFAULT_BENCHMARK,
   DEFAULT_PENALTY_RATE,
   DEFAULT_REGULATOR_PRICE,
@@ -16,6 +17,7 @@ import {
 import {
   abatementCost,
   CAP_MECHANISMS,
+  clearAuction,
   computeNetPositions,
   createRng,
   expectedEmission,
@@ -71,6 +73,7 @@ export class Session {
         abatement: Object.fromEntries(
           INDUSTRY_NAMES.map((i) => [i, { ...DEFAULT_ABATEMENT[i] }]),
         ) as Record<Industry, { a: number; b: number }>,
+        auctionCapRatio: DEFAULT_AUCTION_CAP_RATIO,
       },
       freeCreditLimit: null,
     }
@@ -110,15 +113,6 @@ export class Session {
         (record.regulatorGranted[playerId] ?? 0) +
         (record.secondaryBought[playerId] ?? 0) -
         (record.secondarySold[playerId] ?? 0),
-    )
-  }
-
-  /** Total credits a player bought for money this year (regulator + secondary). */
-  purchased(playerId: string): number {
-    const record = this.currentYearRecord()
-    if (!record) return 0
-    return round1(
-      (record.regulatorGranted[playerId] ?? 0) + (record.secondaryBought[playerId] ?? 0),
     )
   }
 
@@ -170,11 +164,12 @@ export class Session {
     regulatorPrice?: number
     sellPrice?: number
     penaltyRate?: number
+    auctionCapRatio?: number
     benchmark?: Partial<Record<Industry, number>>
     abatement?: Partial<Record<Industry, { a: number; b: number }>>
   }) {
     this.requirePhase('lobby', 'yearSummary')
-    for (const key of ['regulatorPrice', 'sellPrice', 'penaltyRate'] as const) {
+    for (const key of ['regulatorPrice', 'sellPrice', 'penaltyRate', 'auctionCapRatio'] as const) {
       const value = settings[key]
       if (value === undefined) continue
       if (!Number.isFinite(value) || value < 0) {
@@ -262,19 +257,25 @@ export class Session {
       this.state.config,
     )
     const totalFree = Object.values(freeAllocation).reduce((a, b) => a + b, 0)
+    // The cap-stage supply. Grandfathering/benchmarking: the slice of the baseline
+    // not given for free (regulator sale). Auctioning: the auction cap =
+    // auctionCapRatio × Σbaseline (nothing is free).
+    const pool =
+      this.state.capMode === 'auctioning'
+        ? round1(this.state.config.auctionCapRatio * this.totalBaseline())
+        : round1(Math.max(0, this.totalBaseline() - totalFree))
     this.state.years[year] = {
       year,
       freeAllocation,
       regulatorRequest: {},
       regulatorGranted: {},
-      // The regulator sells whatever slice of the baseline is not given out for
-      // free, so the cap stays at 100% of the baseline: grandfathering → ~20%,
-      // benchmarking → the remainder, auctioning → 100% (nothing is free).
-      regulatorPool: round1(Math.max(0, this.totalBaseline() - totalFree)),
+      regulatorPool: pool,
       realized: {},
       secondaryBought: {},
       secondarySold: {},
       abatement: {},
+      auctionBid: {},
+      auctionPrice: null,
       settlement: null,
       netPosition: {},
     }
@@ -284,11 +285,19 @@ export class Session {
   closeCapStage() {
     this.requirePhase('cap')
     const record = this.currentYearRecord()!
-    // Stragglers default to requesting 0
-    for (const player of this.state.players) {
-      record.regulatorRequest[player.id] ??= 0
+    if (this.state.capMode === 'auctioning') {
+      // Sealed-bid uniform-price auction: highest bidders win the fixed supply,
+      // everyone pays the single clearing price.
+      const { clearingPrice, awarded } = clearAuction(record.auctionBid, record.regulatorPool)
+      record.regulatorGranted = awarded
+      record.auctionPrice = clearingPrice
+    } else {
+      // Stragglers default to requesting 0
+      for (const player of this.state.players) {
+        record.regulatorRequest[player.id] ??= 0
+      }
+      record.regulatorGranted = grantRegulator(record.regulatorRequest, record.regulatorPool)
     }
-    record.regulatorGranted = grantRegulator(record.regulatorRequest, record.regulatorPool)
     // Emissions are NOT realized here — players trade against their expected
     // (mean) emission; the actual realization happens at year end (closeTrade).
     this.state.phase = 'reveal'
@@ -309,26 +318,32 @@ export class Session {
       player.emissions[record.year] = record.realized[player.id]
     }
     const held: Record<string, number> = {}
-    const purchased: Record<string, number> = {}
+    const purchaseCost: Record<string, number> = {}
     const sold: Record<string, number> = {}
     const abateCost: Record<string, number> = {}
     const optimal: Record<string, number> = {}
     const { regulatorPrice, sellPrice, penaltyRate } = this.state.config
+    // Cap-stage credits cost the auction clearing price under auctioning, else the
+    // fixed regulator price. Secondary buys always cost the fixed price.
+    const capPrice =
+      this.state.capMode === 'auctioning' ? (record.auctionPrice ?? 0) : regulatorPrice
     for (const player of this.state.players) {
       held[player.id] = this.creditsHeld(player.id)
-      purchased[player.id] = this.purchased(player.id)
+      const capBought = round1(record.regulatorGranted[player.id] ?? 0)
+      const secBought = round1(record.secondaryBought[player.id] ?? 0)
+      purchaseCost[player.id] = round1(capBought * capPrice + secBought * regulatorPrice)
       sold[player.id] = round1(record.secondarySold[player.id] ?? 0)
       const expected = expectedEmission(player, record.year)
       const coeff = this.state.config.abatement[player.industry]
       abateCost[player.id] = abatementCost(expected, record.abatement[player.id] ?? 0, coeff)
-      // Best achievable cost for this company (abate to r*, cover residual vs its free credits)
+      // Best achievable cost for this company (abate to r*, cover residual vs its free credits).
+      // Under auctioning free credits are 0 and the effective buy price is the clearing price.
       const free = round1(
         (record.freeAllocation[player.id] ?? 0) + (record.regulatorGranted[player.id] ?? 0),
       )
-      optimal[player.id] = optimalYearCost(expected, free, coeff, regulatorPrice, sellPrice)
+      optimal[player.id] = optimalYearCost(expected, free, coeff, capPrice || regulatorPrice, sellPrice)
     }
-    const { settlement } = settleYear(record.realized, held, purchased, sold, abateCost, {
-      regulatorPrice,
+    const { settlement } = settleYear(record.realized, held, purchaseCost, sold, abateCost, {
       sellPrice,
       penaltyRate,
     })
@@ -354,6 +369,9 @@ export class Session {
 
   requestCredits(playerId: string, qty: number) {
     this.requirePhase('cap')
+    if (this.state.capMode === 'auctioning') {
+      throw new GameError('WRONG_MODE', 'Under auctioning, submit a bid instead of requesting.')
+    }
     if (!Number.isFinite(qty) || qty < 0) {
       throw new GameError('BAD_REQUEST', 'Requested credits must be a non-negative number.')
     }
@@ -368,6 +386,25 @@ export class Session {
       )
     }
     record.regulatorRequest[playerId] = round1(qty)
+  }
+
+  /**
+   * Cap stage under auctioning: submit a sealed bid (quantity + max price per
+   * credit). Resolved by a uniform-price auction when the cap stage closes.
+   */
+  submitBid(playerId: string, qty: number, price: number) {
+    this.requirePhase('cap')
+    if (this.state.capMode !== 'auctioning') {
+      throw new GameError('WRONG_MODE', 'Bidding is only for the auctioning mode.')
+    }
+    if (!Number.isFinite(qty) || qty < 0) {
+      throw new GameError('BAD_BID', 'Bid quantity must be a non-negative number.')
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      throw new GameError('BAD_BID', 'Bid price must be a non-negative number.')
+    }
+    const record = this.currentYearRecord()!
+    record.auctionBid[playerId] = { qty: round1(qty), price: round1(price) }
   }
 
   /**

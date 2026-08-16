@@ -19,6 +19,7 @@ export interface ClientToServerEvents {
       penaltyRate?: number
       benchmark?: Partial<Record<Industry, number>>
       abatement?: Partial<Record<Industry, { a: number; b: number }>>
+      auctionCapRatio?: number
     },
     ack: Ack,
   ) => void
@@ -33,8 +34,10 @@ export interface ClientToServerEvents {
     payload: { roomCode: string; name: string; industry: Industry },
     ack: Ack<{ playerId: string; token: string; profile: PlayerProfile }>,
   ) => void
-  /** Cap stage: how many credits to request from the regulator pool. */
+  /** Cap stage (grandfathering/benchmarking): credits to request from the regulator pool. */
   'player:requestCredits': (payload: { qty: number }, ack: Ack) => void
+  /** Cap stage (auctioning): sealed bid — quantity and max price per credit. */
+  'player:submitBid': (payload: { qty: number; price: number }, ack: Ack) => void
   /** Trade stage: buy credits from the regulator at the fixed price (unlimited). */
   'player:buyCredits': (payload: { qty: number }, ack: Ack) => void
   /** Trade stage: sell held credits back at the sell price. */

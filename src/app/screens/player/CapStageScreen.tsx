@@ -9,6 +9,7 @@ import { Slider } from '../../components/ui/slider'
 import { AllocationCard, WarningBanner } from '../../components/game/cards'
 import { EmissionHistoryChart } from '../../components/game/charts'
 import { useGame } from '../../net/GameContext'
+import { AuctionBidPanel } from './AuctionBidPanel'
 
 export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
   const { requestCredits } = useGame()
@@ -35,6 +36,20 @@ export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
     const ok = await requestCredits(qty)
     setBusy(false)
     if (ok) toast.success(`Request submitted: ${qty} credits from the regulator`)
+  }
+
+  if (snap.capMode === 'auctioning') {
+    return (
+      <div className="flex flex-col gap-5">
+        <AuctionBidPanel snap={snap} />
+        <div className="rounded-xl border border-border bg-card/70 p-5">
+          <div className="text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
+            Your emission history
+          </div>
+          <EmissionHistoryChart you={snap.you} height={180} />
+        </div>
+      </div>
+    )
   }
 
   return (

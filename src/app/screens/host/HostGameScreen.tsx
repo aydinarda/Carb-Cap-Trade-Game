@@ -59,7 +59,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           {snap.phase === 'cap' && (
             <div>
               <div className="flex justify-between text-xs font-mono text-muted-foreground mb-1.5">
-                <span>Requests submitted</span>
+                <span>{snap.capMode === 'auctioning' ? 'Bids submitted' : 'Requests submitted'}</span>
                 <span className="text-foreground">
                   {agg.submittedCount} / {snap.players.length}
                 </span>
@@ -75,7 +75,13 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           )}
           {(snap.phase === 'reveal' || snap.phase === 'yearSummary') && (
             <span className="text-sm text-muted-foreground font-mono">
-              Year {snap.currentYear} · waiting on you to advance the game
+              {snap.capMode === 'auctioning' && snap.auctionPrice !== null ? (
+                <>
+                  Auction cleared at{' '}
+                  <span className="text-accent font-bold">{snap.auctionPrice}</span> / credit ·{' '}
+                </>
+              ) : null}
+              Year {snap.currentYear} · waiting on you to advance
             </span>
           )}
           {snap.phase === 'ended' && (
@@ -110,11 +116,19 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           hint="this year, by mode"
         />
         <StatCard
-          label="Regulator pool"
+          label={snap.capMode === 'auctioning' ? 'Auction demand / supply' : 'Regulator pool'}
           value={`${requests.toLocaleString()} / ${pool.toLocaleString()}`}
           unit="cr"
           tone={requests > pool ? 'bad' : 'default'}
-          hint={requests > pool ? 'oversubscribed — pro-rata' : 'requests vs pool'}
+          hint={
+            snap.capMode === 'auctioning'
+              ? requests > pool
+                ? 'oversubscribed — price bites'
+                : 'bids vs supply'
+              : requests > pool
+                ? 'oversubscribed — pro-rata'
+                : 'requests vs pool'
+          }
           icon={<Landmark size={12} />}
         />
         <StatCard

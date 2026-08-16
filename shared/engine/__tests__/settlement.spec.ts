@@ -1,23 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import { settleYear } from '../settlement'
 
-const rates = { regulatorPrice: 10, sellPrice: 10, penaltyRate: 20 }
-const noAbate = { P1: 0, P2: 0 }
+// purchaseCost is now passed in as MONEY (the caller computes it from the auction
+// clearing price or the fixed regulator price). sellIncome uses sellPrice here.
+const rates = { sellPrice: 10, penaltyRate: 20 }
 
 describe('settleYear (cost ledger)', () => {
   it('charges only the purchase cost when fully covered', () => {
     const { settlement } = settleYear(
       { P1: 100, P2: 200 },
       { P1: 120, P2: 200 }, // held ≥ realized → no shortage
-      { P1: 40, P2: 0 }, // P1 bought 40 credits
+      { P1: 400, P2: 0 }, // P1 spent 400 acquiring credits
       { P1: 0, P2: 0 }, // nothing sold
-      noAbate,
+      { P1: 0, P2: 0 }, // no abatement
       rates,
     )
     expect(settlement.P1).toEqual({
       shortage: 0,
       abatementCost: 0,
-      purchaseCost: 400, // 40 × 10
+      purchaseCost: 400,
       sellIncome: 0,
       penaltyCost: 0,
       yearCost: 400,
@@ -51,12 +52,12 @@ describe('settleYear (cost ledger)', () => {
     })
   })
 
-  it('nets abatement, purchase, sell income and penalty into the year cost', () => {
-    // abate 150, bought 30 (300) − sold 10 (100) + shortage 10 (200) = 550
+  it('nets abatement, purchase cost, sell income and penalty into the year cost', () => {
+    // abate 150 + spent 300 − sold 10 (100) + shortage 10 (200) = 550
     const { settlement } = settleYear(
       { P1: 100 },
       { P1: 90 },
-      { P1: 30 },
+      { P1: 300 },
       { P1: 10 },
       { P1: 150 },
       rates,

@@ -67,4 +67,5 @@ export const DEFAULT_CONFIG = {
     'Manufacturing & Chemicals': { a: 4, b: 20 },
     Transport: { a: 5, b: 20 },
   },
+  auctionCapRatio: 1.0,
 }

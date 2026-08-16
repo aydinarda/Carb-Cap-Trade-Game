@@ -56,6 +56,10 @@ export interface YearRecord {
   secondarySold: Record<string, number>
   /** Fraction of expected emissions each company chose to abate (0..1). */
   abatement: Record<string, number>
+  /** Auctioning mode: each company's sealed bid at the cap stage. */
+  auctionBid: Record<string, { qty: number; price: number }>
+  /** Auctioning mode: uniform clearing price after the auction closes. */
+  auctionPrice: number | null
   settlement: Record<string, PlayerSettlement> | null
   netPosition: Record<string, number>
 }
@@ -74,6 +78,8 @@ export interface SessionConfig {
   benchmark: Record<Industry, number>
   /** Per-sector marginal abatement cost coefficients (MAC = a + b·fraction). */
   abatement: Record<Industry, { a: number; b: number }>
+  /** Auctioning supply = auctionCapRatio × Σbaseline (host-tunable, ≤ 1 = scarcer). */
+  auctionCapRatio: number
 }
 
 export interface GameState {
@@ -108,6 +114,10 @@ export interface YouView {
   freeAllocation: number | null
   regulatorRequest: number | null
   regulatorGranted: number | null
+  /** Auctioning mode: this company's submitted bid. */
+  auctionBid: { qty: number; price: number } | null
+  /** Auctioning mode: credits won at the auction (= regulatorGranted). */
+  auctionAward: number | null
   /** Credits bought at the fixed price in the trade stage. */
   secondaryBought: number | null
   /** Credits sold back in the trade stage. */
@@ -151,6 +161,10 @@ export interface PlayerSnapshot {
   sellPrice: number
   /** This player's sector MAC coefficients, for live abatement-cost preview. */
   abatementCoeff: { a: number; b: number }
+  /** Auctioning mode: total supply on offer this year (= the cap). */
+  auctionSupply: number
+  /** Auctioning mode: uniform clearing price, once the auction has closed. */
+  auctionPrice: number | null
   classAggregate: ClassAggregate | null
   leaderboard: LeaderboardRow[] | null // visible from yearSummary on
   you: YouView
@@ -226,6 +240,8 @@ export interface HostSnapshot {
   regulatorPool: number | null
   config: SessionConfig
   leaderboard: LeaderboardRow[]
+  /** Auctioning mode: this year's clearing price (null before the auction closes). */
+  auctionPrice: number | null
   /** Full year-by-year history per player (host-only). */
   playerHistory: Record<string, PlayerHistoryYear[]>
 }

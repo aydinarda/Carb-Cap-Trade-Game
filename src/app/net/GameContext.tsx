@@ -57,6 +57,7 @@ interface GameContextValue {
     payload?: Record<string, unknown>,
   ) => Promise<boolean>
   requestCredits: (qty: number) => Promise<boolean>
+  submitBid: (qty: number, price: number) => Promise<boolean>
   buyCredits: (qty: number) => Promise<boolean>
   sellCredits: (qty: number) => Promise<boolean>
   abate: (fraction: number) => Promise<boolean>
@@ -147,6 +148,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }
 
     const requestCredits = (qty: number) => playerRequest('player:requestCredits', { qty })
+    const submitBid = (qty: number, price: number) =>
+      playerRequest('player:submitBid', { qty, price })
     const buyCredits = (qty: number) => playerRequest('player:buyCredits', { qty })
     const sellCredits = (qty: number) => playerRequest('player:sellCredits', { qty })
     const abate = (fraction: number) => playerRequest('player:abate', { fraction })
@@ -168,6 +171,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       createSession,
       hostAction,
       requestCredits,
+      submitBid,
       buyCredits,
       sellCredits,
       abate,
