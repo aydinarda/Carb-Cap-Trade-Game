@@ -1,4 +1,5 @@
-import { ArrowRightLeft, BookOpen, History, Leaf, Send } from 'lucide-react'
+import { ArrowRightLeft, BookOpen, Gavel, History, Leaf, Send } from 'lucide-react'
+import { motion } from 'motion/react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import type { OrderSide, PlayerSnapshot } from '@shared/types'
@@ -17,6 +18,7 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   const { a, b } = snap.abatementCoeff
   const market = snap.market
   const marketPrice = market?.lastPrice ?? market?.vwap ?? null
+  const auctionPrice = snap.auctionPrice
 
   const rawExpected = snap.you.expectedEmission ?? 0
   const held = snap.you.creditsHeld ?? 0
@@ -58,11 +60,9 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5">
-      {/* Main column */}
+    <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5">
+      {/* Left: decisions */}
       <div className="flex flex-col gap-5">
-        {market && <MarketTicker market={market} />}
-
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatCard label="Expected (after cuts)" value={postExpected} unit="tCO₂" tone="accent" />
           <StatCard label="Credits held" value={held} unit="cr" hint="free/auction ± trades" />
@@ -176,7 +176,7 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
                 className="w-28 font-mono"
-                placeholder={marketPrice?.toString() ?? '10'}
+                placeholder={(auctionPrice ?? marketPrice)?.toString() ?? '10'}
               />
             </div>
             <Button
@@ -193,28 +193,52 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
             </p>
           )}
         </div>
+      </div>
 
-        {/* Order book */}
+      {/* Right: live market — auction signal, order book, trades feed */}
+      <div className="flex flex-col gap-4 lg:sticky lg:top-3 h-fit">
+        {auctionPrice !== null && (
+          <motion.div
+            className="rounded-xl border border-accent/60 bg-accent/10 p-4 text-center"
+            animate={{ boxShadow: ['0 0 0 0 rgba(245,166,35,0.5)', '0 0 0 10px rgba(245,166,35,0)'] }}
+            transition={{ duration: 1.6, repeat: Infinity, ease: 'easeOut' }}
+          >
+            <div className="flex items-center justify-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+              <Gavel size={11} className="text-accent" />
+              Auction cleared at
+            </div>
+            <div className="text-4xl font-black font-mono text-accent leading-none mt-1">
+              {auctionPrice}
+            </div>
+            <div className="text-[10px] text-muted-foreground font-mono mt-1">
+              reference price / credit — anchor your bids &amp; asks around this
+            </div>
+          </motion.div>
+        )}
+
+        {market && <MarketTicker market={market} />}
+
         {market && (
-          <div className="rounded-xl border border-border bg-card/70 p-5">
+          <div className="rounded-xl border border-border bg-card/70 p-4">
             <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
               <BookOpen size={12} className="text-primary" />
-              Order book — your orders highlighted (others anonymised)
+              Order book — yours highlighted
             </div>
             <OrderBook market={market} youId={snap.you.id} onCancel={(id) => void cancelOrder(id)} />
           </div>
         )}
-      </div>
 
-      {/* Right: live trades feed (chat-like) */}
-      <div className="rounded-xl border border-border bg-card/70 p-4 lg:sticky lg:top-3 h-fit">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
-          <History size={12} className="text-primary" />
-          Live trades
-        </div>
-        <div className="max-h-[70vh] overflow-y-auto">
-          {market && <TradesFeed trades={market.trades} youId={snap.you.id} max={40} />}
-        </div>
+        {market && (
+          <div className="rounded-xl border border-border bg-card/70 p-4">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
+              <History size={12} className="text-primary" />
+              Live trades
+            </div>
+            <div className="max-h-[40vh] overflow-y-auto">
+              <TradesFeed trades={market.trades} youId={snap.you.id} max={40} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
