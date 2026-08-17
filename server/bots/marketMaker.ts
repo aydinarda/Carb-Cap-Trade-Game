@@ -47,7 +47,11 @@ export function trade(ctx: BotCtx): boolean {
   const held = session.creditsHeld(bot.id)
   const skewCap = MM_SKEW_CAP_FRAC * P
   const skew = clamp(MM_SKEW * (held - target), -skewCap, skewCap)
-  const center = anchor - skew
+  // An allowance is never worth more than the penalty — paying it is exactly the
+  // alternative to holding one — so the perceived value is capped there, and with it
+  // every quote derived from it. This binds under a tight benchmark, where the price
+  // rides at the ceiling instead of sitting comfortably below it.
+  const center = Math.min(anchor - skew, P)
   const avg = botAvgCost(record, bot.id)
   const askFloor = avg !== null ? avg + MM_MIN_MARGIN : center + margin
 
@@ -65,8 +69,10 @@ export function trade(ctx: BotCtx): boolean {
   // Rest fresh two-sided quotes around the inventory-shifted centre.
   const bid = clamp(center - margin, 0.1, P - 0.1)
   acted = tryPlace(session, bot.id, 'buy', MM_QUOTE_SIZE, bid) || acted
-  const ask = Math.max(center + margin, askFloor)
-  if (sellCapacity(session, record, bot.id) > 0) {
+  // Capped at the penalty like the bid. If that still clears our profit floor we
+  // quote; if it does not, we sit out rather than sell the book at a loss.
+  const ask = clamp(Math.max(center + margin, askFloor), 0.1, P)
+  if (ask >= askFloor && sellCapacity(session, record, bot.id) > 0) {
     acted = trySell(session, record, bot.id, MM_QUOTE_SIZE, ask) || acted
   }
   return acted

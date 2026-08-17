@@ -126,6 +126,30 @@ describe('bot archetypes under benchmarking (no primary auction)', () => {
     expect(own.some((o) => o.side === 'sell')).toBe(true)
   })
 
+  it('the market maker never quotes above the penalty, even at the ceiling', () => {
+    const s = new Session('benchmarking', 1)
+    const mm = s.addBot('marketMaker')
+    s.addPlayer('Human', 'Power & Utilities')
+    s.addBot('compliance')
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+
+    // Drive the discovered price right up to the ceiling, which is where a tight
+    // benchmark puts it — an unclamped ask used to escape past P from here.
+    const P = s.state.config.penaltyRate
+    s.placeOrder('P2', 'sell', 5, P)
+    s.placeOrder('P3', 'buy', 5, P)
+    expect(s.currentYearRecord()!.market ?? true).toBeTruthy()
+
+    for (let i = 0; i < 4; i++) marketMaker.trade(ctxFor(s, mm.id))
+    const rec = s.currentYearRecord()!
+    for (const o of rec.orders.filter((x) => x.playerId === mm.id)) {
+      expect(o.price).toBeLessThanOrEqual(P)
+    }
+    for (const t of rec.trades) expect(t.price).toBeLessThanOrEqual(P)
+  })
+
   it('a short compliance firm bids up toward the penalty ceiling', () => {
     const s = new Session('benchmarking', 1)
     const bot = s.addBot('compliance', 'Heavy Materials') // dear MAC → cannot self-cover
