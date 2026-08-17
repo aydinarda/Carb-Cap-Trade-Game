@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import { SECTOR_AVERAGE_EMISSIONS, type Industry } from '@shared/constants'
 import type { CapMode, SessionConfig } from '@shared/types'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -94,20 +95,30 @@ export function SettingsPanel({ config }: { config: SessionConfig }) {
     <div className="flex flex-col gap-3">
       {field('Penalty rate', penalty, setPenalty, 'cost per tCO₂ uncovered — market price ceiling')}
       {field('Auction supply ratio', auctionCapRatio, setAuctionCapRatio, '× baseline (auctioning; ≤1 = scarcer)')}
-      {field('Cap reduction / year', capReduction, setCapReduction, 'auction supply × this each year (EU-ETS LRF; 0.97 = −3%/yr)')}
+      {field('Cap reduction / year', capReduction, setCapReduction, 'auction supply AND benchmark × this each year (EU-ETS LRF; 0.97 = −3%/yr)')}
       <div className="pt-1 mt-1 border-t border-border">
         <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-2">
           Benchmark free credits (benchmarking mode)
         </div>
         <div className="flex flex-col gap-2">
-          {Object.keys(benchmark).map((industry) =>
-            field(
+          {(Object.keys(benchmark) as Industry[]).map((industry) => {
+            // Restate the stringency from the value actually in force, so a hand-edit
+            // shows immediately how far below the sector average it lands.
+            const average = SECTOR_AVERAGE_EMISSIONS[industry]
+            const value = Number(benchmark[industry])
+            const belowPct =
+              average > 0 && Number.isFinite(value)
+                ? Math.round((1 - value / average) * 100)
+                : null
+            return field(
               industry,
               benchmark[industry],
               (v) => setBenchmark((b) => ({ ...b, [industry]: v })),
-              'free credits per company',
-            ),
-          )}
+              belowPct !== null
+                ? `${belowPct}% below the ${average.toLocaleString()} t sector average`
+                : 'free credits per company',
+            )
+          })}
         </div>
       </div>
       <Button

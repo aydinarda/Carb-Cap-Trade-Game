@@ -1,5 +1,12 @@
-import { INDUSTRY_NAMES } from '../shared/constants'
-import { buildMarketView, expectedEmission, tradedNet, windowSum } from '../shared/engine'
+import { INDUSTRY_NAMES, SECTOR_AVERAGE_EMISSIONS } from '../shared/constants'
+import {
+  benchmarkFor,
+  buildMarketView,
+  expectedEmission,
+  isPureTrader,
+  tradedNet,
+  windowSum,
+} from '../shared/engine'
 import type {
   ClassAggregate,
   HostSnapshot,
@@ -24,11 +31,6 @@ function publicRoster(session: Session): PublicPlayerInfo[] {
     isBot: p.isBot,
     botType: p.botType,
   }))
-}
-
-/** Pure-trader bots have ~0 emissions, so the skill-vs-optimum metric is meaningless. */
-function isPureTrader(p: Session['state']['players'][number]): boolean {
-  return !!p.isBot && (p.botType === 'marketMaker' || p.botType === 'speculator')
 }
 
 function leaderboard(session: Session): LeaderboardRow[] {
@@ -92,12 +94,16 @@ function classAggregate(session: Session): ClassAggregate {
     .map((y) => ({
       year: y.year,
       totalRealized: sum(y.realized),
-      cap: round1(state.freeCreditLimit ?? 0),
+      // The cap actually in force that year: everything issued, free or sold. Taken
+      // per-year rather than from state.freeCreditLimit, which is computed once and
+      // so would draw a flat line under a tightening benchmark or auction supply.
+      cap: round1(sum(y.freeAllocation) + y.regulatorPool),
     }))
 
   const settlement = record?.settlement
-  const auctioning = state.capMode === 'auctioning'
-  // Only auctioning has a cap-stage input (sealed bids); G/B just get free credits.
+  // Only a mechanism with a primary auction has a cap-stage input (sealed bids);
+  // the free-allocation modes just issue credits.
+  const auctioning = session.usesAuction
   const capDemand =
     record && auctioning
       ? round1(Object.values(record.auctionBid).reduce((a, b) => a + b.qty, 0))
@@ -146,8 +152,16 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     roster: publicRoster(session),
     freeCreditLimit: state.freeCreditLimit !== null ? round1(state.freeCreditLimit) : null,
     abatementCoeff: state.config.abatement[player.industry],
-    auctionSupply: state.capMode === 'auctioning' ? (record?.regulatorPool ?? 0) : 0,
+    auctionSupply: session.usesAuction ? (record?.regulatorPool ?? 0) : 0,
     auctionPrice: record?.auctionPrice ?? null,
+    // Benchmarking: what this player's sector benchmark is worth this year, and the
+    // sector average it is set below — the two numbers the cap-stage panel explains.
+    sectorBenchmark:
+      state.capMode === 'benchmarking'
+        ? benchmarkFor(player, state.currentYear, state.config)
+        : null,
+    sectorAverage:
+      state.capMode === 'benchmarking' ? SECTOR_AVERAGE_EMISSIONS[player.industry] : null,
     prevMarketPrice: session.previousMarketPrice(),
     market:
       record && (state.phase === 'trade' || settled)

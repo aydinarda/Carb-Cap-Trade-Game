@@ -1,3 +1,4 @@
+import { DEFAULT_BENCHMARK } from '../../constants'
 import type { Player } from '../../types'
 
 /**
@@ -62,12 +63,8 @@ export const DEFAULT_CONFIG = {
   historyWindow: 10,
   baselineYear: 10,
   penaltyRate: 20,
-  benchmark: {
-    'Power & Utilities': 800,
-    'Heavy Materials': 640,
-    'Manufacturing & Chemicals': 420,
-    Transport: 240,
-  },
+  // Mirrors the shipped defaults so the two can't drift (600 / 480 / 315 / 180).
+  benchmark: { ...DEFAULT_BENCHMARK },
   abatement: {
     'Power & Utilities': { a: 2, b: 15 },
     'Heavy Materials': { a: 8, b: 30 },

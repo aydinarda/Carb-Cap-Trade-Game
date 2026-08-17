@@ -1,8 +1,17 @@
-import type { CapMode, Player, SessionConfig } from '../types'
+import type { CapMode, Player, SessionConfig, YearRecord } from '../types'
 
+/**
+ * One cap-and-trade allocation regime. Everything mode-specific lives behind this
+ * interface so the session never asks "is this auctioning?" — it asks the mechanism
+ * what to do. A combined regime (e.g. benchmark free allocation plus an auction of
+ * the residual cap) is therefore a new implementation of this interface and a
+ * registry entry, with no changes to the session or the views.
+ */
 export interface CapMechanism {
   readonly mode: CapMode
   readonly implemented: boolean
+  /** Does the cap stage run a sealed-bid primary auction? */
+  readonly usesAuction: boolean
   /** Total free credits available to the class, from the baseline year. */
   computeFreeCreditLimit(players: Player[], config: SessionConfig): number
   /** Per-player free credit allocation for the target year. */
@@ -12,4 +21,16 @@ export interface CapMechanism {
     freeCreditLimit: number,
     config: SessionConfig,
   ): Record<string, number>
+  /** Primary-market supply for the target year; 0 = no primary sale. */
+  poolFor(
+    players: Player[],
+    targetYear: number,
+    config: SessionConfig,
+    totalBaseline: number,
+  ): number
+  /**
+   * Unit price charged for the credits in `regulatorGranted`. `reference` is the
+   * year's opening reference price (last discovered price, else half the penalty).
+   */
+  primaryPrice(record: YearRecord, config: SessionConfig, reference: number): number
 }

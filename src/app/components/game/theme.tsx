@@ -35,14 +35,14 @@ export const MODE_LABELS = {
   },
   benchmarking: {
     label: 'Benchmarking',
-    tagline: 'A flat free allowance per industry',
-    desc: 'Every company in an industry gets the same free credits — the industry benchmark you set — regardless of its own history. The regulator sells the rest at the fixed price.',
+    tagline: 'A sector benchmark set 40% below the sector average',
+    desc: 'The EU model: every company in a sector gets the same free credits — the sector benchmark — regardless of its own history. Set 40% below the sector average, so an average emitter is short and only an efficient one is long. There is no primary sale: close the gap by cutting emissions or on the secondary market.',
     implemented: true,
   },
   auctioning: {
     label: 'Auctioning',
-    tagline: 'No free credits — buy every allowance',
-    desc: 'The modern ETS model: no free credits. Every allowance is bought from the regulator at the fixed price (the full baseline is on sale, pro-rata if oversubscribed).',
+    tagline: 'No free credits — buy every allowance at auction',
+    desc: 'The modern ETS model: no free credits. The regulator puts a fixed supply on offer at a sealed-bid uniform-price auction, and every allowance is bought there or on the secondary market.',
     implemented: true,
   },
 } as const

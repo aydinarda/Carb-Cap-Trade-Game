@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { round1 } from '../../shared/engine'
 import { Session } from '../session'
-import { hostSnapshot } from '../views'
+import { hostSnapshot, playerSnapshot } from '../views'
 
 // leaderboard() and classAggregate() are internal to views.ts; exercise them
 // through hostSnapshot(), which embeds both.
@@ -70,5 +70,44 @@ describe('classAggregate', () => {
     const agg = hostSnapshot(s).classAggregate
     expect(agg.submittedCount).toBe(0)
     expect(agg.totalRegulatorRequests).toBe(null)
+  })
+
+  it('reports the cap actually in force each year, so a tightening benchmark falls', () => {
+    const s = new Session('benchmarking', 1)
+    s.addPlayer('Alice', 'Power & Utilities')
+    s.addPlayer('Bob', 'Transport')
+    s.updateSettings({ capReductionFactor: 0.9 })
+    runFullYear(s)
+    s.advanceYear()
+    s.closeCapStage()
+    s.openTrade()
+    s.closeTrade()
+
+    const { yearHistory } = hostSnapshot(s).classAggregate
+    expect(yearHistory).toHaveLength(2)
+    // The chart's cap line must track the allocation, not the once-computed limit.
+    expect(yearHistory[1].cap).toBe(round1(yearHistory[0].cap * 0.9))
+  })
+})
+
+describe('benchmarking player snapshot', () => {
+  it('carries the sector benchmark and the average it is set below', () => {
+    const s = new Session('benchmarking', 1)
+    s.addPlayer('Alice', 'Power & Utilities')
+    s.startYear()
+    const snap = playerSnapshot(s, 'P1')
+    expect(snap.sectorAverage).toBe(1000) // midpoint of 850..1150
+    expect(snap.sectorBenchmark).toBe(600) // 40% below it
+    expect(snap.you.freeAllocation).toBe(600)
+    expect(snap.auctionSupply).toBe(0)
+  })
+
+  it('leaves both null outside benchmarking', () => {
+    const s = new Session('grandfathering', 1)
+    s.addPlayer('Alice', 'Power & Utilities')
+    s.startYear()
+    const snap = playerSnapshot(s, 'P1')
+    expect(snap.sectorBenchmark).toBe(null)
+    expect(snap.sectorAverage).toBe(null)
   })
 })

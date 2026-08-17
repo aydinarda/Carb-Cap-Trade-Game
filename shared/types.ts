@@ -106,6 +106,12 @@ export interface YearRecord {
   auctionBid: Record<string, { qty: number; price: number }>
   /** Auctioning mode: uniform clearing price after the auction closes. */
   auctionPrice: number | null
+  /**
+   * Unit price charged for everything in `regulatorGranted`: the auction clearing
+   * price under auctioning, the opening reference price for the trader-bot seed
+   * under benchmarking, 0 under grandfathering.
+   */
+  primaryPrice: number | null
   settlement: Record<string, PlayerSettlement> | null
   netPosition: Record<string, number>
 }
@@ -211,6 +217,10 @@ export interface PlayerSnapshot {
   auctionSupply: number
   /** Auctioning mode: uniform clearing price, once the auction has closed. */
   auctionPrice: number | null
+  /** Benchmarking mode: this year's tightened benchmark for the player's sector. */
+  sectorBenchmark: number | null
+  /** Benchmarking mode: the sector average the benchmark is set below. */
+  sectorAverage: number | null
   /** Previous settled year's discovered market price (VWAP) — a price signal. */
   prevMarketPrice: number | null
   /** Live order-book market (visible during trade and once settled). */

@@ -58,16 +58,31 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
       {/* Control bar */}
       <div className="rounded-xl border border-accent/30 bg-card/80 p-4 flex flex-wrap items-center gap-4 sticky top-3 z-20 backdrop-blur">
         <div className="flex-1 min-w-48">
-          {snap.phase === 'cap' && (
+          {/* Only a cap-stage auction has something to wait on; the free-allocation
+              modes have already issued everything, so report the scarcity instead. */}
+          {snap.phase === 'cap' && snap.capMode === 'auctioning' && (
             <div>
               <div className="flex justify-between text-xs font-mono text-muted-foreground mb-1.5">
-                <span>{snap.capMode === 'auctioning' ? 'Bids submitted' : 'Requests submitted'}</span>
+                <span>Bids submitted</span>
                 <span className="text-foreground">
                   {agg.submittedCount} / {snap.players.length}
                 </span>
               </div>
               <Progress value={submittedPct} className="h-2" />
             </div>
+          )}
+          {snap.phase === 'cap' && snap.capMode !== 'auctioning' && (
+            <span className="text-sm text-muted-foreground font-mono">
+              Allocations issued ·{' '}
+              <span className="text-foreground font-bold">
+                {(agg.totalFreeAllocation ?? 0).toLocaleString()}
+              </span>{' '}
+              cr against{' '}
+              <span className="text-foreground font-bold">
+                {(agg.totalExpected ?? 0).toLocaleString()}
+              </span>{' '}
+              t expected
+            </span>
           )}
           {snap.phase === 'trade' && (
             <span className="text-sm text-muted-foreground font-mono">
@@ -82,6 +97,11 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                 <>
                   Auction cleared at{' '}
                   <span className="text-accent font-bold">{snap.auctionPrice}</span> / credit ·{' '}
+                </>
+              ) : snap.prevMarketPrice !== null ? (
+                <>
+                  Last settled at{' '}
+                  <span className="text-accent font-bold">{snap.prevMarketPrice}</span> / credit ·{' '}
                 </>
               ) : null}
               Year {snap.currentYear} · waiting on you to advance
@@ -118,22 +138,32 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           unit="cr"
           hint="this year, by mode"
         />
-        <StatCard
-          label={snap.capMode === 'auctioning' ? 'Auction demand / supply' : 'Regulator pool'}
-          value={`${requests.toLocaleString()} / ${pool.toLocaleString()}`}
-          unit="cr"
-          tone={requests > pool ? 'bad' : 'default'}
-          hint={
-            snap.capMode === 'auctioning'
-              ? requests > pool
-                ? 'oversubscribed — price bites'
-                : 'bids vs supply'
-              : requests > pool
-                ? 'oversubscribed — pro-rata'
-                : 'requests vs pool'
-          }
-          icon={<Landmark size={12} />}
-        />
+        {snap.capMode === 'auctioning' ? (
+          <StatCard
+            label="Auction demand / supply"
+            value={`${requests.toLocaleString()} / ${pool.toLocaleString()}`}
+            unit="cr"
+            tone={requests > pool ? 'bad' : 'default'}
+            hint={requests > pool ? 'oversubscribed — price bites' : 'bids vs supply'}
+            icon={<Landmark size={12} />}
+          />
+        ) : (
+          // No primary sale: the interesting number is how far the free allocation
+          // falls short of what the class expects to emit — the scarcity it must
+          // close by cutting or trading.
+          <StatCard
+            label="Allocation / expected"
+            value={`${(agg.totalFreeAllocation ?? 0).toLocaleString()} / ${(agg.totalExpected ?? 0).toLocaleString()}`}
+            unit="cr"
+            tone={(agg.totalFreeAllocation ?? 0) < (agg.totalExpected ?? 0) ? 'bad' : 'default'}
+            hint={
+              (agg.totalFreeAllocation ?? 0) < (agg.totalExpected ?? 0)
+                ? 'class is short — must cut or trade'
+                : 'class is covered'
+            }
+            icon={<Landmark size={12} />}
+          />
+        )}
         <StatCard
           label={agg.totalRealized !== null ? 'Class realized' : 'Class expected'}
           value={agg.totalRealized ?? agg.totalExpected ?? '—'}

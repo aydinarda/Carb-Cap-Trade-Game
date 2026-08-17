@@ -1,6 +1,8 @@
 import { customAlphabet, nanoid } from 'nanoid'
 import {
   BASELINE_YEAR,
+  BOT_SEED_MM_FRAC,
+  BOT_SEED_SPEC,
   DEFAULT_ABATEMENT,
   DEFAULT_AUCTION_CAP_RATIO,
   DEFAULT_BENCHMARK,
@@ -23,6 +25,7 @@ import {
   createRng,
   expectedEmission,
   generateHistoryForIndustry,
+  isPureTrader,
   matchOrder,
   openSellRemaining,
   optimalYearCost,
@@ -162,6 +165,32 @@ export class Session {
       if (y.auctionPrice) return y.auctionPrice
     }
     return null
+  }
+
+  /**
+   * The year's opening reference price: the last discovered market price, falling
+   * back to half the penalty as a neutral first-year default. This is the price
+   * signal the bots anchor to and the price the trader-bot seed is sold at.
+   */
+  openingReference(): number {
+    return this.previousMarketPrice() ?? this.state.config.penaltyRate / 2
+  }
+
+  /**
+   * Total allowances in circulation this year: the primary supply plus everything
+   * handed out for free. Under auctioning free allocation is 0, so this is just the
+   * auction pool; under the free-allocation modes it is the class's allocation.
+   */
+  circulatingCap(): number {
+    const record = this.currentYearRecord()
+    if (!record) return 0
+    const free = Object.values(record.freeAllocation).reduce((a, b) => a + b, 0)
+    return round1(record.regulatorPool + free)
+  }
+
+  /** Whether this session's mechanism runs a sealed-bid auction at the cap stage. */
+  get usesAuction(): boolean {
+    return this.state.capMode !== null && this.mechanism.usesAuction
   }
 
   // ---- lobby ----
@@ -335,21 +364,20 @@ export class Session {
       this.state.freeCreditLimit!,
       this.state.config,
     )
-    // Only auctioning issues priced allowances (the auction cap). G/B just hand out
-    // free credits; the rest of the cap simply isn't created, so the total in
-    // circulation is fixed and the secondary market only redistributes it.
-    // Auction supply shrinks each year by the reduction factor (EU-ETS LRF): a
-    // deliberately tightening cap that makes allowances scarcer over time.
-    const reduction = Math.pow(this.state.config.capReductionFactor, year - FIRST_GAME_YEAR)
-    const pool =
-      this.state.capMode === 'auctioning'
-        ? round1(this.state.config.auctionCapRatio * this.totalBaseline() * reduction)
-        : 0
+    // The primary supply, if this mechanism sells one at all. Only auctioning does
+    // today; the free-allocation modes issue nothing beyond the allocation above, so
+    // the total in circulation is fixed and the market only redistributes it.
+    const pool = mechanism.poolFor(
+      this.state.players,
+      year,
+      this.state.config,
+      this.totalBaseline(),
+    )
     // Carry each company's banked surplus / make-good debt into this year's holdings.
     const carriedIn = Object.fromEntries(
       this.state.players.map((p) => [p.id, round1(p.bankedCredits)]),
     )
-    this.state.years[year] = {
+    const record: YearRecord = {
       year,
       freeAllocation,
       regulatorGranted: {},
@@ -361,21 +389,46 @@ export class Session {
       abatement: {},
       auctionBid: {},
       auctionPrice: null,
+      primaryPrice: null,
       settlement: null,
       netPosition: {},
     }
+    record.primaryPrice = mechanism.primaryPrice(record, this.state.config, this.openingReference())
+    this.seedTraderBots(record, mechanism.usesAuction)
+    this.state.years[year] = record
     this.state.phase = 'cap'
+  }
+
+  /**
+   * Pure-trader bots get no free allocation, so under a mode with no primary auction
+   * they would have nothing to quote asks against (shorting is not allowed) and the
+   * book would be one-sided. Sell them an opening inventory at the reference price —
+   * the same way they fund their book at the auction — so their P&L stays comparable
+   * to a student's. Only in the first game year; after that they carry inventory
+   * through `bankedCredits` like everyone else.
+   */
+  private seedTraderBots(record: YearRecord, usesAuction: boolean) {
+    if (usesAuction || record.year !== FIRST_GAME_YEAR) return
+    if (!(record.primaryPrice && record.primaryPrice > 0)) return
+    const classFree = Object.values(record.freeAllocation).reduce((a, b) => a + b, 0)
+    for (const player of this.state.players) {
+      if (!isPureTrader(player)) continue
+      const seed =
+        player.botType === 'marketMaker' ? BOT_SEED_MM_FRAC * classFree : BOT_SEED_SPEC
+      if (seed > 0) record.regulatorGranted[player.id] = round1(seed)
+    }
   }
 
   closeCapStage() {
     this.requirePhase('cap')
     const record = this.currentYearRecord()!
-    if (this.state.capMode === 'auctioning') {
+    if (this.mechanism.usesAuction) {
       // Sealed-bid uniform-price auction: highest bidders win the fixed supply,
       // everyone pays the single clearing price.
       const { clearingPrice, awarded } = clearAuction(record.auctionBid, record.regulatorPool)
       record.regulatorGranted = awarded
       record.auctionPrice = clearingPrice
+      record.primaryPrice = clearingPrice
     }
     // Grandfathering/benchmarking: free allocation is all that's issued (already
     // applied in openYear) — nothing else happens at the cap close.
@@ -404,11 +457,15 @@ export class Session {
     const abateCost: Record<string, number> = {}
     const optimal: Record<string, number> = {}
     const { penaltyRate } = this.state.config
-    // Auction credits cost the clearing price; G/B free credits cost 0.
-    const capPrice = this.state.capMode === 'auctioning' ? (record.auctionPrice ?? 0) : 0
+    // Whatever went into regulatorGranted was sold at this price: the auction
+    // clearing price, or the reference price for the trader-bot seed. 0 for free credits.
+    const capPrice = record.primaryPrice ?? 0
     // The market's volume-weighted average price is the reference for the optimum
-    // benchmark. With no trades, fall back to the auction price or the penalty rate.
-    const refPrice = buildMarketView(record.orders, record.trades).vwap ?? (record.auctionPrice || penaltyRate)
+    // benchmark. With no trades, fall back to the auction price, then to the last
+    // discovered price (the free-allocation modes have no auction), then the penalty.
+    const refPrice =
+      buildMarketView(record.orders, record.trades).vwap ??
+      (record.auctionPrice || this.previousMarketPrice() || penaltyRate)
     for (const player of this.state.players) {
       held[player.id] = this.creditsHeld(player.id)
       const { buyCash, sellCash } = tradedCash(record.trades, player.id)
@@ -474,13 +531,14 @@ export class Session {
   // ---- player actions ----
 
   /**
-   * Cap stage under auctioning: submit a sealed bid (quantity + max price per
-   * credit). Resolved by a uniform-price auction when the cap stage closes.
+   * Cap stage under a mechanism with a primary auction: submit a sealed bid
+   * (quantity + max price per credit). Resolved by a uniform-price auction when the
+   * cap stage closes.
    */
   submitBid(playerId: string, qty: number, price: number) {
     this.requirePhase('cap')
-    if (this.state.capMode !== 'auctioning') {
-      throw new GameError('WRONG_MODE', 'Bidding is only for the auctioning mode.')
+    if (!this.mechanism.usesAuction) {
+      throw new GameError('WRONG_MODE', 'This mode has no cap-stage auction to bid into.')
     }
     if (!Number.isFinite(qty) || qty < 0) {
       throw new GameError('BAD_BID', 'Bid quantity must be a non-negative number.')

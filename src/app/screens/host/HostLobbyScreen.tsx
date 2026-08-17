@@ -28,6 +28,11 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
   const [botCount, setBotCount] = useState('3')
   const mode = snap.capMode ? MODE_LABELS[snap.capMode] : null
   const joinUrl = `${window.location.origin}/`
+  // Previewed in the lobby, before the engine has issued anything. Pure-trader bots
+  // are excluded, matching the benchmarking mechanism.
+  const benchmarkTotal = snap.players
+    .filter((p) => !(p.isBot && (p.botType === 'marketMaker' || p.botType === 'speculator')))
+    .reduce((sum, p) => sum + (snap.config.benchmark[p.industry] ?? 0), 0)
 
   const addBots = () => {
     const count = Math.max(1, Math.min(20, Math.floor(Number(botCount) || 1)))
@@ -125,8 +130,8 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
           <SettingsPanel config={snap.config} />
         </div>
 
-        {/* Add bots (auctioning only) */}
-        {snap.capMode === 'auctioning' && (
+        {/* Add bots */}
+        {snap.capMode !== null && (
           <div className="rounded-xl border border-accent/30 bg-accent/5 p-5">
             <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
               <Bot size={12} className="text-accent" />
@@ -163,9 +168,16 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
               </Button>
             </div>
             <p className="text-[11px] text-muted-foreground font-mono mt-2">
-              Bots bid in the auction and trade in the order book (auctioning mode). Compliance
+              Bots trade in the order book, and bid in the auction where there is one. Compliance
               anchors price to fundamentals; market makers add liquidity; speculators &amp; noise add
               realism.
+              {snap.capMode === 'benchmarking' && (
+                <>
+                  {' '}
+                  Compliance &amp; noise bots are real emitters and receive their sector benchmark;
+                  market makers &amp; speculators get none and buy an opening book instead.
+                </>
+              )}
             </p>
           </div>
         )}
@@ -193,7 +205,8 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
           )}
           {snap.capMode === 'benchmarking' && (
             <div className="text-xs text-muted-foreground mt-1 font-mono">
-              → free credits come from per-industry benchmarks (see settings)
+              → free credits = {(Math.round(benchmarkTotal * 10) / 10).toLocaleString()} from
+              per-sector benchmarks set 40% below the sector average (see settings)
             </div>
           )}
         </div>

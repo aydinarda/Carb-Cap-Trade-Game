@@ -41,7 +41,9 @@ export function trade(ctx: BotCtx): boolean {
 
   const anchor = anchorValue(mv, referencePrice(session)) * (1 + (ctx.rt.bias ?? 0)) // personality-shifted value
   const margin = Math.max(MM_MIN_MARGIN, MM_SPREAD_FRAC * anchor)
-  const target = MM_INV_FRAC * record.regulatorPool
+  // Target inventory is a slice of everything in circulation — the auction pool under
+  // auctioning (where free allocation is 0), the class's free allocation otherwise.
+  const target = MM_INV_FRAC * session.circulatingCap()
   const held = session.creditsHeld(bot.id)
   const skewCap = MM_SKEW_CAP_FRAC * P
   const skew = clamp(MM_SKEW * (held - target), -skewCap, skewCap)
@@ -75,7 +77,7 @@ export function auction(ctx: BotCtx): boolean {
   const record = session.currentYearRecord()
   if (!record) return false
   const P = session.state.config.penaltyRate
-  const target = MM_INV_FRAC * record.regulatorPool // deep inventory to two-side the market
+  const target = MM_INV_FRAC * session.circulatingCap() // deep inventory to two-side the market
   if (target <= 0) return false
   // Bid above the discovered reference (to win inventory), capped at P and dispersed.
   const price = disperse(Math.min(P, referencePrice(session) * MM_AUCTION_AGGR), ctx.rt.bias ?? 0, P)

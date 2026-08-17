@@ -28,17 +28,42 @@ export const DEFAULT_AUCTION_CAP_RATIO = 1.0 // auctioning supply = this × Σba
 export const DEFAULT_CAP_REDUCTION_FACTOR = 0.97 // auction supply shrinks by this factor each year (EU-ETS LRF); 0.97 = −3%/yr, 1 = flat
 
 /**
- * Benchmarking free allocation: every company in an industry gets this many
- * free credits regardless of its own history. Defaults are ~80% of each
- * industry's midpoint so the totals are comparable to grandfathering; the host
- * can tune them.
+ * Sector average annual emission — the midpoint of the generation range above.
+ * Derived rather than hardcoded so it can never drift from INDUSTRIES.
+ * Power & Utilities 1000 · Heavy Materials 800 · Manufacturing & Chemicals 525 · Transport 300
  */
-export const DEFAULT_BENCHMARK: Record<Industry, number> = {
-  'Power & Utilities': 800,
-  'Heavy Materials': 640,
-  'Manufacturing & Chemicals': 420,
-  Transport: 240,
-}
+export const SECTOR_AVERAGE_EMISSIONS = Object.fromEntries(
+  INDUSTRY_NAMES.map((i) => [i, (INDUSTRIES[i].low + INDUSTRIES[i].high) / 2]),
+) as Record<Industry, number>
+
+/**
+ * EU-style benchmark stringency. A real benchmark is the average emission
+ * intensity of the most efficient 10% of installations in the sector; here we
+ * approximate that with a flat cut — the benchmark sits 40% below the sector
+ * average. An average company is therefore structurally short and must cut
+ * emissions or buy on the secondary market; only a genuinely efficient one is long.
+ */
+export const BENCHMARK_STRINGENCY = 0.6
+
+/**
+ * Benchmarking free allocation: every company in an industry gets this many free
+ * credits regardless of its own history. The host can tune them per sector.
+ * 600 / 480 / 315 / 180 at the default stringency.
+ */
+export const DEFAULT_BENCHMARK = Object.fromEntries(
+  INDUSTRY_NAMES.map((i) => [
+    i,
+    Math.round(SECTOR_AVERAGE_EMISSIONS[i] * BENCHMARK_STRINGENCY * 10) / 10,
+  ]),
+) as Record<Industry, number>
+
+/**
+ * Pure-trader bots (market makers, speculators) get no free allocation, so under a
+ * mode with no primary auction they would have nothing to quote asks against. They
+ * buy an opening book at the reference price instead — these size that purchase.
+ */
+export const BOT_SEED_MM_FRAC = 0.18 // × the class's free allocation; mirrors MM_INV_FRAC
+export const BOT_SEED_SPEC = 20 // flat; mirrors SPEC_INIT_INV
 
 /**
  * Per-sector marginal abatement cost (MAC): cost to cut the f-th fraction of a

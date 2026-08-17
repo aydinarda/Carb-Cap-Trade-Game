@@ -255,3 +255,95 @@ describe('lobby management', () => {
     void FIRST_GAME_YEAR
   })
 })
+
+describe('benchmarking mode', () => {
+  function benchmarking(seed = 1) {
+    const s = new Session('benchmarking', seed)
+    s.addPlayer('Alice', 'Power & Utilities')
+    s.addPlayer('Bob', 'Transport')
+    return s
+  }
+
+  it('issues the sector benchmark and no primary supply', () => {
+    const s = benchmarking()
+    s.startYear()
+    const rec = s.currentYearRecord()!
+    const { benchmark } = s.state.config
+    expect(rec.freeAllocation.P1).toBe(benchmark['Power & Utilities'])
+    expect(rec.freeAllocation.P2).toBe(benchmark.Transport)
+    expect(rec.regulatorPool).toBe(0)
+  })
+
+  it('tightens the allocation each year by capReductionFactor', () => {
+    const s = benchmarking()
+    s.updateSettings({ capReductionFactor: 0.9 })
+    s.startYear()
+    const year11 = s.currentYearRecord()!.freeAllocation.P1
+    s.closeCapStage()
+    s.openTrade()
+    s.closeTrade()
+    s.advanceYear()
+    const year12 = s.currentYearRecord()!.freeAllocation.P1
+    expect(year12).toBe(round1(year11 * 0.9))
+  })
+
+  it('rejects cap-stage bids — there is no auction to bid into', () => {
+    const s = benchmarking()
+    s.startYear()
+    expect(() => s.submitBid('P1', 10, 5)).toThrow(/no cap-stage auction/i)
+  })
+
+  it('circulatingCap is the free allocation, and the auction pool under auctioning', () => {
+    const b = benchmarking()
+    b.startYear()
+    const rec = b.currentYearRecord()!
+    const totalFree = Object.values(rec.freeAllocation).reduce((x, y) => x + y, 0)
+    expect(b.circulatingCap()).toBe(round1(totalFree))
+
+    // No-regression guard for the market maker's target inventory.
+    const a = auctioning()
+    a.startYear()
+    expect(a.circulatingCap()).toBe(a.currentYearRecord()!.regulatorPool)
+  })
+})
+
+describe('trader-bot seed inventory', () => {
+  it('sells pure-trader bots an opening book at the reference price, once', () => {
+    const s = new Session('benchmarking', 1)
+    s.addPlayer('Human', 'Power & Utilities') // P1
+    const mm = s.addBot('marketMaker') // P2
+    const firm = s.addBot('compliance') // P3
+    s.startYear()
+    const rec = s.currentYearRecord()!
+
+    // Year 1 has no discovered price yet, so the seed is priced at penaltyRate / 2.
+    expect(rec.primaryPrice).toBe(s.state.config.penaltyRate / 2)
+    // The MM gets no free allocation but a seed it must pay for…
+    expect(rec.freeAllocation[mm.id]).toBe(0)
+    expect(rec.regulatorGranted[mm.id]).toBeGreaterThan(0)
+    // …while a real emitter gets its benchmark and no seed.
+    expect(rec.freeAllocation[firm.id]).toBeGreaterThan(0)
+    expect(rec.regulatorGranted[firm.id]).toBeUndefined()
+
+    // The seed is charged through the normal cap-cost line.
+    const seed = rec.regulatorGranted[mm.id]
+    s.closeCapStage()
+    s.openTrade()
+    s.closeTrade()
+    expect(rec.settlement![mm.id].purchaseCost).toBe(round1(seed * rec.primaryPrice!))
+
+    // Only in the first game year — afterwards it carries inventory via banking.
+    s.advanceYear()
+    expect(s.currentYearRecord()!.regulatorGranted[mm.id]).toBeUndefined()
+  })
+
+  it('grants no seed under auctioning — bots fund themselves at the clearing price', () => {
+    const s = new Session('auctioning', 1)
+    s.addPlayer('Human', 'Power & Utilities')
+    const mm = s.addBot('marketMaker')
+    s.startYear()
+    const rec = s.currentYearRecord()!
+    expect(rec.regulatorGranted[mm.id]).toBeUndefined()
+    expect(rec.primaryPrice).toBe(0) // no auction price until the cap stage closes
+  })
+})

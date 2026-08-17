@@ -15,8 +15,10 @@ export { realizeYear, expectedEmission } from './emissions'
 export { abatementCost, optimalAbatement, optimalYearCost } from './abatement'
 export { generateHistoryForIndustry } from './playerGeneration'
 export { createRng, round1, type Rng } from './rng'
+export { isPureTrader } from './roles'
 export { computeNetPositions } from './trade'
 export { windowSum, computeFreeCreditLimit } from './grandfathering'
+export { benchmarkFor } from './benchmarking'
 export { clearAuction } from './auction'
 export {
   matchOrder,

@@ -2,6 +2,7 @@ import type { PlayerSnapshot } from '@shared/types'
 import { AllocationCard, WarningBanner } from '../../components/game/cards'
 import { EmissionHistoryChart } from '../../components/game/charts'
 import { AuctionBidPanel } from './AuctionBidPanel'
+import { BenchmarkPanel } from './BenchmarkPanel'
 
 export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
   const historyPanel = (
@@ -23,8 +24,20 @@ export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
     )
   }
 
-  // Grandfathering / benchmarking: free allocation only — nothing to buy at the
-  // cap stage. Everything else is traded on the open market next.
+  // Benchmarking: a flat sector allocation set below the sector average, so most
+  // companies open short. Nothing to submit — the panel explains the gap and points
+  // at the two ways to close it.
+  if (snap.capMode === 'benchmarking') {
+    return (
+      <div className="flex flex-col gap-5">
+        <BenchmarkPanel snap={snap} />
+        {historyPanel}
+      </div>
+    )
+  }
+
+  // Grandfathering: free allocation only — nothing to buy at the cap stage.
+  // Everything else is traded on the open market next.
   const freeAllocation = snap.you.freeAllocation ?? 0
   return (
     <div className="flex flex-col gap-5">

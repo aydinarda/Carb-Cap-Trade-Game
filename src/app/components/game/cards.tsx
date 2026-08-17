@@ -107,9 +107,9 @@ export function AllocationCard({
         {mode === 'grandfathering' &&
           "Proportional to your share of the class's total emissions over the past ten years (80% of the class baseline is distributed for free)."}
         {mode === 'benchmarking' &&
-          'A flat allowance set for your industry — every company in the same industry gets the same free credits, regardless of its own history.'}
+          'The benchmark set for your sector — every company in it gets the same free credits regardless of its own history. It sits 40% below the sector average, so an average emitter is short.'}
         {mode === 'auctioning' &&
-          'No free credits under auctioning — every allowance must be bought from the regulator at the fixed price.'}
+          'No free credits under auctioning — every allowance must be bought at the sealed-bid auction or on the market.'}
       </p>
     </div>
   )

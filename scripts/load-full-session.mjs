@@ -6,12 +6,13 @@
  *
  * Three sequential sessions (one per cap mechanism), because host:addBots is lobby-only:
  *   1. grandfathering — 1 host + 100 players, a few years played to completion
- *   2. benchmarking   — same
+ *   2. benchmarking   — same + 25 bots (they trade the order book; no auction to bid into)
  *   3. auctioning     — same + 25 bots (15 noise / 5 compliance / 3 speculator / 2 marketMaker)
  *
  * Each session: create → 100 players join → (bots) → a JOIN grace window (join in the
- * browser now!) → per year: cap stage (auction bids) → trade window (players place
- * bids/asks + abate at a relaxed cadence) → settle → advance → endGame.
+ * browser now!) → per year: cap stage (auction bids, where the mode has an auction) →
+ * trade window (players place bids/asks + abate at a relaxed cadence) → settle →
+ * advance → endGame.
  *
  * The players get session:snapshot pushed (no polling); we drive their ACTIONS and
  * measure the ack round-trip. Expected 4xx (no-shorting, wrong-phase races) are counted
@@ -254,7 +255,7 @@ async function main() {
   }
 
   await runSession('grandfathering', { withBots: false })
-  await runSession('benchmarking', { withBots: false })
+  await runSession('benchmarking', { withBots: true })
   await runSession('auctioning', { withBots: true })
 
   // ── summary + thresholds ──

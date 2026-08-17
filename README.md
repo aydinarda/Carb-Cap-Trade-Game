@@ -4,8 +4,8 @@ A real-time multiplayer cap-and-trade carbon game for the classroom. Students ru
 companies in an industry **they pick at join** (the ten-year emission history is
 generated for that industry); the instructor allocates emission allowances under a
 cap mechanism — **switchable between years** — and steps the class through game
-years: cap stage (regulator sale) → emission reveal → student market → penalty
-settlement.
+years: cap stage (allocation, or an auction where the mode has one) → emission
+reveal → student market → penalty settlement.
 
 The game design comes from `../../Renjie/game_design/setup copy.ipynb` (read-only
 reference — never edit that folder). Currently implemented:
@@ -13,17 +13,18 @@ reference — never edit that folder). Currently implemented:
 | Mechanic | Status |
 |---|---|
 | **Grandfathering** | ✅ fully playable — free credits ∝ past ten-year emissions, cap = 80% of class baseline |
-| **Regulator sale** | ✅ cap stage: yearly pool = the remaining 20% of the baseline, pro-rata if oversubscribed; fixed informational price |
-| **Student market** | ✅ order book: limit buy/sell orders, price-time priority, partial fills, no self-trading — prices come entirely from students |
-| **Penalty settlement** | ✅ two-tier: shortage covered by leftover unsold market credits costs the LOW rate; uncovered shortage costs the HIGH rate; points are cumulative, fewest wins |
+| **Benchmarking** | ✅ fully playable — a flat sector benchmark set 40% below the sector average, tightening yearly by the LRF; no primary sale, so the gap is closed by cutting emissions or on the market |
+| **Auctioning** | ✅ fully playable — no free credits; a single-round sealed-bid uniform-price auction sells a supply that shrinks each year by the LRF |
+| **Student market** | ✅ order book: limit buy/sell orders, price-time priority, partial fills, no shorting — prices come entirely from students |
+| **Abatement** | ✅ each company chooses a cut fraction against its sector MAC curve (`a + b·f`); optimal play is where marginal cost meets the carbon price |
+| **Penalty settlement** | ✅ uncovered tonnes are charged `penaltyRate` each — the effective ceiling on the market price |
+| **Banking / make-good** | ✅ EU-ETS carry: a surplus year banks allowances, an uncovered year carries a make-good debt on top of the penalty; leftovers are monetized at the final price |
+| **Market bots** | ✅ four archetypes (compliance, market maker, speculator, noise) in any mode with a market; they anchor to the previous year's price with the penalty as the ceiling |
 | **Mode switching** | ✅ instructor can change the cap mechanism in the lobby and between years |
-| **Benchmarking** | 🚧 selectable, allocation pending from the game designer (blocks year start) |
-| **Auctioning** | 🚧 selectable, auction mechanics pending |
 
-There is no cash ledger (deliberate choice): trades transfer credits at
-student-set prices, and penalty points are the score. Unused credits expire at
-year end (no banking), which is why distributing leftover unsold offers to shorts
-at settlement costs sellers nothing.
+Scores are cumulative costs — abatement spend + credit purchases − sale income +
+penalties — and the leaderboard ranks emitters by distance from their own optimum,
+so it measures skill rather than which industry they drew.
 
 ## Run locally
 
@@ -89,8 +90,11 @@ consider the paid starter instance for game day.
 
 ```
 shared/           types, constants, event contract, pure game engine (unit-tested)
-  engine/         playerGeneration, grandfathering, emissions, stubs for
-                  benchmarking/auctioning/trade behind CapMechanism/TradeMechanism
+  engine/         playerGeneration, emissions, abatement, order book, settlement,
+                  and the three allocation regimes (grandfathering, benchmarking,
+                  auctioning) behind one CapMechanism interface — everything
+                  mode-specific lives there, so a combined regime is a new file
+server/bots/      four bot archetypes driven by one interval (BotManager)
 server/           Express + Socket.IO: Session state machine, role-scoped views
 src/app/          React client: net/ (socket + context), screens/player, screens/host
 ```

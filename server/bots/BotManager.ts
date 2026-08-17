@@ -17,11 +17,11 @@ const ARCHETYPES: Record<
 > = { compliance, marketMaker, speculator, noise }
 
 /**
- * Drives all backend bots. A single ~2.5s interval scans every live session and,
- * for auctioning rooms in the cap/trade phase, lets each bot act once (auction bid
- * in 'cap', an order-book move in 'trade'). Broadcasts only when a bot actually did
- * something. Uses its own RNG per session so bot randomness never perturbs the
- * engine's seeded emission realizations.
+ * Drives all backend bots. A single ~2.5s interval scans every live session and lets
+ * each bot act once per tick (auction bid in 'cap', an order-book move in 'trade').
+ * Modes without a primary auction skip the cap stage entirely. Broadcasts only when
+ * a bot actually did something. Uses its own RNG per session so bot randomness never
+ * perturbs the engine's seeded emission realizations.
  */
 export class BotManager {
   private timer?: NodeJS.Timeout
@@ -67,7 +67,10 @@ export class BotManager {
   private tick() {
     for (const session of this.store.activeSessions()) {
       const phase = session.state.phase
-      if ((phase !== 'cap' && phase !== 'trade') || session.state.capMode !== 'auctioning') continue
+      if (phase !== 'cap' && phase !== 'trade') continue
+      // Under a free-allocation mode there is no primary auction to bid into, so the
+      // bots only work the order book once the market opens.
+      if (phase === 'cap' && !session.usesAuction) continue
       const record = session.currentYearRecord()
       if (!record) continue
       const bots = session.state.players.filter((p) => p.isBot && p.botType)

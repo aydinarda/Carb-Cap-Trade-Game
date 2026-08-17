@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createRng, openSellRemaining, round1 } from '../../shared/engine'
+import { createRng, expectedEmission, openSellRemaining, round1 } from '../../shared/engine'
 import * as compliance from '../bots/compliance'
 import * as marketMaker from '../bots/marketMaker'
 import * as noise from '../bots/noise'
@@ -83,4 +83,70 @@ describe('bot archetypes — single tick', () => {
       )
     })
   }
+})
+
+describe('bot archetypes under benchmarking (no primary auction)', () => {
+  for (const [name, arch] of Object.entries(ARCHETYPES)) {
+    it(`${name}: trades on free allocation without shorting`, () => {
+      const s = new Session('benchmarking', 1)
+      const bot = s.addBot(name as 'compliance')
+      s.addPlayer('Human', 'Transport')
+      s.startYear()
+
+      const ctx = ctxFor(s, bot.id)
+      // There is nothing to bid into, so the cap stage is a no-op for every archetype.
+      expect(arch.auction(ctx)).toBe(false)
+
+      s.closeCapStage()
+      s.openTrade()
+      for (let i = 0; i < 6; i++) arch.trade(ctx)
+      const rec = s.currentYearRecord()!
+      expect(openSellRemaining(rec.orders, bot.id)).toBeLessThanOrEqual(
+        s.creditsHeld(bot.id) + 1e-9,
+      )
+    })
+  }
+
+  it('the market maker quotes both sides off its seed inventory', () => {
+    const s = new Session('benchmarking', 1)
+    const mm = s.addBot('marketMaker')
+    // Emitters give the class a free allocation, which is what sizes the MM's target.
+    s.addPlayer('Human', 'Power & Utilities')
+    s.addBot('compliance')
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+
+    marketMaker.trade(ctxFor(s, mm.id))
+    const rec = s.currentYearRecord()!
+    const own = rec.orders.filter((o) => o.playerId === mm.id && o.status === 'open')
+    // The bug this guards: with target inventory keyed off the (zero) auction pool the
+    // MM skews hard negative and never rests an ask.
+    expect(own.some((o) => o.side === 'buy')).toBe(true)
+    expect(own.some((o) => o.side === 'sell')).toBe(true)
+  })
+
+  it('a short compliance firm bids up toward the penalty ceiling', () => {
+    const s = new Session('benchmarking', 1)
+    const bot = s.addBot('compliance', 'Heavy Materials') // dear MAC → cannot self-cover
+    s.addPlayer('Human', 'Transport')
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+
+    const ctx = ctxFor(s, bot.id)
+    const held = s.creditsHeld(bot.id)
+    const expected = expectedEmission(s.getPlayer(bot.id)!, s.state.currentYear)
+    expect(expected).toBeGreaterThan(held) // structurally short, as the benchmark intends
+
+    compliance.trade(ctx)
+    const bid = s
+      .currentYearRecord()!
+      .orders.find((o) => o.playerId === bot.id && o.side === 'buy' && o.status === 'open')
+    expect(bid).toBeDefined()
+    // Its willingness to pay exceeds the stale mid (penaltyRate / 2) precisely because
+    // the penalty, not the market, is the binding alternative.
+    expect(bid!.price).toBeGreaterThan(s.state.config.penaltyRate / 2)
+    expect(bid!.price).toBeLessThanOrEqual(s.state.config.penaltyRate)
+  })
 })

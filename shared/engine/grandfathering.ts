@@ -27,7 +27,15 @@ export function computeFreeCreditLimit(players: Player[], config: SessionConfig)
 export const grandfathering: CapMechanism = {
   mode: 'grandfathering',
   implemented: true,
+  usesAuction: false,
   computeFreeCreditLimit,
+  // Free allocation is the only issuance — no primary sale, so nothing to price.
+  poolFor() {
+    return 0
+  },
+  primaryPrice() {
+    return 0
+  },
   allocate(players, targetYear, freeCreditLimit, config) {
     const sums = new Map(
       players.map((p) => [p.id, windowSum(p, targetYear, config.historyWindow)]),

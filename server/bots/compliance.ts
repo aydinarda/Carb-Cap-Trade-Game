@@ -4,10 +4,34 @@ import { disperse, marketMid, referencePrice, tryPlace, trySell, trySubmitBid } 
 import type { BotCtx } from './types'
 
 /**
+ * Willingness to pay for a tonne the firm cannot cover. Its alternatives to buying
+ * are cutting the tonne itself or paying the penalty, so it will pay up to the
+ * cheaper of the two. `rCover` is the abatement fraction that would close the gap
+ * outright; if even a 100% cut leaves it short, the penalty is the binding
+ * alternative and it should bid all the way up to it.
+ *
+ * This matters most under a free-allocation mode with a tight benchmark: the class
+ * is structurally short, and without the penalty ceiling in view every bot would
+ * anchor on the same stale mid and the market would be slow to price the scarcity.
+ */
+function reservationPrice(
+  expected: number,
+  held: number,
+  coeff: { a: number; b: number },
+  penaltyRate: number,
+): number {
+  if (expected <= 0) return penaltyRate
+  const rCover = 1 - held / expected
+  if (rCover >= 1) return penaltyRate
+  return Math.min(penaltyRate, coeff.a + coeff.b * Math.max(0, rCover))
+}
+
+/**
  * Compliance firm — a real emitter that plays fundamentals and thereby anchors the
- * price. It abates to the cost-minimising point, then covers its residual near fair
- * value (min(penaltyRate, MAC)), lifting asks cheaper than fair and hitting bids
- * richer than fair — the arbitrage that pulls the market back to fundamentals.
+ * price. It abates to the cost-minimising point, then covers its residual at its
+ * reservation price (the cheaper of cutting the tonne itself and paying the
+ * penalty), lifting asks below that and hitting bids richer than its own MAC — the
+ * arbitrage that pulls the market back to fundamentals.
  */
 export function trade(ctx: BotCtx): boolean {
   const { session, bot } = ctx
@@ -30,10 +54,14 @@ export function trade(ctx: BotCtx): boolean {
   const need = round1(expected * (1 - rStar) - held)
 
   if (need > 0.5) {
-    if (mv.bestAsk !== null && mv.bestAsk < fair) {
+    // Short after abating: bid at what the shortfall is actually worth to us, which
+    // rises toward the penalty the further we are from covering it.
+    const reservation = reservationPrice(expected, held, coeff, P)
+    const reservationB = disperse(reservation, ctx.rt.bias ?? 0, P)
+    if (mv.bestAsk !== null && mv.bestAsk < reservation) {
       return tryPlace(session, bot.id, 'buy', need, mv.bestAsk) // lift a cheap ask
     }
-    return tryPlace(session, bot.id, 'buy', need, fairB - 0.1) // rest a bid at fair
+    return tryPlace(session, bot.id, 'buy', need, reservationB - 0.1)
   }
   if (need < -0.5) {
     const surplus = -need
