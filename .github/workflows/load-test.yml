@@ -1,0 +1,61 @@
+name: Load test (full session)
+
+# Manual only — drives a full 3-mode game (grandfathering → benchmarking →
+# auctioning + 25 bots) with 100 simulated players against the deployed backend.
+# You can join in a browser with the room code the run prints in its logs.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Backend URL to hit
+        default: https://carb-cap-trade-api.onrender.com
+        required: true
+      frontend_url:
+        description: Frontend URL (optional — shown in the "join now" hint)
+        default: ''
+        required: false
+      n_players:
+        description: Simulated players
+        default: '100'
+        required: true
+      years_per_mode:
+        description: Years played per cap mode
+        default: '3'
+        required: true
+      round_window:
+        description: Trade window (seconds per year)
+        default: '25'
+        required: true
+      join_grace:
+        description: Grace window to join in a browser before year 1 (seconds)
+        default: '15'
+        required: true
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run full-session load test
+        env:
+          # Set a repo secret HOST_KEY to match the backend; falls back to admin123.
+          HOST_KEY: ${{ secrets.HOST_KEY || 'admin123' }}
+          BASE_URL: ${{ inputs.base_url }}
+          FRONTEND_URL: ${{ inputs.frontend_url }}
+          N_PLAYERS: ${{ inputs.n_players }}
+          YEARS_PER_MODE: ${{ inputs.years_per_mode }}
+          ROUND_WINDOW: ${{ inputs.round_window }}
+          JOIN_GRACE: ${{ inputs.join_grace }}
+        run: node scripts/load-full-session.mjs
