@@ -6,10 +6,15 @@ import { MAX_STEP } from './types'
 export const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
 
 /**
- * The reference price the bots anchor to this year: the previous settled year's
- * discovered market price, or half the penalty as a neutral first-year default.
+ * The reference price the bots anchor to this year. Once the auction has cleared,
+ * THIS year's clearing price is the freshest signal (everyone just paid it for their
+ * allowances), so the secondary market anchors there. Before that (cap stage, or the
+ * free-allocation modes with no auction) it falls back to the previous settled year's
+ * discovered price, then to half the penalty as a neutral first-year default.
  */
 export function referencePrice(session: Session): number {
+  const auctionPrice = session.currentYearRecord()?.auctionPrice
+  if (auctionPrice && auctionPrice > 0) return auctionPrice
   return session.previousMarketPrice() ?? session.state.config.penaltyRate / 2
 }
 

@@ -22,11 +22,22 @@ describe('bot helpers', () => {
     expect(disperse(10, 0.5, 20)).toBe(15) // +50% bias
   })
 
-  it('referencePrice falls back to penaltyRate/2 in the first year', () => {
+  it('referencePrice falls back to penaltyRate/2 before the first auction clears', () => {
+    const s = new Session('auctioning', 1)
+    s.addPlayer('A', 'Power & Utilities')
+    s.startYear() // cap stage — no auction price yet
+    expect(referencePrice(s)).toBe(s.state.config.penaltyRate / 2)
+  })
+
+  it('referencePrice tracks THIS year\'s auction clearing once it has run', () => {
     const s = new Session('auctioning', 1)
     s.addPlayer('A', 'Power & Utilities')
     s.startYear()
-    expect(referencePrice(s)).toBe(s.state.config.penaltyRate / 2)
+    s.submitBid('P1', 100, 15)
+    s.closeCapStage() // auction clears → clearing price is the fresh anchor
+    const clearing = s.currentYearRecord()!.auctionPrice!
+    expect(clearing).toBeGreaterThan(0)
+    expect(referencePrice(s)).toBe(clearing)
   })
 
   it('sellCapacity = held − open asks; botAvgCost from auction spend', () => {
