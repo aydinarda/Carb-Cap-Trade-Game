@@ -1,27 +1,54 @@
+import {
+  parseSpec,
+  specIntegral,
+  specMarginal,
+  specOptimal,
+  type AbatementParamsByModel,
+  type AbatementSpec,
+} from './abatementModels'
 import { round1 } from './rng'
 
-export interface AbatementCoeff {
-  /** Marginal cost of the first (fraction→0) tonne abated. */
-  a: number
-  /** How fast the marginal cost rises with the fraction abated. */
-  b: number
+export type { AbatementSpec }
+
+/**
+ * The original linear shorthand. Callers that still pass a bare `{a, b}` are read as
+ * `{ model: 'linear', params: {a, b} }` — this keeps every existing call site and test
+ * working while the engine migrates to full specs.
+ */
+export type AbatementCoeff = AbatementParamsByModel['linear']
+
+/** Either a full model spec or the legacy bare linear coefficients. */
+export type AbatementInput = AbatementSpec | AbatementCoeff
+
+export function toSpec(input: AbatementInput): AbatementSpec {
+  return 'model' in input ? input : { model: 'linear', params: input }
 }
 
 /**
- * Total cost to abate a fraction `r` of a company's expected emission. Marginal
- * cost per tonne at fraction f is `a + b·f`, so integrating over 0..r and
- * scaling by the emission level E gives E·(a·r + b·r²/2). Convex: cheap cuts
- * first, then progressively dearer.
+ * Marginal cost of the next tonne at abatement fraction `f`, per tonne.
+ * Deliberately NOT rounded — the bots derive their reservation and fair prices from
+ * this, and quantizing it would move every quote by up to half a tick.
  */
-export function abatementCost(expected: number, fraction: number, coeff: AbatementCoeff): number {
-  const r = Math.max(0, Math.min(1, fraction))
-  return round1(expected * (coeff.a * r + (coeff.b * r * r) / 2))
+export function marginalCost(fraction: number, input: AbatementInput): number {
+  return specMarginal(fraction, toSpec(input))
+}
+
+/**
+ * Total cost to abate a fraction `r` of a company's expected emission: the integral of
+ * the marginal cost curve over 0..r, scaled by the emission level. Convex for every
+ * shipped model — cheap cuts first, then progressively dearer.
+ */
+export function abatementCost(
+  expected: number,
+  fraction: number,
+  input: AbatementInput,
+): number {
+  return round1(expected * specIntegral(fraction, toSpec(input)))
 }
 
 /** Cost-minimising abatement fraction: where marginal cost meets the price, clamped to [0,1]. */
-export function optimalAbatement(coeff: AbatementCoeff, price: number): number {
-  if (coeff.b <= 0) return price > coeff.a ? 1 : 0
-  return Math.max(0, Math.min(1, (price - coeff.a) / coeff.b))
+export function optimalAbatement(input: AbatementInput, price: number): number {
+  return specOptimal(price, toSpec(input))
 }
 
 /**
@@ -33,11 +60,14 @@ export function optimalAbatement(coeff: AbatementCoeff, price: number): number {
 export function optimalYearCost(
   expected: number,
   free: number,
-  coeff: AbatementCoeff,
+  input: AbatementInput,
   price: number,
 ): number {
-  const r = optimalAbatement(coeff, price)
+  const spec = toSpec(input)
+  const r = specOptimal(price, spec)
   const abated = expected * (1 - r)
   // cover > 0 → buy the shortfall; cover < 0 → sell the surplus (income).
-  return round1(abatementCost(expected, r, coeff) + price * (abated - free))
+  return round1(abatementCost(expected, r, spec) + price * (abated - free))
 }
+
+export { parseSpec }

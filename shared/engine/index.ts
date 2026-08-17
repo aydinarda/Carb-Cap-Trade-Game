@@ -12,7 +12,28 @@ export const CAP_MECHANISMS: Record<CapMode, CapMechanism> = {
 
 export { type CapMechanism } from './capMechanism'
 export { realizeYear, expectedEmission } from './emissions'
-export { abatementCost, optimalAbatement, optimalYearCost } from './abatement'
+export {
+  abatementCost,
+  marginalCost,
+  optimalAbatement,
+  optimalYearCost,
+  toSpec,
+  parseSpec,
+  type AbatementCoeff,
+  type AbatementInput,
+  type AbatementSpec,
+} from './abatement'
+export {
+  ABATEMENT_MODELS,
+  bisectOptimal,
+  specIntegral,
+  specMarginal,
+  specOptimal,
+  type AbatementModel,
+  type AbatementModelId,
+  type AbatementParamsByModel,
+  type AbatementTier,
+} from './abatementModels'
 export { generateHistoryForIndustry } from './playerGeneration'
 export { createRng, round1, type Rng } from './rng'
 export { isPureTrader } from './roles'
