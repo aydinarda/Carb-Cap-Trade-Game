@@ -38,14 +38,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node must be set up FIRST: pnpm 11 needs Node 22+ (it uses node:sqlite), and
+      # pnpm/action-setup runs pnpm under whatever Node is active.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - uses: pnpm/action-setup@v4
         with:
           version: 11
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
