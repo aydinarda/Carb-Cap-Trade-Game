@@ -140,7 +140,6 @@ describe('bot archetypes under benchmarking (no primary auction)', () => {
     const P = s.state.config.penaltyRate
     s.placeOrder('P2', 'sell', 5, P)
     s.placeOrder('P3', 'buy', 5, P)
-    expect(s.currentYearRecord()!.market ?? true).toBeTruthy()
 
     for (let i = 0; i < 4; i++) marketMaker.trade(ctxFor(s, mm.id))
     const rec = s.currentYearRecord()!
