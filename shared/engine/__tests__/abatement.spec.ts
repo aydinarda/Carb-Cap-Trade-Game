@@ -32,13 +32,23 @@ describe('optimalYearCost & fairness', () => {
     // The leaderboard scores (actual − optimal); if both play optimally, actual = optimal,
     // so the normalized score is 0 for BOTH regardless of sector/size. Verify the benchmark
     // is well-defined and finite for wildly different sectors + sizes.
-    const power = optimalYearCost(1000, 800, { a: 2, b: 15 }, 10, 10)
-    const heavy = optimalYearCost(300, 240, { a: 8, b: 30 }, 10, 10)
+    const power = optimalYearCost(1000, 800, { a: 2, b: 15 }, 10)
+    const heavy = optimalYearCost(300, 240, { a: 8, b: 30 }, 10)
     expect(Number.isFinite(power)).toBe(true)
     expect(Number.isFinite(heavy)).toBe(true)
     // Deviating from the optimum can only cost more than the optimum benchmark.
     const suboptimal = optimalAbatement({ a: 2, b: 15 }, 10)
     const worse = abatementCost(1000, suboptimal + 0.2, { a: 2, b: 15 }) + 10 * (1000 * (1 - (suboptimal + 0.2)) - 800)
     expect(worse).toBeGreaterThan(power)
+  })
+
+  it('computes exact values across both cover branches and the r=0 clamp', () => {
+    // r = (10−0)/100 = 0.1 → abate 100, abatementCost 500.
+    // buy branch: abated 900 > free 0 → cover 10×900 = 9000 → 9500.
+    expect(optimalYearCost(1000, 0, { a: 0, b: 100 }, 10)).toBe(9500)
+    // sell branch: abated 900 < free 950 → cover 10×(−50) = −500 → 500 − 500 = 0.
+    expect(optimalYearCost(1000, 950, { a: 0, b: 100 }, 10)).toBe(0)
+    // price 10 < a 20 → r clamps to 0, no abatement → cover 10×(100−40) = 600.
+    expect(optimalYearCost(100, 40, { a: 20, b: 10 }, 10)).toBe(600)
   })
 })

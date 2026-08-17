@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Order } from '../../types'
+import type { Order, Trade } from '../../types'
 import {
   buildMarketView,
   cancelOrder,
@@ -101,5 +101,28 @@ describe('helpers', () => {
     expect(view.bestAsk).toBe(12)
     expect(view.volume).toBe(20)
     expect(view.vwap).toBe(12)
+  })
+
+  it('caps the wire arrays (25 levels / 60 tape) but aggregates over ALL data', () => {
+    const orders: Order[] = []
+    for (let i = 0; i < 30; i++) orders.push(order(`B${i}`, 'buy', 5, 10 + i)) // 30 bids
+    for (let i = 0; i < 30; i++) orders.push(order(`A${i}`, 'sell', 5, 50 + i)) // 30 asks
+    const trades: Trade[] = []
+    for (let i = 0; i < 70; i++) {
+      trades.push({ id: `T${i}`, buyerId: 'x', sellerId: 'y', qty: 2, price: 10, seq: i })
+    }
+    const view = buildMarketView(orders, trades)
+
+    // Arrays truncated for the wire…
+    expect(view.bids).toHaveLength(25)
+    expect(view.asks).toHaveLength(25)
+    expect(view.trades).toHaveLength(60)
+    expect(view.trades[0].seq).toBe(69) // most recent first
+
+    // …but volume/vwap reflect all 70 trades, and best levels are the true top of book.
+    expect(view.volume).toBe(140) // 70 × 2, not 60 × 2
+    expect(view.vwap).toBe(10)
+    expect(view.bestBid).toBe(39) // 10 + 29 (highest bid)
+    expect(view.bestAsk).toBe(50) // lowest ask
   })
 })

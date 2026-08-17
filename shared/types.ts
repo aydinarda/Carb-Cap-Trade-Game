@@ -232,12 +232,10 @@ export interface ClassAggregate {
   freeCreditLimit: number | null
   totalFreeAllocation: number | null
   totalRegulatorRequests: number | null
-  totalRegulatorGranted: number | null
   submittedCount: number
   /** Σ expected emissions — the mean the class plans against, before realization. */
   totalExpected: number | null
   totalRealized: number | null
-  totalNetPosition: number | null
   /** Total cost accrued this year across the class (purchases + penalties). */
   totalCostThisYear: number | null
   industryBreakdown: IndustryBreakdownRow[]

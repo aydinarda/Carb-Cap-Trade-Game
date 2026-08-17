@@ -421,7 +421,7 @@ export class Session {
       const free = round1(
         (record.freeAllocation[player.id] ?? 0) + (record.regulatorGranted[player.id] ?? 0),
       )
-      optimal[player.id] = optimalYearCost(expected, free, coeff, refPrice, refPrice)
+      optimal[player.id] = optimalYearCost(expected, free, coeff, refPrice)
     }
     const { settlement } = settleYear(record.realized, held, purchaseCost, sellIncome, abateCost, {
       penaltyRate,

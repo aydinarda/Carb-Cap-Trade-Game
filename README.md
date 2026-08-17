@@ -68,7 +68,7 @@ Refreshing a device resumes the same identity automatically (token in localStora
 pnpm test            # engine unit tests (grandfathering math is verified against
                      # the designer's own xlsx output, transcribed as a fixture)
 pnpm typecheck
-node scripts/smoke.mjs   # wire-protocol smoke test (needs the server running)
+node scripts/bots-smoke.mjs   # auctioning + bots wire-protocol smoke (needs the server running)
 ```
 
 ## Deploy to Render

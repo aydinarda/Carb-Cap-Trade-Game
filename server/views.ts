@@ -109,14 +109,11 @@ function classAggregate(session: Session): ClassAggregate {
     freeCreditLimit: state.freeCreditLimit !== null ? round1(state.freeCreditLimit) : null,
     totalFreeAllocation: record ? sum(record.freeAllocation) : null,
     totalRegulatorRequests: capDemand,
-    totalRegulatorGranted: record ? sum(record.regulatorGranted) : null,
     submittedCount: capSubmitted,
     totalExpected: record
       ? round1(players.reduce((s, p) => s + expectedEmission(p, state.currentYear), 0))
       : null,
     totalRealized: hasRealized ? sum(record!.realized) : null,
-    totalNetPosition:
-      record && Object.keys(record.netPosition).length > 0 ? sum(record.netPosition) : null,
     totalCostThisYear: settlement
       ? round1(Object.values(settlement).reduce((s, x) => s + x.yearCost, 0))
       : null,

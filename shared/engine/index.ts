@@ -10,20 +10,14 @@ export const CAP_MECHANISMS: Record<CapMode, CapMechanism> = {
   auctioning,
 }
 
-export { MechanismNotImplementedError, type CapMechanism } from './capMechanism'
+export { type CapMechanism } from './capMechanism'
 export { realizeYear, expectedEmission } from './emissions'
-export {
-  abatementCost,
-  optimalAbatement,
-  optimalYearCost,
-  type AbatementCoeff,
-} from './abatement'
-export { generateHistoryForIndustry, generatePlayerProfile } from './playerGeneration'
+export { abatementCost, optimalAbatement, optimalYearCost } from './abatement'
+export { generateHistoryForIndustry } from './playerGeneration'
 export { createRng, round1, type Rng } from './rng'
 export { computeNetPositions } from './trade'
 export { windowSum, computeFreeCreditLimit } from './grandfathering'
-export { grantRegulator } from './regulator'
-export { clearAuction, type AuctionBid } from './auction'
+export { clearAuction } from './auction'
 export {
   matchOrder,
   cancelOrder,

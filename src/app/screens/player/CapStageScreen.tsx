@@ -28,7 +28,7 @@ export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
   const freeAllocation = snap.you.freeAllocation ?? 0
   return (
     <div className="flex flex-col gap-5">
-      <AllocationCard freeAllocation={freeAllocation} regulatorRequest={null} mode={snap.capMode!} />
+      <AllocationCard freeAllocation={freeAllocation} mode={snap.capMode!} />
       <WarningBanner>
         These are the only credits issued to you — there is no fixed-price sale. Your expected
         Year {snap.currentYear} emission is <strong>{snap.you.expectedEmission ?? '—'} tCO₂</strong>{' '}

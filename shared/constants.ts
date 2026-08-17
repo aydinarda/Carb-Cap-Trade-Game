@@ -9,8 +9,6 @@ export type Industry = keyof typeof INDUSTRIES
 
 export const INDUSTRY_NAMES = Object.keys(INDUSTRIES) as Industry[]
 
-export const INDUSTRY_PROBS = [0.25, 0.25, 0.25, 0.25]
-
 export const FREE_CREDIT_RATIO = 0.8
 export const HISTORY_WINDOW = 10
 export const BASELINE_YEAR = 10
@@ -55,5 +53,4 @@ export const DEFAULT_ABATEMENT: Record<Industry, { a: number; b: number }> = {
   'Heavy Materials': { a: 8, b: 30 }, // hard (cement/steel) → cuts little
 }
 
-export const MIN_PLAYERS = 1
 export const MAX_PLAYERS = 60

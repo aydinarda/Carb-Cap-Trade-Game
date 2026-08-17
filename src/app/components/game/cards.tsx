@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, Construction, Gavel, Leaf, Trophy, TrendingDown, TrendingUp } from 'lucide-react'
+import { AlertTriangle, Bot, Gavel, Leaf, Trophy } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { Industry } from '@shared/constants'
 import type {
@@ -88,11 +88,9 @@ export function StatCard({
 
 export function AllocationCard({
   freeAllocation,
-  regulatorRequest,
   mode,
 }: {
   freeAllocation: number
-  regulatorRequest: number | null
   mode: CapMode
 }) {
   return (
@@ -113,11 +111,6 @@ export function AllocationCard({
         {mode === 'auctioning' &&
           'No free credits under auctioning — every allowance must be bought from the regulator at the fixed price.'}
       </p>
-      {regulatorRequest !== null && (
-        <div className="mt-2 text-xs font-mono text-accent">
-          + {regulatorRequest.toLocaleString()} credits requested from the regulator
-        </div>
-      )}
     </div>
   )
 }
@@ -241,56 +234,6 @@ export function LeaderboardTable({
           </div>
         )
       })}
-    </div>
-  )
-}
-
-export function NetPositionCard({ netPosition }: { netPosition: number }) {
-  const shortage = netPosition > 0
-  return (
-    <div
-      className={cn(
-        'rounded-xl border p-4',
-        shortage ? 'border-destructive/40 bg-destructive/10' : 'border-primary/40 bg-primary/10',
-      )}
-    >
-      <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-wider mb-1 text-muted-foreground">
-        {shortage ? (
-          <TrendingUp size={12} className="text-destructive" />
-        ) : (
-          <TrendingDown size={12} className="text-primary" />
-        )}
-        Net position
-      </div>
-      <div
-        className={cn(
-          'text-3xl font-bold font-mono',
-          shortage ? 'text-destructive' : 'text-primary',
-        )}
-      >
-        {shortage ? '+' : ''}
-        {netPosition.toLocaleString()}
-        <span className="text-sm text-muted-foreground ml-1.5">tCO₂</span>
-      </div>
-      <p className="text-xs text-muted-foreground mt-1.5">
-        {shortage
-          ? 'Shortage: you emitted more than your credits cover. You would need to buy in the trade stage.'
-          : 'Surplus: your credits cover your emissions. You could sell the surplus in the trade stage.'}
-      </p>
-    </div>
-  )
-}
-
-export function PendingMechanismNotice({ title, note }: { title: string; note?: string }) {
-  return (
-    <div className="rounded-xl border border-accent/30 bg-accent/5 p-5 flex gap-3">
-      <Construction size={20} className="text-accent shrink-0 mt-0.5" />
-      <div>
-        <div className="text-sm font-bold text-accent mb-1">{title}</div>
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          {note ?? 'Details are pending from the game designer. The interface is ready — the mechanics will be plugged in once they are specified.'}
-        </p>
-      </div>
     </div>
   )
 }

@@ -26,19 +26,18 @@ export function optimalAbatement(coeff: AbatementCoeff, price: number): number {
 
 /**
  * The minimum achievable expected cost for a company playing perfectly: abate to
- * r*, then cover the residual against its free credits — buy the shortfall at
- * buyPrice or sell the surplus at sellPrice. Used as the per-company benchmark so
- * the leaderboard measures skill (distance from optimum), not sector/size luck.
+ * r*, then settle the residual against its free credits at the market price — buy
+ * the shortfall or sell the surplus, both at `price`. Used as the per-company
+ * benchmark so the leaderboard measures skill (distance from optimum), not luck.
  */
 export function optimalYearCost(
   expected: number,
   free: number,
   coeff: AbatementCoeff,
-  buyPrice: number,
-  sellPrice: number,
+  price: number,
 ): number {
-  const r = optimalAbatement(coeff, buyPrice)
+  const r = optimalAbatement(coeff, price)
   const abated = expected * (1 - r)
-  const cover = abated >= free ? buyPrice * (abated - free) : -sellPrice * (free - abated)
-  return round1(abatementCost(expected, r, coeff) + cover)
+  // cover > 0 → buy the shortfall; cover < 0 → sell the surplus (income).
+  return round1(abatementCost(expected, r, coeff) + price * (abated - free))
 }

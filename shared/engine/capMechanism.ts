@@ -1,12 +1,5 @@
 import type { CapMode, Player, SessionConfig } from '../types'
 
-export class MechanismNotImplementedError extends Error {
-  constructor(mode: CapMode) {
-    super(`Cap mechanism "${mode}" is not implemented yet — details pending from the game designer.`)
-    this.name = 'MechanismNotImplementedError'
-  }
-}
-
 export interface CapMechanism {
   readonly mode: CapMode
   readonly implemented: boolean

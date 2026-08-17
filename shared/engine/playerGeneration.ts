@@ -1,4 +1,4 @@
-import { INDUSTRIES, INDUSTRY_NAMES, INDUSTRY_PROBS } from '../constants'
+import { INDUSTRIES } from '../constants'
 import type { PlayerProfile } from '../types'
 import { round1, type Rng } from './rng'
 
@@ -13,9 +13,8 @@ import { round1, type Rng } from './rng'
  * to Year_10 while also treating Year_10 as the baseline year. Implemented
  * verbatim; intent to be confirmed with the game designer.
  *
- * The notebook assigns industries randomly (25% each); in the game students
- * pick their own industry at join, so the random choice lives in
- * generatePlayerProfile and the history generation is separate.
+ * The notebook assigns industries randomly (25% each); in the game students pick
+ * their own industry at join, so only the history generation lives here.
  */
 export function generateHistoryForIndustry(
   industry: keyof typeof INDUSTRIES,
@@ -35,10 +34,4 @@ export function generateHistoryForIndustry(
   }
 
   return { industry, emissions }
-}
-
-/** Notebook-style generation with a random industry (kept for tests/simulation). */
-export function generatePlayerProfile(rng: Rng): PlayerProfile {
-  const industry = rng.choice(INDUSTRY_NAMES, INDUSTRY_PROBS)
-  return generateHistoryForIndustry(industry, rng)
 }
