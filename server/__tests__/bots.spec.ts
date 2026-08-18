@@ -85,6 +85,69 @@ describe('bot archetypes — single tick', () => {
   }
 })
 
+describe('grandfathering bots', () => {
+  it('sells trader bots an opening book so a market maker can quote both sides', () => {
+    const s = new Session('grandfathering', 1)
+    const mm = s.addBot('marketMaker')
+    s.addPlayer('Human', 'Power & Utilities')
+    s.addBot('compliance')
+    s.startYear()
+    const rec = s.currentYearRecord()!
+
+    // The bug this pins: grandfathering used to price regulatorGranted at 0, which made
+    // seedTraderBots bail, leaving the market maker with nothing to sell.
+    expect(rec.primaryPrice).toBeGreaterThan(0)
+    expect(rec.regulatorGranted[mm.id]).toBeGreaterThan(0)
+    // A financial player has no history to grandfather, so it draws no free allocation.
+    expect(rec.freeAllocation[mm.id]).toBe(0)
+
+    s.closeCapStage()
+    s.openTrade()
+    marketMaker.trade(ctxFor(s, mm.id))
+    const own = rec.orders.filter((o) => o.playerId === mm.id && o.status === 'open')
+    expect(own.some((o) => o.side === 'buy')).toBe(true)
+    expect(own.some((o) => o.side === 'sell')).toBe(true)
+  })
+
+  it('does not let a trader bot dilute the real emitters\' allocation', () => {
+    const withoutBot = new Session('grandfathering', 3)
+    withoutBot.addPlayer('Alice', 'Power & Utilities')
+    withoutBot.startYear()
+    const soloAlice = withoutBot.currentYearRecord()!.freeAllocation.P1
+
+    const withBot = new Session('grandfathering', 3)
+    withBot.addPlayer('Alice', 'Power & Utilities')
+    withBot.addBot('marketMaker')
+    withBot.startYear()
+    expect(withBot.currentYearRecord()!.freeAllocation.P1).toBe(soloAlice)
+  })
+
+  it('tightens with the LRF only when the scenario asks for it', () => {
+    const flat = new Session('grandfathering', 1)
+    flat.addPlayer('Alice', 'Power & Utilities')
+    flat.startYear()
+    const flatYear11 = flat.currentYearRecord()!.freeAllocation.P1
+
+    const tightening = new Session('grandfathering', 1, {
+      allocation: { applyLRFToGrandfathering: true, capReductionFactor: 0.9 },
+    })
+    tightening.addPlayer('Alice', 'Power & Utilities')
+    tightening.startYear()
+    // Year 11 is the exponent origin, so both start equal…
+    expect(tightening.currentYearRecord()!.freeAllocation.P1).toBe(flatYear11)
+    for (const s of [flat, tightening]) {
+      s.closeCapStage()
+      s.openTrade()
+      s.closeTrade()
+      s.advanceYear()
+    }
+    // …and only the opted-in session shrinks in year 12.
+    expect(tightening.currentYearRecord()!.freeAllocation.P1).toBeLessThan(
+      flat.currentYearRecord()!.freeAllocation.P1,
+    )
+  })
+})
+
 describe('bot archetypes under benchmarking (no primary auction)', () => {
   for (const [name, arch] of Object.entries(ARCHETYPES)) {
     it(`${name}: trades on free allocation without shorting`, () => {

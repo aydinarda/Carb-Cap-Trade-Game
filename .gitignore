@@ -17,3 +17,6 @@ pnpm-debug.log*
 
 # os
 .DS_Store
+
+# simulation output (single sqlite file, regenerated)
+sim/out/

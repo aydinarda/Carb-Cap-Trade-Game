@@ -46,17 +46,21 @@ pnpm start      # single server on :3001 serving both
 ## Instructor run-book (one class session)
 
 1. Open `/host`, pick the cap mechanism, enter the host key, **Create session**.
-   Adjust settings in the lobby if needed (regulator price, low/high penalty rates).
+   Adjust settings in the lobby if needed (penalty rate, auction supply ratio, cap
+   reduction factor, per-sector benchmarks). Optionally add market bots.
 2. Project the lobby: students join at the site root with the 4-letter room code,
    pick an industry, and get a generated 10-year emission history.
 3. **Start Year 11** — the roster locks, free credits are allocated.
-4. Cap stage: students request extra credits from the regulator pool (20% of the
-   baseline; oversubscription is cut pro-rata; stragglers default to 0).
-5. **Close cap stage** — realized emissions are drawn and revealed.
+4. Cap stage: under auctioning students submit a sealed bid (quantity + max price);
+   under grandfathering and benchmarking there is nothing to submit — the panel
+   shows the allocation and the gap it leaves.
+5. **Close cap stage** — the auction clears (auctioning), then expected emissions
+   are shown. Realized emissions are drawn at year end, not here.
 6. **Open the market** — students post limit buy/sell orders; the book matches them
    live. The host screen shows the order book, trades feed, and price stats.
-7. **Close market & settle penalties** — shorts covered by leftover unsold offers
-   pay the low rate, the rest the high rate; the leaderboard updates.
+7. **Close market & settle** — emissions are realized, uncovered tonnes are charged
+   the penalty rate and carried as a make-good debt, surpluses are banked, and the
+   leaderboard updates.
 8. **Start Year 12** — optionally switch the cap mechanism first (year-summary
    panel); the ten-year window moves and allocation recomputes. Repeat.
 9. **End game** anytime for the final leaderboard.
@@ -66,10 +70,16 @@ Refreshing a device resumes the same identity automatically (token in localStora
 ## Tests
 
 ```bash
-pnpm test            # engine unit tests (grandfathering math is verified against
-                     # the designer's own xlsx output, transcribed as a fixture)
-pnpm typecheck
-node scripts/bots-smoke.mjs   # auctioning + bots wire-protocol smoke (needs the server running)
+pnpm test            # engine + config + sim unit tests. Grandfathering math is
+                     # verified against the designer's own xlsx output, and
+                     # server/__tests__/golden.spec.ts pins the engine's literal
+                     # output so a refactor cannot move it unnoticed.
+pnpm typecheck       # client, server and sim
+
+# Wire-protocol smoke tests — each needs `pnpm dev` running.
+node scripts/bots-smoke.mjs    # auctioning + bots
+node scripts/bench-smoke.mjs   # benchmarking: allocation, tightening, seeded traders
+node scripts/gf-smoke.mjs      # grandfathering: bots quote both sides
 ```
 
 ## Deploy to Render
@@ -89,15 +99,53 @@ consider the paid starter instance for game day.
 ## Architecture
 
 ```
-shared/           types, constants, event contract, pure game engine (unit-tested)
-  engine/         playerGeneration, emissions, abatement, order book, settlement,
-                  and the three allocation regimes (grandfathering, benchmarking,
-                  auctioning) behind one CapMechanism interface — everything
-                  mode-specific lives there, so a combined regime is a new file
-server/bots/      four bot archetypes driven by one interval (BotManager)
+shared/config/    GameConfig — every tunable number in one nested object, plus the
+                  deep-merge that turns a partial override into a full config
+shared/           types, constants (the sector tables), event contract, game engine
+  engine/         playerGeneration, emissions, order book, settlement; the three
+                  allocation regimes behind one CapMechanism interface; and the
+                  abatement MAC curves behind one AbatementModel interface
+server/bots/      four bot archetypes; stepBots() advances them one tick and is
+                  shared by the live BotManager interval and the simulator
 server/           Express + Socket.IO: Session state machine, role-scoped views
 src/app/          React client: net/ (socket + context), screens/player, screens/host
+sim/              headless scenario harness (see below)
 ```
+
+Nothing in the engine reads a hardcoded number: `new Session(mode, seed, override)` takes
+a deep-partial `GameConfig`, so a scenario can change the penalty rate, a sector's
+abatement curve, emission volatility or the market maker's spread without touching code.
+The host UI and the wire payload are unchanged — the host snapshot carries a narrow
+derived `HostConfigView`, not the whole config.
+
+## Simulation harness
+
+`pnpm sim` runs scenarios headlessly and in-process — no sockets, so a five-year game
+settles in milliseconds and a full sweep is seconds. It drives the real `Session` through
+the same methods a socket would and calls the real `stepBots`, so what it measures is the
+shipped engine, not a model of it.
+
+```bash
+pnpm sim -- --list                                  # the scenario catalog
+pnpm sim -- --scenario depth-sweep --seeds 20       # one sweep, 20 seeds each
+pnpm sim -- --scenario abatement-models --trades    # also record every trade
+pnpm sim                                            # everything, 5 seeds
+```
+
+Alongside the liquidity bots, each run populates the class with **simulated students** —
+four behaviour archetypes (`passive`, `rational`, `hedger`, `opportunist`) crossed with a
+sector mix, each with its own participation rate, cover target and price noise. The
+behaviour mix moves the market far more than the bot mix does.
+
+Everything lands in one SQLite file, `sim/out/sim.db` (via Node's built-in `node:sqlite`
+— no dependency), appended across runs so sweeps stay comparable. Tables: `runs`, `years`,
+`players`, `trades`; plus views `v_price_by_scenario`, `v_depth_by_scenario` and
+`v_efficiency_by_behaviour` for the recurring questions.
+
+One metric is analysis-only and never surfaced in the game: `efficient_price`, the price
+that would clear the class's aggregate shortage against its own MAC curves. It is the
+yardstick for whether the market found the right answer — the in-game signal remains the
+previous year's discovered price plus the penalty ceiling.
 
 All game logic runs server-side; clients render role-scoped snapshots pushed after
 every mutation. Players never see others' private numbers or unrevealed emissions.

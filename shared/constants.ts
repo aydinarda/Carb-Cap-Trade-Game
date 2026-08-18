@@ -1,3 +1,11 @@
+/**
+ * Sector definitions and the tables derived from them.
+ *
+ * Everything tunable now lives in `shared/config` — this file is the remaining source of
+ * truth for the SET of sectors, because `Industry` is a TypeScript type derived from
+ * these keys and so cannot be configured at runtime. The per-sector NUMBERS here seed
+ * `DEFAULT_GAME_CONFIG` and can be overridden per session.
+ */
 export const INDUSTRIES = {
   'Power & Utilities': { low: 850, high: 1150 },
   'Heavy Materials': { low: 650, high: 950 },
@@ -8,24 +16,6 @@ export const INDUSTRIES = {
 export type Industry = keyof typeof INDUSTRIES
 
 export const INDUSTRY_NAMES = Object.keys(INDUSTRIES) as Industry[]
-
-export const FREE_CREDIT_RATIO = 0.8
-export const HISTORY_WINDOW = 10
-export const BASELINE_YEAR = 10
-export const FIRST_GAME_YEAR = 11
-
-/**
- * Realized emissions are drawn from each company's own distribution, centred on
- * its expected (mean) emission — the most recent known level — with this
- * standard deviation as a fraction of the mean. Players plan against the mean;
- * the actual realization (revealed only at year end) can differ by this spread.
- */
-export const EMISSION_VOLATILITY = 0.08
-
-// Host-adjustable defaults
-export const DEFAULT_PENALTY_RATE = 20 // cost per tCO2 left uncovered — the effective ceiling on the market price
-export const DEFAULT_AUCTION_CAP_RATIO = 1.0 // auctioning supply = this × Σbaseline; host-tunable (lower = scarcer, stronger price signal)
-export const DEFAULT_CAP_REDUCTION_FACTOR = 0.97 // auction supply shrinks by this factor each year (EU-ETS LRF); 0.97 = −3%/yr, 1 = flat
 
 /**
  * Sector average annual emission — the midpoint of the generation range above.
@@ -58,14 +48,6 @@ export const DEFAULT_BENCHMARK = Object.fromEntries(
 ) as Record<Industry, number>
 
 /**
- * Pure-trader bots (market makers, speculators) get no free allocation, so under a
- * mode with no primary auction they would have nothing to quote asks against. They
- * buy an opening book at the reference price instead — these size that purchase.
- */
-export const BOT_SEED_MM_FRAC = 0.18 // × the class's free allocation; mirrors MM_INV_FRAC
-export const BOT_SEED_SPEC = 20 // flat; mirrors SPEC_INIT_INV
-
-/**
  * Per-sector marginal abatement cost (MAC): cost to cut the f-th fraction of a
  * company's emissions is `a + b·f` per tonne (rising — cheap cuts first). The
  * optimal cut is where MAC meets the carbon price: r* = (price − a)/b. Sectors
@@ -77,5 +59,3 @@ export const DEFAULT_ABATEMENT: Record<Industry, { a: number; b: number }> = {
   Transport: { a: 5, b: 20 },
   'Heavy Materials': { a: 8, b: 30 }, // hard (cement/steel) → cuts little
 }
-
-export const MAX_PLAYERS = 60

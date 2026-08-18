@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { EMISSION_VOLATILITY } from '../../constants'
+import { DEFAULT_GAME_CONFIG } from '../../config'
+
+const EMISSION_VOLATILITY = DEFAULT_GAME_CONFIG.emissions.volatility
 import { expectedEmission, realizeYear } from '../emissions'
 import { createRng } from '../rng'
 import { XLSX_PLAYERS } from './fixtures'

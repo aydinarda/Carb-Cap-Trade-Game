@@ -1,28 +1,19 @@
 import type { Server } from 'socket.io'
 import type { ClientToServerEvents, ServerToClientEvents } from '../../shared/events'
 import { createRng, type Rng } from '../../shared/engine'
-import { GameError, type Session, type SessionStore } from '../session'
-import * as compliance from './compliance'
-import * as marketMaker from './marketMaker'
-import * as noise from './noise'
-import * as speculator from './speculator'
 import { BOT_TICK_MS } from '../config'
-import type { BotCtx, BotRuntime, BotType } from './types'
+import type { Session, SessionStore } from '../session'
+import { stepBots } from './step'
+import type { BotRuntime } from './types'
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents>
 type Broadcast = (io: IO, session: Session) => void | Promise<void>
 
-const ARCHETYPES: Record<
-  BotType,
-  { trade: (c: BotCtx) => boolean; auction: (c: BotCtx) => boolean }
-> = { compliance, marketMaker, speculator, noise }
-
 /**
- * Drives all backend bots. A single ~2.5s interval scans every live session and lets
- * each bot act once per tick (auction bid in 'cap', an order-book move in 'trade').
- * Modes without a primary auction skip the cap stage entirely. Broadcasts only when
- * a bot actually did something. Uses its own RNG per session so bot randomness never
- * perturbs the engine's seeded emission realizations.
+ * Drives all backend bots. A single interval scans every live session and lets each bot
+ * act once per tick via `stepBots` — the same function the headless simulator calls.
+ * Broadcasts only when a bot actually did something. Uses its own RNG per session so bot
+ * randomness never perturbs the engine's seeded emission realizations.
  */
 export class BotManager {
   private timer?: NodeJS.Timeout
@@ -67,35 +58,9 @@ export class BotManager {
 
   private tick() {
     for (const session of this.store.activeSessions()) {
-      const phase = session.state.phase
-      if (phase !== 'cap' && phase !== 'trade') continue
-      // Under a free-allocation mode there is no primary auction to bid into, so the
-      // bots only work the order book once the market opens.
-      if (phase === 'cap' && !session.usesAuction) continue
-      const record = session.currentYearRecord()
-      if (!record) continue
-      const bots = session.state.players.filter((p) => p.isBot && p.botType)
-      if (bots.length === 0) continue
-
-      const rng = this.rngFor(session)
-      let acted = false
-      for (const bot of bots) {
-        // Cap stage: bid once (don't re-submit/re-broadcast every tick).
-        if (phase === 'cap' && record.auctionBid[bot.id] !== undefined) continue
-        const arch = ARCHETYPES[bot.botType as BotType]
-        if (!arch) continue
-        const rt = this.rtFor(session.state.roomCode, bot.id)
-        // Draw this bot's persistent personality bias once (type-specific dispersion).
-        if (rt.bias === undefined) {
-          rt.bias = rng.normal(0, session.state.config.bots.sigma[bot.botType as BotType])
-        }
-        const ctx: BotCtx = { session, bot, rng, rt }
-        try {
-          acted = (phase === 'cap' ? arch.auction : arch.trade)(ctx) || acted
-        } catch (e) {
-          if (!(e instanceof GameError)) console.error('[bot]', e)
-        }
-      }
+      const acted = stepBots(session, this.rngFor(session), (playerId) =>
+        this.rtFor(session.state.roomCode, playerId),
+      )
       if (acted) void this.broadcast(this.io, session)
     }
   }

@@ -90,7 +90,7 @@ describe('golden — grandfathering', () => {
           "P2": 254.5,
           "P3": 2217.1,
         },
-        "primaryPrice": 0,
+        "primaryPrice": 10,
         "realized": {
           "P1": 792.5,
           "P2": 188.8,
@@ -155,7 +155,7 @@ describe('golden — grandfathering', () => {
           "P2": 174.4,
           "P3": 2467.7,
         },
-        "primaryPrice": 0,
+        "primaryPrice": 12,
         "realized": {
           "P1": 631.7,
           "P2": 188.9,

@@ -110,9 +110,10 @@ describe('benchmarking', () => {
 
   it('prices regulatorGranted at the reference (the trader-bot seed)', () => {
     const record = { auctionPrice: null } as never
+    // Both free-allocation modes sell the trader bots their opening book at the
+    // reference price — nothing else ever lands in regulatorGranted under either.
     expect(CAP_MECHANISMS.benchmarking.primaryPrice(record, DEFAULT_CONFIG, 12.4)).toBe(12.4)
-    // Grandfathering issues nothing priced at all.
-    expect(CAP_MECHANISMS.grandfathering.primaryPrice(record, DEFAULT_CONFIG, 12.4)).toBe(0)
+    expect(CAP_MECHANISMS.grandfathering.primaryPrice(record, DEFAULT_CONFIG, 12.4)).toBe(12.4)
   })
 })
 
