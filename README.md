@@ -142,6 +142,17 @@ Everything lands in one SQLite file, `sim/out/sim.db` (via Node's built-in `node
 `players`, `trades`; plus views `v_price_by_scenario`, `v_depth_by_scenario` and
 `v_efficiency_by_behaviour` for the recurring questions.
 
+### Dashboard
+
+```bash
+pnpm sim:viz          # -> http://localhost:3002   (--port / --db to override)
+```
+
+A local, build-free dashboard over that file: price discovery per cap regime, the depth
+threshold, price by abatement curve, the stringency and penalty sweeps, and cost-above-optimum
+per student archetype — plus a read-only SQL box for anything the panels don't cover. Every
+chart has a table view, and `?theme=light` / `?theme=dark` pins the mode.
+
 One metric is analysis-only and never surfaced in the game: `efficient_price`, the price
 that would clear the class's aggregate shortage against its own MAC curves. It is the
 yardstick for whether the market found the right answer — the in-game signal remains the

@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cap &amp; Trade — simulation results</title>
+<style>
+  /* Palette: the validated reference instance. Categorical slots 1–4 for nominal
+     series (cap mode, abatement model, behaviour); a single-hue blue ordinal ramp
+     for market-maker count, which is ORDERED and must not read as four identities. */
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --plane: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+    --series-4: #eda100;
+    --ord-1: #86b6ef;
+    --ord-2: #3987e5;
+    --ord-3: #1c5cab;
+    --ord-4: #0d366b;
+    --good: #0ca30c;
+    --critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --plane: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --series-3: #199e70;
+      --series-4: #c98500;
+      --ord-1: #2a78d6;
+      --ord-2: #5598e7;
+      --ord-3: #86b6ef;
+      --ord-4: #cde2fb;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --plane: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --ord-1: #2a78d6;
+    --ord-2: #5598e7;
+    --ord-3: #86b6ef;
+    --ord-4: #cde2fb;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--plane);
+    color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 24px 64px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  h2 { font-size: 15px; margin: 0 0 2px; letter-spacing: -0.005em; }
+  .sub { color: var(--text-secondary); font-size: 13px; margin: 0 0 24px; }
+  .note { color: var(--text-muted); font-size: 12px; margin: 6px 0 0; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 28px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .tile .k { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .tile .v { font-size: 24px; font-weight: 650; margin-top: 2px; }
+
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px 18px 12px; margin-bottom: 20px; }
+  .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 20px; }
+  .grid2 .card { margin-bottom: 0; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0 0; padding: 0; list-style: none; }
+  .legend li { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+
+  button {
+    font: inherit; font-size: 12px; color: var(--text-secondary);
+    background: transparent; border: 1px solid var(--border);
+    border-radius: 7px; padding: 4px 10px; cursor: pointer;
+  }
+  button:hover { color: var(--text-primary); }
+  button[aria-pressed="true"] { color: var(--text-primary); border-color: var(--text-muted); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 12px; margin-top: 12px; }
+  th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; font-variant-numeric: normal; }
+  th { color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em; }
+  .table-wrap { overflow-x: auto; }
+  [hidden] { display: none !important; }
+
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .tick { fill: var(--text-muted); font-size: 11px; }
+  .axis-title { fill: var(--text-muted); font-size: 11px; }
+  .dlabel { font-size: 11px; font-weight: 600; }
+
+  #tip {
+    position: fixed; z-index: 10; pointer-events: none;
+    opacity: 0; visibility: hidden; transition: opacity .1s; background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+    font-size: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.14); max-width: 260px;
+  }
+  #tip .th { color: var(--text-muted); font-size: 11px; margin-bottom: 4px; }
+  #tip .row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  #tip .row b { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  textarea {
+    width: 100%; min-height: 84px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--plane); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px; resize: vertical;
+  }
+  .empty { color: var(--text-muted); font-size: 13px; padding: 20px 0; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="tip" role="tooltip"></div>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Cap &amp; Trade — simulation results</h1>
+      <p class="sub" id="sub">loading…</p>
+    </div>
+    <button id="theme" type="button">Toggle theme</button>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+  <div id="panels"></div>
+
+  <div class="card">
+    <div class="card-head"><div>
+      <h2>Ad-hoc query</h2>
+      <p class="note">Read-only. Tables: <code>runs</code>, <code>years</code>, <code>players</code>, <code>trades</code>. Views: <code>v_price_by_scenario</code>, <code>v_depth_by_scenario</code>, <code>v_efficiency_by_behaviour</code>.</p>
+    </div></div>
+    <textarea id="sql">SELECT * FROM v_depth_by_scenario ORDER BY humans, market_makers;</textarea>
+    <div style="margin-top:10px"><button id="run" type="button">Run query</button></div>
+    <div id="sqlout"></div>
+  </div>
+</div>
+
+<script type="module">
+const $ = (s, r = document) => r.querySelector(s)
+const el = (t, a = {}, kids = []) => {
+  const n = document.createElementNS(
+    t === 'svg' || SVG_TAGS.has(t) ? 'http://www.w3.org/2000/svg' : 'http://www.w3.org/1999/xhtml', t)
+  for (const [k, v] of Object.entries(a)) if (v != null) n.setAttribute(k, v)
+  for (const c of [].concat(kids)) n.append(c)
+  return n
+}
+const SVG_TAGS = new Set(['g','path','line','rect','circle','text','polyline','svg'])
+const CAT = ['var(--series-1)','var(--series-2)','var(--series-3)','var(--series-4)']
+const ORD = ['var(--ord-1)','var(--ord-2)','var(--ord-3)','var(--ord-4)']
+const tip = $('#tip')
+
+const fmt = {
+  num: (v) => v == null ? '—' : (Math.round(v * 100) / 100).toLocaleString(),
+  pct: (v) => v == null ? '—' : `${(v * 100).toFixed(1)}%`,
+  int: (v) => v == null ? '—' : Math.round(v).toLocaleString(),
+}
+
+function showTip(evt, title, rows) {
+  tip.innerHTML = ''
+  tip.append(el('div', { class: 'th' }, [title]))
+  for (const r of rows) {
+    const row = el('div', { class: 'row' })
+    if (r.color) row.append(el('span', { class: 'swatch', style: `background:${r.color}` }))
+    row.append(el('span', {}, [r.label]))
+    row.append(el('b', {}, [r.value]))
+    tip.append(row)
+  }
+  tip.style.visibility = 'visible'
+  tip.style.opacity = '1'
+  const pad = 14
+  const r = tip.getBoundingClientRect()
+  let x = evt.clientX + pad, y = evt.clientY + pad
+  if (x + r.width > innerWidth - 8) x = evt.clientX - r.width - pad
+  if (y + r.height > innerHeight - 8) y = evt.clientY - r.height - pad
+  tip.style.left = `${x}px`; tip.style.top = `${y}px`
+}
+const hideTip = () => { tip.style.opacity = '0'; tip.style.visibility = 'hidden' }
+
+/** Nice round tick values covering [0, max]. */
+function ticks(max, count = 5) {
+  if (!(max > 0)) return [0, 1]
+  const raw = max / count
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)))
+  const step = [1, 2, 2.5, 5, 10].find((s) => s * mag >= raw) * mag
+  const out = []
+  for (let v = 0; v <= max + step * 0.001; v += step) out.push(Math.round(v * 1e6) / 1e6)
+  return out
+}
+
+/**
+ * Multi-series line chart. `series` = [{name, color, points:[{x,y}]}].
+ * Ships a crosshair + shared tooltip, a legend, and a direct label on each line's
+ * last point — identity is never carried by color alone.
+ */
+function lineChart({ series, xTitle, yTitle, yFmt = fmt.num, xFmt = fmt.num, xTickValues, width = 720, labelLines = true }) {
+  const W = width, H = 300, m = { t: 14, r: labelLines ? 64 : 20, b: 40, l: 56 }
+  const xs = [...new Set(series.flatMap((s) => s.points.map((p) => p.x)))].sort((a, b) => a - b)
+  const xMin = xs[0], xMax = xs[xs.length - 1]
+  const yMax = Math.max(...series.flatMap((s) => s.points.map((p) => p.y ?? 0)), 0)
+  const X = (v) => m.l + (xMax === xMin ? 0 : (v - xMin) / (xMax - xMin)) * (W - m.l - m.r)
+  const Y = (v) => H - m.b - (yMax ? (v / yMax) : 0) * (H - m.t - m.b)
+
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' })
+  for (const t of ticks(yMax)) {
+    svg.append(el('line', { x1: m.l, x2: W - m.r, y1: Y(t), y2: Y(t), stroke: 'var(--grid)', 'stroke-width': 1 }))
+    svg.append(el('text', { class: 'tick', x: m.l - 8, y: Y(t) + 4, 'text-anchor': 'end' }, [yFmt(t)]))
+  }
+  for (const x of (xTickValues ?? xs)) {
+    svg.append(el('text', { class: 'tick', x: X(x), y: H - m.b + 18, 'text-anchor': 'middle' }, [xFmt(x)]))
+  }
+  svg.append(el('line', { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: 'var(--axis)', 'stroke-width': 1 }))
+  svg.append(el('text', { class: 'axis-title', x: (m.l + W - m.r) / 2, y: H - 4, 'text-anchor': 'middle' }, [xTitle]))
+  svg.append(el('text', { class: 'axis-title', x: 0, y: 0, transform: `translate(13,${(H - m.b + m.t) / 2}) rotate(-90)`, 'text-anchor': 'middle' }, [yTitle]))
+
+  const endLabels = []
+  const crosshair = el('line', { y1: m.t, y2: H - m.b, stroke: 'var(--axis)', 'stroke-width': 1, opacity: 0 })
+  svg.append(crosshair)
+
+  series.forEach((s) => {
+    const pts = s.points.filter((p) => p.y != null).sort((a, b) => a.x - b.x)
+    if (!pts.length) return
+    svg.append(el('path', {
+      d: pts.map((p, i) => `${i ? 'L' : 'M'}${X(p.x)},${Y(p.y)}`).join(' '),
+      fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+    }))
+    for (const p of pts) {
+      // 2px surface ring keeps overlapping markers legible where lines cross.
+      svg.append(el('circle', { cx: X(p.x), cy: Y(p.y), r: 4, fill: s.color, stroke: 'var(--surface-1)', 'stroke-width': 2 }))
+    }
+    const last = pts[pts.length - 1]
+    if (labelLines) endLabels.push({ x: X(last.x), y: Y(last.y), name: s.name, color: s.color })
+  })
+
+  // Place end labels top-down, dropping any that would collide with the one above.
+  endLabels.sort((a, b) => a.y - b.y)
+  let lastLabelY = -Infinity
+  for (const l of endLabels) {
+    if (l.y - lastLabelY < 14) continue
+    lastLabelY = l.y
+    svg.append(el('text', { class: 'dlabel', x: l.x + 9, y: l.y + 4, fill: 'var(--text-secondary)' }, [l.name]))
+  }
+
+  svg.addEventListener('pointermove', (evt) => {
+    const box = svg.getBoundingClientRect()
+    const vx = ((evt.clientX - box.left) / box.width) * W
+    let best = xs[0]
+    for (const x of xs) if (Math.abs(X(x) - vx) < Math.abs(X(best) - vx)) best = x
+    crosshair.setAttribute('x1', X(best)); crosshair.setAttribute('x2', X(best))
+    crosshair.setAttribute('opacity', 0.5)
+    showTip(evt, `${xTitle}: ${xFmt(best)}`, series.map((s) => {
+      const p = s.points.find((q) => q.x === best)
+      return { color: s.color, label: s.name, value: p ? yFmt(p.y) : '—' }
+    }))
+  })
+  svg.addEventListener('pointerleave', () => { hideTip(); crosshair.setAttribute('opacity', 0) })
+  return svg
+}
+
+/** Grouped/simple bar chart over nominal categories, anchored to the baseline. */
+function barChart({ rows, xTitle, yTitle, yFmt = fmt.num, colorOf, width = 720 }) {
+  const W = width, H = 300, m = { t: 14, r: 16, b: 46, l: 64 }
+  const yMax = Math.max(...rows.map((r) => r.value ?? 0), 0)
+  const band = (W - m.l - m.r) / rows.length
+  const bw = Math.min(72, band - 14) // ≥2px surface gap between adjacent bars
+  const Y = (v) => H - m.b - (yMax ? v / yMax : 0) * (H - m.t - m.b)
+
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' })
+  for (const t of ticks(yMax)) {
+    svg.append(el('line', { x1: m.l, x2: W - m.r, y1: Y(t), y2: Y(t), stroke: 'var(--grid)', 'stroke-width': 1 }))
+    svg.append(el('text', { class: 'tick', x: m.l - 8, y: Y(t) + 4, 'text-anchor': 'end' }, [yFmt(t)]))
+  }
+  svg.append(el('line', { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: 'var(--axis)', 'stroke-width': 1 }))
+  svg.append(el('text', { class: 'axis-title', x: 0, y: 0, transform: `translate(15,${(H - m.b + m.t) / 2}) rotate(-90)`, 'text-anchor': 'middle' }, [yTitle]))
+
+  rows.forEach((r, i) => {
+    const cx = m.l + band * i + band / 2
+    const color = colorOf(r, i)
+    const h = Math.max(0, H - m.b - Y(r.value ?? 0))
+    const bar = el('rect', {
+      x: cx - bw / 2, y: Y(r.value ?? 0), width: bw, height: h,
+      rx: 4, fill: color,
+    })
+    // Square off the baseline end so the bar sits on the axis, not floating above it.
+    if (h > 4) svg.append(el('rect', { x: cx - bw / 2, y: H - m.b - 4, width: bw, height: 4, fill: color }))
+    svg.append(bar)
+    svg.append(el('text', { class: 'dlabel', x: cx, y: Y(r.value ?? 0) - 7, 'text-anchor': 'middle', fill: 'var(--text-secondary)' }, [yFmt(r.value)]))
+    svg.append(el('text', { class: 'tick', x: cx, y: H - m.b + 18, 'text-anchor': 'middle' }, [String(r.label)]))
+    bar.addEventListener('pointermove', (e) => showTip(e, String(r.label), (r.detail ?? []).concat([{ color, label: yTitle, value: yFmt(r.value) }])))
+    bar.addEventListener('pointerleave', hideTip)
+  })
+  if (xTitle) svg.append(el('text', { class: 'axis-title', x: (m.l + W - m.r) / 2, y: H - 6, 'text-anchor': 'middle' }, [xTitle]))
+  return svg
+}
+
+function legend(items) {
+  return el('ul', { class: 'legend' }, items.map((i) =>
+    el('li', {}, [el('span', { class: 'swatch', style: `background:${i.color}` }), i.name])))
+}
+
+function dataTable(cols, rows) {
+  const t = el('table')
+  t.append(el('tr', {}, cols.map((c) => el('th', {}, [c.label]))))
+  for (const r of rows) t.append(el('tr', {}, cols.map((c) => el('td', {}, [c.get(r)]))))
+  return el('div', { class: 'table-wrap' }, [t])
+}
+
+/** A chart card with a chart/table toggle — the relief rule for low-contrast slots. */
+function card({ title, note, chart, legendItems, tableCols, tableRows }) {
+  const body = el('div')
+  body.append(chart)
+  if (legendItems?.length) body.append(legend(legendItems))
+  const table = dataTable(tableCols, tableRows)
+  table.hidden = true
+
+  const btn = el('button', { type: 'button', 'aria-pressed': 'false' }, ['Table'])
+  btn.addEventListener('click', () => {
+    const showing = btn.getAttribute('aria-pressed') === 'true'
+    btn.setAttribute('aria-pressed', String(!showing))
+    body.hidden = !showing
+    table.hidden = showing
+  })
+
+  return el('div', { class: 'card' }, [
+    el('div', { class: 'card-head' }, [
+      el('div', {}, [el('h2', {}, [title]), note ? el('p', { class: 'note' }, [note]) : el('span')]),
+      btn,
+    ]),
+    body, table,
+  ])
+}
+
+// ---------------------------------------------------------------- render
+
+const data = await (await fetch('/api/data')).json()
+const panels = $('#panels')
+$('#sub').textContent =
+  `${data.meta.dbPath} · ${data.meta.totals.runs} runs · ${data.meta.totals.years} settled years`
+
+$('#tiles').append(...[
+  { k: 'Runs', v: fmt.int(data.meta.totals.runs) },
+  { k: 'Settled years', v: fmt.int(data.meta.totals.years) },
+  { k: 'Scenarios', v: fmt.int(data.meta.scenarios.length) },
+].map((t) => el('div', { class: 'tile' }, [
+  el('div', { class: 'k' }, [t.k]), el('div', { class: 'v' }, [t.v]),
+])))
+
+const groupBy = (rows, key) => {
+  const m = new Map()
+  for (const r of rows) {
+    if (!m.has(r[key])) m.set(r[key], [])
+    m.get(r[key]).push(r)
+  }
+  return m
+}
+
+// 1 — price discovery over the game, per cap regime.
+if (data.pricePath.length) {
+  const byMode = groupBy(data.pricePath, 'capMode')
+  const series = [...byMode.entries()].map(([name, rows], i) => ({
+    name, color: CAT[i % CAT.length],
+    points: rows.map((r) => ({ x: r.year, y: r.vwap })),
+  }))
+  panels.append(card({
+    title: 'Price discovery by cap regime',
+    note: 'Mean traded VWAP per year, averaged across seeds. Diverging paths mean the regime — not the class — is setting the price.',
+    chart: lineChart({ series, xTitle: 'Game year', yTitle: 'VWAP', xFmt: fmt.int }),
+    legendItems: series,
+    tableCols: [
+      { label: 'Cap mode', get: (r) => r.capMode },
+      { label: 'Year', get: (r) => fmt.int(r.year) },
+      { label: 'VWAP', get: (r) => fmt.num(r.vwap) },
+      { label: 'Efficient', get: (r) => fmt.num(r.efficient) },
+      { label: 'n', get: (r) => fmt.int(r.n) },
+    ],
+    tableRows: data.pricePath,
+  }))
+}
+
+// 2 — the shallowness question. Market-maker count is ORDERED, so it gets the
+// single-hue ordinal ramp rather than four unrelated identities.
+if (data.depth.length) {
+  const mmCounts = [...new Set(data.depth.map((r) => r.marketMakers))].sort((a, b) => a - b)
+  const mkSeries = (field) => mmCounts.map((mm, i) => ({
+    name: `${mm} MM`, color: ORD[Math.min(i, ORD.length - 1)],
+    points: data.depth.filter((r) => r.marketMakers === mm).map((r) => ({ x: r.humans, y: r[field] })),
+  }))
+  const humans = [...new Set(data.depth.map((r) => r.humans))].sort((a, b) => a - b)
+  const items = mkSeries('oneSided')
+
+  const grid = el('div', { class: 'grid2' })
+  grid.append(card({
+    title: 'Where market shallowness bites',
+    note: 'Share of ticks with an empty side of the book. Above zero, someone wanting to trade simply cannot.',
+    chart: lineChart({ series: items, xTitle: 'Students in the class', yTitle: 'One-sided ticks', yFmt: fmt.pct, xFmt: fmt.int, xTickValues: humans, width: 500, labelLines: false }),
+    legendItems: items,
+    tableCols: [
+      { label: 'Students', get: (r) => fmt.int(r.humans) },
+      { label: 'MMs', get: (r) => fmt.int(r.marketMakers) },
+      { label: 'One-sided', get: (r) => fmt.pct(r.oneSided) },
+      { label: 'Spread', get: (r) => fmt.num(r.spread) },
+      { label: 'Impact', get: (r) => fmt.num(r.impact) },
+      { label: 'Fill rate', get: (r) => fmt.pct(r.fillRate) },
+    ],
+    tableRows: data.depth,
+  }))
+  const impact = mkSeries('impact')
+  grid.append(card({
+    title: 'Price impact of a normal order',
+    note: 'Mean mid move per 10 credits traded. High impact means one student can move the whole market.',
+    chart: lineChart({ series: impact, xTitle: 'Students in the class', yTitle: 'Impact / 10 cr', xFmt: fmt.int, xTickValues: humans, width: 500, labelLines: false }),
+    legendItems: impact,
+    tableCols: [
+      { label: 'Students', get: (r) => fmt.int(r.humans) },
+      { label: 'MMs', get: (r) => fmt.int(r.marketMakers) },
+      { label: 'Impact', get: (r) => fmt.num(r.impact) },
+      { label: 'Depth', get: (r) => fmt.num(r.depth) },
+    ],
+    tableRows: data.depth,
+  }))
+  panels.append(grid)
+}
+
+// 3 — abatement curve shape.
+if (data.models.length) {
+  const rows = data.models.map((r) => ({
+    label: r.model, value: r.vwap,
+    detail: [
+      { label: 'Abated (t)', value: fmt.int(r.abated) },
+      { label: 'Penalty', value: fmt.int(r.penalty) },
+      { label: 'Class cost', value: fmt.int(r.cost) },
+    ],
+  }))
+  panels.append(card({
+    title: 'Price by abatement curve',
+    note: 'The same class under four MAC shapes. Curves that make shallow cuts cheap pull the price down, because firms abate instead of buying.',
+    chart: barChart({ rows, yTitle: 'VWAP', colorOf: (_r, i) => CAT[i % CAT.length] }),
+    tableCols: [
+      { label: 'Model', get: (r) => r.model },
+      { label: 'VWAP', get: (r) => fmt.num(r.vwap) },
+      { label: 'Abated', get: (r) => fmt.int(r.abated) },
+      { label: 'Penalty', get: (r) => fmt.int(r.penalty) },
+      { label: 'Class cost', get: (r) => fmt.int(r.cost) },
+    ],
+    tableRows: data.models,
+  }))
+}
+
+// 4 + 5 — the two single-series sweeps, side by side. One series → no legend.
+const sweeps = el('div', { class: 'grid2' })
+if (data.stringency.length) {
+  sweeps.append(card({
+    title: 'Benchmark tightness → price',
+    note: 'Transport benchmark (credits) against discovered price. Lower benchmark = scarcer market.',
+    chart: lineChart({
+      series: [{ name: 'VWAP', color: CAT[0], points: data.stringency.map((r) => ({ x: r.benchmark, y: r.vwap })) }],
+      xTitle: 'Transport benchmark (cr)', yTitle: 'VWAP', xFmt: fmt.int, width: 500, labelLines: false,
+    }),
+    tableCols: [
+      { label: 'Benchmark', get: (r) => fmt.int(r.benchmark) },
+      { label: 'VWAP', get: (r) => fmt.num(r.vwap) },
+      { label: 'At ceiling', get: (r) => fmt.pct(r.ceiling) },
+      { label: 'Penalty', get: (r) => fmt.int(r.penalty) },
+    ],
+    tableRows: data.stringency,
+  }))
+}
+if (data.penalty.length) {
+  sweeps.append(card({
+    title: 'Penalty rate → price',
+    note: 'The penalty is the ceiling on what an allowance can be worth. Where the line flattens, the ceiling has stopped binding.',
+    chart: lineChart({
+      series: [{ name: 'VWAP', color: CAT[0], points: data.penalty.map((r) => ({ x: r.penaltyRate, y: r.vwap })) }],
+      xTitle: 'Penalty rate', yTitle: 'VWAP', xFmt: fmt.int, width: 500, labelLines: false,
+    }),
+    tableCols: [
+      { label: 'Penalty rate', get: (r) => fmt.int(r.penaltyRate) },
+      { label: 'VWAP', get: (r) => fmt.num(r.vwap) },
+      { label: 'At ceiling', get: (r) => fmt.pct(r.ceiling) },
+    ],
+    tableRows: data.penalty,
+  }))
+}
+if (sweeps.childElementCount) panels.append(sweeps)
+
+// 6 — how each simulated student archetype does against its own optimum.
+if (data.behaviour.length) {
+  const rows = data.behaviour.map((r) => ({
+    label: r.behaviour, value: r.excess,
+    detail: [
+      { label: 'Mean year cost', value: fmt.int(r.cost) },
+      { label: 'Mean abatement', value: fmt.pct(r.abatement) },
+      { label: 'Observations', value: fmt.int(r.n) },
+    ],
+  }))
+  panels.append(card({
+    title: 'Cost above own optimum, by student archetype',
+    note: 'Lower is better play — distance from the best that company could have done. Never abating puts the passive archetype an order of magnitude behind, so the other three bars are small by construction; read their labels.',
+    chart: barChart({ rows, yTitle: 'Excess cost', colorOf: (_r, i) => CAT[i % CAT.length] }),
+    tableCols: [
+      { label: 'Behaviour', get: (r) => r.behaviour },
+      { label: 'Excess', get: (r) => fmt.num(r.excess) },
+      { label: 'Cost', get: (r) => fmt.int(r.cost) },
+      { label: 'Abatement', get: (r) => fmt.pct(r.abatement) },
+      { label: 'n', get: (r) => fmt.int(r.n) },
+    ],
+    tableRows: data.behaviour,
+  }))
+}
+
+if (!panels.childElementCount) {
+  panels.append(el('div', { class: 'card' }, [
+    el('p', { class: 'empty' }, ['No runs recorded yet. Run `pnpm sim` and reload.']),
+  ]))
+}
+
+// ---------------------------------------------------------------- sql
+$('#run').addEventListener('click', async () => {
+  const out = $('#sqlout')
+  out.innerHTML = ''
+  const res = await (await fetch(`/api/query?sql=${encodeURIComponent($('#sql').value)}`)).json()
+  if (res.error) {
+    out.append(el('p', { class: 'note', style: 'color:var(--critical)' }, [res.error]))
+    return
+  }
+  if (!res.rows.length) { out.append(el('p', { class: 'note' }, ['No rows.'])); return }
+  const cols = Object.keys(res.rows[0]).map((k) => ({ label: k, get: (r) => String(r[k] ?? '—') }))
+  out.append(dataTable(cols, res.rows))
+})
+
+// ?theme=light|dark pins the mode, which makes a link reproducible and lets a
+// screenshot capture either mode. Without it the page follows the OS setting.
+const pinned = new URLSearchParams(location.search).get('theme')
+if (pinned === 'light' || pinned === 'dark') document.documentElement.setAttribute('data-theme', pinned)
+
+$('#theme').addEventListener('click', () => {
+  const root = document.documentElement
+  const isDark = root.getAttribute('data-theme') === 'dark'
+    || (!root.hasAttribute('data-theme') && matchMedia('(prefers-color-scheme: dark)').matches)
+  root.setAttribute('data-theme', isDark ? 'light' : 'dark')
+})
+</script>
+</body>
+</html>

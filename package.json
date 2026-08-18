@@ -12,7 +12,8 @@
     "start": "node dist/server/index.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc -p server/tsconfig.json && tsc -p sim/tsconfig.json",
-    "sim": "tsx sim/cli.ts"
+    "sim": "tsx sim/cli.ts",
+    "sim:viz": "tsx sim/viz/server.ts"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "1.2.3",
