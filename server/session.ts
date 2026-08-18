@@ -1,20 +1,6 @@
 import { customAlphabet, nanoid } from 'nanoid'
-import {
-  BASELINE_YEAR,
-  BOT_SEED_MM_FRAC,
-  BOT_SEED_SPEC,
-  DEFAULT_ABATEMENT,
-  DEFAULT_AUCTION_CAP_RATIO,
-  DEFAULT_BENCHMARK,
-  DEFAULT_CAP_REDUCTION_FACTOR,
-  DEFAULT_PENALTY_RATE,
-  FIRST_GAME_YEAR,
-  FREE_CREDIT_RATIO,
-  HISTORY_WINDOW,
-  INDUSTRY_NAMES,
-  MAX_PLAYERS,
-  type Industry,
-} from '../shared/constants'
+import { resolveConfig, type DeepPartial, type GameConfig } from '../shared/config'
+import { INDUSTRY_NAMES, type Industry } from '../shared/constants'
 import {
   abatementCost,
   buildMarketView,
@@ -55,9 +41,10 @@ const BOT_LABELS: Record<BotType, string> = {
 }
 
 /** Near-zero emission history for pure-trader bots (financial players). */
-function flatTinyHistory(industry: Industry): PlayerProfile {
+function flatTinyHistory(industry: Industry, config: GameConfig): PlayerProfile {
   const emissions: Record<number, number> = {}
-  for (let y = 1; y <= HISTORY_WINDOW; y++) emissions[y] = 0.1
+  const { historyYears, traderHistoryLevel } = config.emissions
+  for (let y = 1; y <= historyYears; y++) emissions[y] = traderHistoryLevel
   return { industry, emissions }
 }
 
@@ -81,7 +68,13 @@ export class Session {
   private readonly rng: Rng
   private orderSeq = 0
 
-  constructor(capMode: CapMode, seed?: number) {
+  /**
+   * `override` is a deep-partial patch onto the shipped defaults — the entire interface a
+   * simulation scenario needs to vary anything from the penalty rate to a sector's
+   * abatement curve to the market maker's spread.
+   */
+  constructor(capMode: CapMode, seed?: number, override?: DeepPartial<GameConfig>) {
+    const config = resolveConfig(override)
     const actualSeed = seed ?? Math.floor(Math.random() * 2 ** 31)
     this.rng = createRng(actualSeed)
     this.hostToken = nanoid()
@@ -90,21 +83,10 @@ export class Session {
       seed: actualSeed,
       capMode,
       phase: 'lobby',
-      currentYear: FIRST_GAME_YEAR,
+      currentYear: config.emissions.firstGameYear,
       players: [],
       years: {},
-      config: {
-        freeCreditRatio: FREE_CREDIT_RATIO,
-        historyWindow: HISTORY_WINDOW,
-        baselineYear: BASELINE_YEAR,
-        penaltyRate: DEFAULT_PENALTY_RATE,
-        benchmark: { ...DEFAULT_BENCHMARK },
-        abatement: Object.fromEntries(
-          INDUSTRY_NAMES.map((i) => [i, { ...DEFAULT_ABATEMENT[i] }]),
-        ) as Record<Industry, { a: number; b: number }>,
-        auctionCapRatio: DEFAULT_AUCTION_CAP_RATIO,
-        capReductionFactor: DEFAULT_CAP_REDUCTION_FACTOR,
-      },
+      config,
       freeCreditLimit: null,
     }
   }
@@ -129,7 +111,7 @@ export class Session {
 
   private totalBaseline(): number {
     return this.state.players.reduce(
-      (s, p) => s + (p.emissions[this.state.config.baselineYear] ?? 0),
+      (s, p) => s + (p.emissions[this.state.config.emissions.baselineYear] ?? 0),
       0,
     )
   }
@@ -173,7 +155,8 @@ export class Session {
    * signal the bots anchor to and the price the trader-bot seed is sold at.
    */
   openingReference(): number {
-    return this.previousMarketPrice() ?? this.state.config.penaltyRate / 2
+    const { penaltyRate, openingReferenceFraction } = this.state.config.market
+    return this.previousMarketPrice() ?? penaltyRate * openingReferenceFraction
   }
 
   /**
@@ -202,13 +185,13 @@ export class Session {
     if (!INDUSTRY_NAMES.includes(industry)) {
       throw new GameError('BAD_INDUSTRY', 'Please pick an industry.')
     }
-    if (this.state.players.length >= MAX_PLAYERS) {
+    if (this.state.players.length >= this.state.config.session.maxPlayers) {
       throw new GameError('FULL', 'This session is full.')
     }
-    const profile = generateHistoryForIndustry(industry, this.rng)
+    const profile = generateHistoryForIndustry(industry, this.rng, this.state.config.emissions)
     const player: Player = {
       id: `P${this.state.players.length + 1}`,
-      name: trimmed.slice(0, 40),
+      name: trimmed.slice(0, this.state.config.session.maxNameLength),
       connected: true,
       score: 0,
       optimalScore: 0,
@@ -225,12 +208,14 @@ export class Session {
    * history; pure-trader archetypes get a near-zero one (financial players). */
   addBot(botType: BotType, industry?: Industry): Player {
     this.requirePhase('lobby')
-    if (this.state.players.length >= MAX_PLAYERS) {
+    if (this.state.players.length >= this.state.config.session.maxPlayers) {
       throw new GameError('FULL', 'This session is full.')
     }
     const ind = industry ?? INDUSTRY_NAMES[Math.floor(this.rng.uniform(0, INDUSTRY_NAMES.length))]
     const isEmitter = botType === 'compliance' || botType === 'noise'
-    const profile = isEmitter ? generateHistoryForIndustry(ind, this.rng) : flatTinyHistory(ind)
+    const profile = isEmitter
+      ? generateHistoryForIndustry(ind, this.rng, this.state.config.emissions)
+      : flatTinyHistory(ind, this.state.config)
     const n = this.state.players.filter((p) => p.botType === botType).length + 1
     const player: Player = {
       id: `P${this.state.players.length + 1}`,
@@ -269,13 +254,17 @@ export class Session {
     abatement?: Partial<Record<Industry, { a: number; b: number }>>
   }) {
     this.requirePhase('lobby', 'yearSummary')
-    for (const key of ['penaltyRate', 'auctionCapRatio'] as const) {
-      const value = settings[key]
-      if (value === undefined) continue
-      if (!Number.isFinite(value) || value < 0) {
-        throw new GameError('BAD_SETTING', `${key} must be a non-negative number.`)
+    if (settings.penaltyRate !== undefined) {
+      if (!Number.isFinite(settings.penaltyRate) || settings.penaltyRate < 0) {
+        throw new GameError('BAD_SETTING', 'penaltyRate must be a non-negative number.')
       }
-      this.state.config[key] = round1(value)
+      this.state.config.market.penaltyRate = round1(settings.penaltyRate)
+    }
+    if (settings.auctionCapRatio !== undefined) {
+      if (!Number.isFinite(settings.auctionCapRatio) || settings.auctionCapRatio < 0) {
+        throw new GameError('BAD_SETTING', 'auctionCapRatio must be a non-negative number.')
+      }
+      this.state.config.allocation.auctionCapRatio = round1(settings.auctionCapRatio)
     }
     // Reduction factor needs finer precision than 1 dp (0.97 must not round to 1.0).
     if (settings.capReductionFactor !== undefined) {
@@ -283,7 +272,7 @@ export class Session {
       if (!Number.isFinite(v) || v <= 0 || v > 1) {
         throw new GameError('BAD_SETTING', 'capReductionFactor must be in (0, 1].')
       }
-      this.state.config.capReductionFactor = Math.round(v * 1000) / 1000
+      this.state.config.allocation.capReductionFactor = Math.round(v * 1000) / 1000
     }
     if (settings.benchmark) {
       for (const [industry, value] of Object.entries(settings.benchmark)) {
@@ -291,7 +280,7 @@ export class Session {
         if (!Number.isFinite(value) || value < 0) {
           throw new GameError('BAD_SETTING', `benchmark for ${industry} must be non-negative.`)
         }
-        this.state.config.benchmark[industry as Industry] = round1(value)
+        this.state.config.allocation.benchmark[industry as Industry] = round1(value)
       }
     }
     if (settings.abatement) {
@@ -300,9 +289,18 @@ export class Session {
         if (!Number.isFinite(coeff.a) || coeff.a < 0 || !Number.isFinite(coeff.b) || coeff.b < 0) {
           throw new GameError('BAD_SETTING', `abatement for ${industry} must be non-negative.`)
         }
-        this.state.config.abatement[industry as Industry] = {
-          a: round1(coeff.a),
-          b: round1(coeff.b),
+        // The host panel only edits the linear MAC. A scenario may have swapped the
+        // sector onto another curve, whose params these numbers would not describe.
+        const current = this.state.config.abatement.sectors[industry as Industry]
+        if (current.model !== 'linear') {
+          throw new GameError(
+            'BAD_SETTING',
+            `abatement for ${industry} uses the "${current.model}" model, which the host panel cannot edit.`,
+          )
+        }
+        this.state.config.abatement.sectors[industry as Industry] = {
+          model: 'linear',
+          params: { a: round1(coeff.a), b: round1(coeff.b) },
         }
       }
     }
@@ -346,7 +344,7 @@ export class Session {
       this.state.players,
       this.state.config,
     )
-    this.openYear(FIRST_GAME_YEAR)
+    this.openYear(this.state.config.emissions.firstGameYear)
   }
 
   private openYear(year: number) {
@@ -408,13 +406,13 @@ export class Session {
    * through `bankedCredits` like everyone else.
    */
   private seedTraderBots(record: YearRecord, usesAuction: boolean) {
-    if (usesAuction || record.year !== FIRST_GAME_YEAR) return
+    if (usesAuction || record.year !== this.state.config.emissions.firstGameYear) return
     if (!(record.primaryPrice && record.primaryPrice > 0)) return
     const classFree = Object.values(record.freeAllocation).reduce((a, b) => a + b, 0)
     for (const player of this.state.players) {
       if (!isPureTrader(player)) continue
-      const seed =
-        player.botType === 'marketMaker' ? BOT_SEED_MM_FRAC * classFree : BOT_SEED_SPEC
+      const { marketMakerFrac, speculatorFlat } = this.state.config.bots.seed
+      const seed = player.botType === 'marketMaker' ? marketMakerFrac * classFree : speculatorFlat
       if (seed > 0) record.regulatorGranted[player.id] = round1(seed)
     }
   }
@@ -447,7 +445,13 @@ export class Session {
     const record = this.currentYearRecord()!
     // Realization happens now, at year end: each company's actual emission is
     // drawn from its own distribution around the expected mean it planned against.
-    record.realized = realizeYear(this.state.players, this.rng, record.year, record.abatement)
+    record.realized = realizeYear(
+      this.state.players,
+      this.rng,
+      record.year,
+      record.abatement,
+      this.state.config.emissions.volatility,
+    )
     for (const player of this.state.players) {
       player.emissions[record.year] = record.realized[player.id]
     }
@@ -456,7 +460,7 @@ export class Session {
     const sellIncome: Record<string, number> = {}
     const abateCost: Record<string, number> = {}
     const optimal: Record<string, number> = {}
-    const { penaltyRate } = this.state.config
+    const { penaltyRate } = this.state.config.market
     // Whatever went into regulatorGranted was sold at this price: the auction
     // clearing price, or the reference price for the trader-bot seed. 0 for free credits.
     const capPrice = record.primaryPrice ?? 0
@@ -473,7 +477,7 @@ export class Session {
       purchaseCost[player.id] = round1(capCost + buyCash)
       sellIncome[player.id] = sellCash
       const expected = expectedEmission(player, record.year)
-      const coeff = this.state.config.abatement[player.industry]
+      const coeff = this.state.config.abatement.sectors[player.industry]
       abateCost[player.id] = abatementCost(expected, record.abatement[player.id] ?? 0, coeff)
       const free = round1(
         (record.freeAllocation[player.id] ?? 0) + (record.regulatorGranted[player.id] ?? 0),
@@ -525,7 +529,7 @@ export class Session {
       if (vwap !== null) return vwap
       if (y.auctionPrice) return y.auctionPrice
     }
-    return this.state.config.penaltyRate
+    return this.state.config.market.penaltyRate
   }
 
   // ---- player actions ----
@@ -619,8 +623,8 @@ export class Session {
 export class SessionStore {
   private byCode = new Map<string, Session>()
 
-  create(capMode: CapMode, seed?: number): Session {
-    const session = new Session(capMode, seed)
+  create(capMode: CapMode, seed?: number, override?: DeepPartial<GameConfig>): Session {
+    const session = new Session(capMode, seed, override)
     this.byCode.set(session.state.roomCode, session)
     return session
   }

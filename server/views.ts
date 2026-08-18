@@ -1,4 +1,5 @@
-import { INDUSTRY_NAMES, SECTOR_AVERAGE_EMISSIONS } from '../shared/constants'
+import type { GameConfig } from '../shared/config'
+import { INDUSTRY_NAMES, type Industry } from '../shared/constants'
 import {
   benchmarkFor,
   buildMarketView,
@@ -9,6 +10,7 @@ import {
 } from '../shared/engine'
 import type {
   ClassAggregate,
+  HostConfigView,
   HostSnapshot,
   IndustryBreakdownRow,
   LeaderboardRow,
@@ -20,6 +22,32 @@ import type { Session } from './session'
 
 function round1(value: number): number {
   return Math.round(value * 10) / 10
+}
+
+/**
+ * Sector averages derived from the config actually in force — the midpoint of each
+ * generation range. Derived rather than imported so a scenario that widens a sector's
+ * range still gets a truthful "% below average" hint.
+ */
+function sectorAverages(config: GameConfig): Record<Industry, number> {
+  return Object.fromEntries(
+    INDUSTRY_NAMES.map((i) => {
+      const { low, high } = config.emissions.industries[i]
+      return [i, (low + high) / 2]
+    }),
+  ) as Record<Industry, number>
+}
+
+/** The slice of the config the host panel renders. See HostConfigView for why it is narrow. */
+function hostConfigView(config: GameConfig): HostConfigView {
+  return {
+    penaltyRate: config.market.penaltyRate,
+    auctionCapRatio: config.allocation.auctionCapRatio,
+    capReductionFactor: config.allocation.capReductionFactor,
+    benchmark: { ...config.allocation.benchmark },
+    sectorAverage: sectorAverages(config),
+    abatement: { ...config.abatement.sectors },
+  }
 }
 
 function publicRoster(session: Session): PublicPlayerInfo[] {
@@ -34,7 +62,7 @@ function publicRoster(session: Session): PublicPlayerInfo[] {
 }
 
 function leaderboard(session: Session): LeaderboardRow[] {
-  const { baselineYear } = session.state.config
+  const { baselineYear } = session.state.config.emissions
   const skill = (p: Session['state']['players'][number]) => {
     const baseline = p.emissions[baselineYear] ?? 0
     return baseline > 0 ? round1((p.score - p.optimalScore) / baseline) : round1(p.score - p.optimalScore)
@@ -66,7 +94,7 @@ function classAggregate(session: Session): ClassAggregate {
   const players = state.players
 
   const totalBaseline = round1(
-    players.reduce((s, p) => s + (p.emissions[state.config.baselineYear] ?? 0), 0),
+    players.reduce((s, p) => s + (p.emissions[state.config.emissions.baselineYear] ?? 0), 0),
   )
 
   const sum = (values: Record<string, number>) =>
@@ -151,7 +179,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     playerCount: state.players.length,
     roster: publicRoster(session),
     freeCreditLimit: state.freeCreditLimit !== null ? round1(state.freeCreditLimit) : null,
-    abatementCoeff: state.config.abatement[player.industry],
+    abatement: state.config.abatement.sectors[player.industry],
     auctionSupply: session.usesAuction ? (record?.regulatorPool ?? 0) : 0,
     auctionPrice: record?.auctionPrice ?? null,
     // Benchmarking: what this player's sector benchmark is worth this year, and the
@@ -161,7 +189,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
         ? benchmarkFor(player, state.currentYear, state.config)
         : null,
     sectorAverage:
-      state.capMode === 'benchmarking' ? SECTOR_AVERAGE_EMISSIONS[player.industry] : null,
+      state.capMode === 'benchmarking' ? sectorAverages(state.config)[player.industry] : null,
     prevMarketPrice: session.previousMarketPrice(),
     market:
       record && (state.phase === 'trade' || settled)
@@ -243,7 +271,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
     currentYear: state.currentYear,
     freeCreditLimit: state.freeCreditLimit !== null ? round1(state.freeCreditLimit) : null,
     regulatorPool: record?.regulatorPool ?? null,
-    config: state.config,
+    config: hostConfigView(state.config),
     classAggregate: classAggregate(session),
     leaderboard: leaderboard(session),
     auctionPrice: record?.auctionPrice ?? null,
@@ -258,8 +286,8 @@ export function hostSnapshot(session: Session): HostSnapshot {
       isBot: p.isBot,
       botType: p.botType,
       score: p.score,
-      baselineEmission: p.emissions[state.config.baselineYear] ?? 0,
-      windowSum: round1(windowSum(p, state.currentYear, state.config.historyWindow)),
+      baselineEmission: p.emissions[state.config.emissions.baselineYear] ?? 0,
+      windowSum: round1(windowSum(p, state.currentYear, state.config.emissions.historyWindow)),
       freeAllocation: record?.freeAllocation[p.id] ?? null,
       regulatorGranted:
         record && Object.keys(record.regulatorGranted).length > 0

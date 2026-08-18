@@ -1,4 +1,6 @@
+import type { GameConfig } from './config/schema'
 import type { Industry } from './constants'
+import type { AbatementSpec } from './engine/abatementModels'
 
 export type CapMode = 'grandfathering' | 'benchmarking' | 'auctioning'
 
@@ -116,20 +118,28 @@ export interface YearRecord {
   netPosition: Record<string, number>
 }
 
-export interface SessionConfig {
-  freeCreditRatio: number
-  historyWindow: number
-  baselineYear: number
+/**
+ * Flat, read-only projection of `GameConfig` for the host UI — exactly what the settings
+ * panel renders, and nothing more.
+ *
+ * The full config is deliberately NOT sent: `hostSnapshot()` is rebuilt and pushed to
+ * every connected socket on every bot tick, so shipping the ~60 nested fields the UI
+ * never reads would be a real hot-path cost. Derived in `views.ts`, never stored.
+ */
+export interface HostConfigView {
   /** Cost per tCO2 of emissions left uncovered at settlement. */
   penaltyRate: number
-  /** Benchmarking mode: free credits per company, by industry. */
-  benchmark: Record<Industry, number>
-  /** Per-sector marginal abatement cost coefficients (MAC = a + b·fraction). */
-  abatement: Record<Industry, { a: number; b: number }>
   /** Auctioning supply = auctionCapRatio × Σbaseline (host-tunable, ≤ 1 = scarcer). */
   auctionCapRatio: number
-  /** Auction supply shrinks by this factor each year (EU-ETS LRF); 1 = flat. */
+  /** Auction supply and benchmark shrink by this factor each year (EU-ETS LRF); 1 = flat. */
   capReductionFactor: number
+  /** Benchmarking mode: free credits per company, by industry. */
+  benchmark: Record<Industry, number>
+  /** Sector averages the benchmark is set against, so the panel's "% below" hint follows
+   *  a scenario that changed the emission ranges. */
+  sectorAverage: Record<Industry, number>
+  /** Read-only display of the active MAC curve per sector. */
+  abatement: Record<Industry, AbatementSpec>
 }
 
 export interface GameState {
@@ -140,7 +150,7 @@ export interface GameState {
   currentYear: number
   players: Player[]
   years: Record<number, YearRecord>
-  config: SessionConfig
+  config: GameConfig
   /** Computed once when leaving the lobby; fixed across years (see OQ-2 in the plan). */
   freeCreditLimit: number | null
 }
@@ -211,8 +221,9 @@ export interface PlayerSnapshot {
   playerCount: number
   roster: PublicPlayerInfo[]
   freeCreditLimit: number | null
-  /** This player's sector MAC coefficients, for live abatement-cost preview. */
-  abatementCoeff: { a: number; b: number }
+  /** This player's sector MAC curve, for the live abatement-cost preview. The client
+   *  evaluates it with the same shared functions the server settles with. */
+  abatement: AbatementSpec
   /** Auctioning mode: total supply on offer this year (= the cap). */
   auctionSupply: number
   /** Auctioning mode: uniform clearing price, once the auction has closed. */
@@ -299,7 +310,7 @@ export interface HostSnapshot {
   classAggregate: ClassAggregate
   freeCreditLimit: number | null
   regulatorPool: number | null
-  config: SessionConfig
+  config: HostConfigView
   leaderboard: LeaderboardRow[]
   /** Auctioning mode: this year's clearing price (null before the auction closes). */
   auctionPrice: number | null

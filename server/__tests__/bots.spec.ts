@@ -26,7 +26,7 @@ describe('bot helpers', () => {
     const s = new Session('auctioning', 1)
     s.addPlayer('A', 'Power & Utilities')
     s.startYear() // cap stage — no auction price yet
-    expect(referencePrice(s)).toBe(s.state.config.penaltyRate / 2)
+    expect(referencePrice(s)).toBe(s.state.config.market.penaltyRate / 2)
   })
 
   it('referencePrice tracks THIS year\'s auction clearing once it has run', () => {
@@ -137,7 +137,7 @@ describe('bot archetypes under benchmarking (no primary auction)', () => {
 
     // Drive the discovered price right up to the ceiling, which is where a tight
     // benchmark puts it — an unclamped ask used to escape past P from here.
-    const P = s.state.config.penaltyRate
+    const P = s.state.config.market.penaltyRate
     s.placeOrder('P2', 'sell', 5, P)
     s.placeOrder('P3', 'buy', 5, P)
 
@@ -169,7 +169,7 @@ describe('bot archetypes under benchmarking (no primary auction)', () => {
     expect(bid).toBeDefined()
     // Its willingness to pay exceeds the stale mid (penaltyRate / 2) precisely because
     // the penalty, not the market, is the binding alternative.
-    expect(bid!.price).toBeGreaterThan(s.state.config.penaltyRate / 2)
-    expect(bid!.price).toBeLessThanOrEqual(s.state.config.penaltyRate)
+    expect(bid!.price).toBeGreaterThan(s.state.config.market.penaltyRate / 2)
+    expect(bid!.price).toBeLessThanOrEqual(s.state.config.market.penaltyRate)
   })
 })

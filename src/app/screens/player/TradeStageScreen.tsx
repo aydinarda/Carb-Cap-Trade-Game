@@ -2,6 +2,7 @@ import { AlertTriangle, ArrowRightLeft, BookOpen, Gavel, History, Landmark, Leaf
 import { motion } from 'motion/react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import { abatementCost, marginalCost } from '@shared/engine/abatement'
 import type { OrderSide, PlayerSnapshot } from '@shared/types'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -15,7 +16,7 @@ const r1 = (n: number) => Math.round(n * 10) / 10
 
 export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   const { placeOrder, cancelOrder, abate } = useGame()
-  const { a, b } = snap.abatementCoeff
+  const abatementSpec = snap.abatement
   const market = snap.market
   const marketPrice = market?.lastPrice ?? market?.vwap ?? null
   const auctionPrice = snap.auctionPrice
@@ -37,8 +38,10 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   }, [snap.currentYear])
 
   const postExpected = r1(rawExpected * (1 - abateFrac))
-  const abateCost = r1(rawExpected * (a * abateFrac + (b * abateFrac * abateFrac) / 2))
-  const marginalCost = r1(a + b * abateFrac)
+  // Evaluated with the very functions the server settles with, so the preview cannot
+  // drift from the charge — and so a scenario on a non-linear MAC curve previews correctly.
+  const abateCost = abatementCost(rawExpected, abateFrac, abatementSpec)
+  const nextTonneCost = r1(marginalCost(abateFrac, abatementSpec))
   const gap = r1(postExpected - held) // > 0 short, < 0 surplus
   const short = gap > 0
 
@@ -123,12 +126,12 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
             <span
               className={cn(
                 'text-xs font-mono border rounded-full px-2 py-0.5',
-                marketPrice !== null && marginalCost <= marketPrice
+                marketPrice !== null && nextTonneCost <= marketPrice
                   ? 'text-primary border-primary/30'
                   : 'text-muted-foreground border-border',
               )}
             >
-              next-tonne cost {marginalCost} vs market {marketPrice ?? '—'}
+              next-tonne cost {nextTonneCost} vs market {marketPrice ?? '—'}
             </span>
           </div>
           <div className="flex items-center gap-4">

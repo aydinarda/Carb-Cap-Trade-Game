@@ -1,7 +1,6 @@
 import { openSellRemaining, round1, tradedCash } from '../../shared/engine'
 import type { MarketView, OrderSide, YearRecord } from '../../shared/types'
 import { GameError, type Session } from '../session'
-import { MAX_STEP } from './types'
 
 export const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
 
@@ -20,8 +19,8 @@ export function referencePrice(session: Session): number {
 }
 
 /** Apply a bot's personality bias to a price and clamp it into (0.1, penaltyRate]. */
-export function disperse(price: number, bias: number, penaltyRate: number): number {
-  return round1(clamp(price * (1 + bias), 0.1, penaltyRate))
+export function disperse(price: number, bias: number, penaltyRate: number, minPrice = 0.1): number {
+  return round1(clamp(price * (1 + bias), minPrice, penaltyRate))
 }
 
 /**
@@ -85,7 +84,7 @@ export function tryPlace(
   qty: number,
   price: number,
 ): boolean {
-  const q = round1(Math.min(qty, MAX_STEP))
+  const q = round1(Math.min(qty, session.state.config.bots.maxStep))
   const p = round1(price)
   if (!(q > 0) || !(p > 0)) return false
   try {

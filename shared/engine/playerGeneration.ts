@@ -1,13 +1,15 @@
-import { INDUSTRIES } from '../constants'
+import { DEFAULT_GAME_CONFIG } from '../config/defaults'
+import type { EmissionsConfig } from '../config/schema'
+import type { Industry } from '../constants'
 import type { PlayerProfile } from '../types'
 import { round1, type Rng } from './rng'
 
 /**
- * Generates a 10-year emission history for a chosen industry per the notebook:
+ * Generates a pre-game emission history for a chosen industry per the notebook:
  *   latest = U(industry range)
- *   oldest = latest × (1 + U(0.05, 0.2))
- *   trend  = linspace(oldest, latest, 10) + N(0, 0.03·latest), rounded to 1 dp
- *   emissions[i] is stored to Year_{10−i}
+ *   oldest = latest × (1 + U(declineLow, declineHigh))
+ *   trend  = linspace(oldest, latest, historyYears) + N(0, trendNoise·latest), 1 dp
+ *   emissions[i] is stored to Year_{historyYears−i}
  *
  * OQ-1: the notebook maps the FIRST linspace element (the oldest, largest value)
  * to Year_10 while also treating Year_10 as the baseline year. Implemented
@@ -15,22 +17,28 @@ import { round1, type Rng } from './rng'
  *
  * The notebook assigns industries randomly (25% each); in the game students pick
  * their own industry at join, so only the history generation lives here.
+ *
+ * The order and count of `rng` draws is load-bearing: it fixes every seeded history in
+ * the game and in the golden test. Do not reorder them or add a draw in between.
  */
 export function generateHistoryForIndustry(
-  industry: keyof typeof INDUSTRIES,
+  industry: Industry,
   rng: Rng,
+  config: EmissionsConfig = DEFAULT_GAME_CONFIG.emissions,
 ): PlayerProfile {
-  const { low, high } = INDUSTRIES[industry]
+  const { low, high } = config.industries[industry]
+  const { declineLow, declineHigh, trendNoise } = config.generation
+  const years = config.historyYears
 
   const latest = rng.uniform(low, high)
-  const reduction = rng.uniform(0.05, 0.2)
+  const reduction = rng.uniform(declineLow, declineHigh)
   const oldest = latest * (1 + reduction)
 
   const emissions: Record<number, number> = {}
-  for (let i = 0; i < 10; i++) {
-    const trend = oldest + ((latest - oldest) * i) / 9
-    const noise = rng.normal(0, 0.03 * latest)
-    emissions[10 - i] = round1(trend + noise)
+  for (let i = 0; i < years; i++) {
+    const trend = oldest + ((latest - oldest) * i) / (years - 1)
+    const noise = rng.normal(0, trendNoise * latest)
+    emissions[years - i] = round1(trend + noise)
   }
 
   return { industry, emissions }

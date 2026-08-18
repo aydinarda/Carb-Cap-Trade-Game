@@ -26,6 +26,7 @@ export {
 export {
   ABATEMENT_MODELS,
   bisectOptimal,
+  bisectSpec,
   specIntegral,
   specMarginal,
   specOptimal,

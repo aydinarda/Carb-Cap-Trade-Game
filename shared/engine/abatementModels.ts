@@ -237,6 +237,24 @@ export function specOptimal(price: number, spec: AbatementSpec): number {
   }
 }
 
+/**
+ * Numeric optimum for a spec, via bisection rather than the closed form. This is the
+ * path a future model without an exact inverse would take, and it doubles as the
+ * cross-check that the shipped closed forms are right.
+ */
+export function bisectSpec(price: number, spec: AbatementSpec): number {
+  switch (spec.model) {
+    case 'linear':
+      return bisectOptimal(linear, spec.params, price)
+    case 'power':
+      return bisectOptimal(power, spec.params, price)
+    case 'exponential':
+      return bisectOptimal(exponential, spec.params, price)
+    case 'tiered':
+      return bisectOptimal(tiered, spec.params, price)
+  }
+}
+
 /** Validates and normalizes an arbitrary spec-shaped value. Throws on a bad shape. */
 export function parseSpec(raw: unknown): AbatementSpec {
   const o = obj(raw)

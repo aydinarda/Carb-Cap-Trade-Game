@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { SECTOR_AVERAGE_EMISSIONS, type Industry } from '@shared/constants'
-import type { CapMode, SessionConfig } from '@shared/types'
+import type { Industry } from '@shared/constants'
+import type { CapMode, HostConfigView } from '@shared/types'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { cn, MODE_LABELS } from '../../components/game/theme'
@@ -38,7 +38,7 @@ export function ModePicker({ capMode, compact }: { capMode: CapMode | null; comp
 }
 
 /** Credit price + penalty rate + per-industry benchmarks — editable in the lobby and between years. */
-export function SettingsPanel({ config }: { config: SessionConfig }) {
+export function SettingsPanel({ config }: { config: HostConfigView }) {
   const { hostAction } = useGame()
   const [penalty, setPenalty] = useState(String(config.penaltyRate))
   const [benchmark, setBenchmark] = useState<Record<string, string>>(() =>
@@ -104,7 +104,7 @@ export function SettingsPanel({ config }: { config: SessionConfig }) {
           {(Object.keys(benchmark) as Industry[]).map((industry) => {
             // Restate the stringency from the value actually in force, so a hand-edit
             // shows immediately how far below the sector average it lands.
-            const average = SECTOR_AVERAGE_EMISSIONS[industry]
+            const average = config.sectorAverage[industry]
             const value = Number(benchmark[industry])
             const belowPct =
               average > 0 && Number.isFinite(value)

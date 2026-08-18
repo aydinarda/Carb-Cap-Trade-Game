@@ -1,4 +1,3 @@
-import { FIRST_GAME_YEAR } from '../constants'
 import type { CapMechanism } from './capMechanism'
 import { round1 } from './rng'
 
@@ -21,8 +20,9 @@ export const auctioning: CapMechanism = {
     return allocation
   },
   poolFor(_players, targetYear, config, totalBaseline) {
-    const reduction = Math.pow(config.capReductionFactor, targetYear - FIRST_GAME_YEAR)
-    return round1(config.auctionCapRatio * totalBaseline * reduction)
+    const { auctionCapRatio, capReductionFactor } = config.allocation
+    const reduction = Math.pow(capReductionFactor, targetYear - config.emissions.firstGameYear)
+    return round1(auctionCapRatio * totalBaseline * reduction)
   },
   primaryPrice(record) {
     return record.auctionPrice ?? 0

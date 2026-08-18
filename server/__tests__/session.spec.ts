@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { FIRST_GAME_YEAR, MAX_PLAYERS } from '../../shared/constants'
+import { DEFAULT_GAME_CONFIG } from '../../shared/config'
+
+const FIRST_GAME_YEAR = DEFAULT_GAME_CONFIG.emissions.firstGameYear
+const MAX_PLAYERS = DEFAULT_GAME_CONFIG.session.maxPlayers
 import { clearAuction, round1 } from '../../shared/engine'
 import { GameError, Session } from '../session'
 
@@ -74,7 +77,7 @@ describe('endGame — monetize leftover carry at the final price', () => {
     s.setAbatement('P1', 1)
     s.closeTrade()
     // No trades occurred and grandfathering has no auction price → final price = penaltyRate.
-    const finalPrice = s.state.config.penaltyRate
+    const finalPrice = s.state.config.market.penaltyRate
     const before = new Map(s.state.players.map((p) => [p.id, { score: p.score, banked: p.bankedCredits }]))
     s.endGame()
     expect(s.state.phase).toBe('ended')
@@ -175,7 +178,7 @@ describe('updateSettings validation & precision', () => {
   it('stores capReductionFactor at fine precision (0.97 must not round to 1.0)', () => {
     const s = auctioning()
     s.updateSettings({ capReductionFactor: 0.97 })
-    expect(s.state.config.capReductionFactor).toBe(0.97)
+    expect(s.state.config.allocation.capReductionFactor).toBe(0.97)
   })
 
   it('rejects out-of-range / negative settings', () => {
@@ -268,7 +271,7 @@ describe('benchmarking mode', () => {
     const s = benchmarking()
     s.startYear()
     const rec = s.currentYearRecord()!
-    const { benchmark } = s.state.config
+    const { benchmark } = s.state.config.allocation
     expect(rec.freeAllocation.P1).toBe(benchmark['Power & Utilities'])
     expect(rec.freeAllocation.P2).toBe(benchmark.Transport)
     expect(rec.regulatorPool).toBe(0)
@@ -317,7 +320,7 @@ describe('trader-bot seed inventory', () => {
     const rec = s.currentYearRecord()!
 
     // Year 1 has no discovered price yet, so the seed is priced at penaltyRate / 2.
-    expect(rec.primaryPrice).toBe(s.state.config.penaltyRate / 2)
+    expect(rec.primaryPrice).toBe(s.state.config.market.penaltyRate / 2)
     // The MM gets no free allocation but a seed it must pay for…
     expect(rec.freeAllocation[mm.id]).toBe(0)
     expect(rec.regulatorGranted[mm.id]).toBeGreaterThan(0)

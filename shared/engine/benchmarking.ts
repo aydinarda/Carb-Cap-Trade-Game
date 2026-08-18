@@ -1,5 +1,5 @@
-import { FIRST_GAME_YEAR } from '../constants'
-import type { Player, SessionConfig } from '../types'
+import type { GameConfig } from '../config/schema'
+import type { Player } from '../types'
 import type { CapMechanism } from './capMechanism'
 import { round1 } from './rng'
 import { isPureTrader } from './roles'
@@ -16,11 +16,12 @@ import { isPureTrader } from './roles'
  * There is no primary sale: the free allocation is the only issuance, so the total
  * in circulation is fixed and the secondary market only redistributes it.
  */
-function benchmarkFor(player: Player, targetYear: number, config: SessionConfig): number {
+export function benchmarkFor(player: Player, targetYear: number, config: GameConfig): number {
   // Pure-trader bots have no activity level to benchmark against — see roles.ts.
   if (isPureTrader(player)) return 0
-  const reduction = Math.pow(config.capReductionFactor, targetYear - FIRST_GAME_YEAR)
-  return round1((config.benchmark[player.industry] ?? 0) * reduction)
+  const { capReductionFactor } = config.allocation
+  const reduction = Math.pow(capReductionFactor, targetYear - config.emissions.firstGameYear)
+  return round1((config.allocation.benchmark[player.industry] ?? 0) * reduction)
 }
 
 export const benchmarking: CapMechanism = {
@@ -30,7 +31,7 @@ export const benchmarking: CapMechanism = {
   computeFreeCreditLimit(players, config) {
     // The class total in the first game year, matching when this is computed.
     return round1(
-      players.reduce((sum, p) => sum + benchmarkFor(p, FIRST_GAME_YEAR, config), 0),
+      players.reduce((sum, p) => sum + benchmarkFor(p, config.emissions.firstGameYear, config), 0),
     )
   },
   allocate(players, targetYear, _freeCreditLimit, config) {
@@ -50,4 +51,3 @@ export const benchmarking: CapMechanism = {
   },
 }
 
-export { benchmarkFor }

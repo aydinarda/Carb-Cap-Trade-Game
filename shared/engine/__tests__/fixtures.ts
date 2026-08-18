@@ -1,4 +1,4 @@
-import { DEFAULT_BENCHMARK } from '../../constants'
+import { resolveConfig } from '../../config'
 import type { Player } from '../../types'
 
 /**
@@ -58,19 +58,8 @@ export const XLSX_PLAYERS: {
   },
 ]
 
-export const DEFAULT_CONFIG = {
-  freeCreditRatio: 0.8,
-  historyWindow: 10,
-  baselineYear: 10,
-  penaltyRate: 20,
-  // Mirrors the shipped defaults so the two can't drift (600 / 480 / 315 / 180).
-  benchmark: { ...DEFAULT_BENCHMARK },
-  abatement: {
-    'Power & Utilities': { a: 2, b: 15 },
-    'Heavy Materials': { a: 8, b: 30 },
-    'Manufacturing & Chemicals': { a: 4, b: 20 },
-    Transport: { a: 5, b: 20 },
-  },
-  auctionCapRatio: 1.0,
-  capReductionFactor: 1.0,
-}
+export const DEFAULT_CONFIG = resolveConfig({
+  // A flat cap keeps these fixtures on the notebook's arithmetic: the shipped default
+  // is 0.97, which would tighten allocations from year 12 on.
+  allocation: { capReductionFactor: 1 },
+})

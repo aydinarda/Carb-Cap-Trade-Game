@@ -1,4 +1,5 @@
-import type { CapMode, Player, SessionConfig, YearRecord } from '../types'
+import type { GameConfig } from '../config/schema'
+import type { CapMode, Player, YearRecord } from '../types'
 
 /**
  * One cap-and-trade allocation regime. Everything mode-specific lives behind this
@@ -13,24 +14,24 @@ export interface CapMechanism {
   /** Does the cap stage run a sealed-bid primary auction? */
   readonly usesAuction: boolean
   /** Total free credits available to the class, from the baseline year. */
-  computeFreeCreditLimit(players: Player[], config: SessionConfig): number
+  computeFreeCreditLimit(players: Player[], config: GameConfig): number
   /** Per-player free credit allocation for the target year. */
   allocate(
     players: Player[],
     targetYear: number,
     freeCreditLimit: number,
-    config: SessionConfig,
+    config: GameConfig,
   ): Record<string, number>
   /** Primary-market supply for the target year; 0 = no primary sale. */
   poolFor(
     players: Player[],
     targetYear: number,
-    config: SessionConfig,
+    config: GameConfig,
     totalBaseline: number,
   ): number
   /**
    * Unit price charged for the credits in `regulatorGranted`. `reference` is the
    * year's opening reference price (last discovered price, else half the penalty).
    */
-  primaryPrice(record: YearRecord, config: SessionConfig, reference: number): number
+  primaryPrice(record: YearRecord, config: GameConfig, reference: number): number
 }

@@ -1,4 +1,11 @@
-import { buildMarketView, expectedEmission, optimalAbatement, round1 } from '../../shared/engine'
+import {
+  buildMarketView,
+  expectedEmission,
+  marginalCost,
+  optimalAbatement,
+  round1,
+  type AbatementSpec,
+} from '../../shared/engine'
 import { GameError } from '../session'
 import { disperse, marketMid, referencePrice, tryPlace, trySell, trySubmitBid } from './helpers'
 import type { BotCtx } from './types'
@@ -17,13 +24,13 @@ import type { BotCtx } from './types'
 function reservationPrice(
   expected: number,
   held: number,
-  coeff: { a: number; b: number },
+  coeff: AbatementSpec,
   penaltyRate: number,
 ): number {
   if (expected <= 0) return penaltyRate
   const rCover = 1 - held / expected
   if (rCover >= 1) return penaltyRate
-  return Math.min(penaltyRate, coeff.a + coeff.b * Math.max(0, rCover))
+  return Math.min(penaltyRate, marginalCost(Math.max(0, rCover), coeff))
 }
 
 /**
@@ -37,8 +44,9 @@ export function trade(ctx: BotCtx): boolean {
   const { session, bot } = ctx
   const record = session.currentYearRecord()
   if (!record) return false
-  const P = session.state.config.penaltyRate
-  const coeff = session.state.config.abatement[bot.industry]
+  const P = session.state.config.market.penaltyRate
+  const cfg = session.state.config.bots.compliance
+  const coeff = session.state.config.abatement.sectors[bot.industry]
   const mv = buildMarketView(record.orders, record.trades)
   const mid = marketMid(mv, referencePrice(session))
   const rStar = optimalAbatement(coeff, mid)
@@ -47,13 +55,13 @@ export function trade(ctx: BotCtx): boolean {
   } catch (e) {
     if (!(e instanceof GameError)) throw e
   }
-  const fair = Math.min(P, coeff.a + coeff.b * rStar)
+  const fair = Math.min(P, marginalCost(rStar, coeff))
   const fairB = disperse(fair, ctx.rt.bias ?? 0, P) // personality-shifted fair value
   const expected = expectedEmission(bot, record.year)
   const held = session.creditsHeld(bot.id)
   const need = round1(expected * (1 - rStar) - held)
 
-  if (need > 0.5) {
+  if (need > cfg.minTradeSize) {
     // Short after abating: bid at what the shortfall is actually worth to us, which
     // rises toward the penalty the further we are from covering it.
     const reservation = reservationPrice(expected, held, coeff, P)
@@ -61,14 +69,14 @@ export function trade(ctx: BotCtx): boolean {
     if (mv.bestAsk !== null && mv.bestAsk < reservation) {
       return tryPlace(session, bot.id, 'buy', need, mv.bestAsk) // lift a cheap ask
     }
-    return tryPlace(session, bot.id, 'buy', need, reservationB - 0.1)
+    return tryPlace(session, bot.id, 'buy', need, reservationB - cfg.priceStep)
   }
-  if (need < -0.5) {
+  if (need < -cfg.minTradeSize) {
     const surplus = -need
     if (mv.bestBid !== null && mv.bestBid > fair) {
       return trySell(session, record, bot.id, surplus, mv.bestBid) // hit a rich bid
     }
-    return trySell(session, record, bot.id, surplus, fairB + 0.1)
+    return trySell(session, record, bot.id, surplus, fairB + cfg.priceStep)
   }
   return false
 }
@@ -77,8 +85,8 @@ export function auction(ctx: BotCtx): boolean {
   const { session, bot } = ctx
   const record = session.currentYearRecord()
   if (!record) return false
-  const P = session.state.config.penaltyRate
-  const coeff = session.state.config.abatement[bot.industry]
+  const P = session.state.config.market.penaltyRate
+  const coeff = session.state.config.abatement.sectors[bot.industry]
   const ref = referencePrice(session)
   // Abate to the market-implied point; the residual is what it still needs to buy.
   const rStar = optimalAbatement(coeff, ref)

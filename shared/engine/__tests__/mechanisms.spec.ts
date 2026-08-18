@@ -7,6 +7,7 @@ import {
 } from '../../constants'
 import type { Player } from '../../types'
 import { CAP_MECHANISMS } from '../index'
+import { resolveConfig } from '../../config'
 import { DEFAULT_CONFIG, XLSX_PLAYERS } from './fixtures'
 
 const players = XLSX_PLAYERS.map((f) => f.player)
@@ -75,21 +76,21 @@ describe('benchmarking', () => {
   it('gives every company its sector benchmark, regardless of history', () => {
     const allocation = CAP_MECHANISMS.benchmarking.allocate(players, 11, 0, DEFAULT_CONFIG)
     for (const p of players) {
-      expect(allocation[p.id]).toBe(DEFAULT_CONFIG.benchmark[p.industry])
+      expect(allocation[p.id]).toBe(DEFAULT_CONFIG.allocation.benchmark[p.industry])
     }
   })
 
   it('free credit limit is the sum of per-company benchmarks', () => {
-    const expected = players.reduce((s, p) => s + DEFAULT_CONFIG.benchmark[p.industry], 0)
+    const expected = players.reduce((s, p) => s + DEFAULT_CONFIG.allocation.benchmark[p.industry], 0)
     expect(CAP_MECHANISMS.benchmarking.computeFreeCreditLimit(players, DEFAULT_CONFIG)).toBe(
       expected,
     )
   })
 
   it('tightens each year by the cap reduction factor', () => {
-    const config = { ...DEFAULT_CONFIG, capReductionFactor: 0.97 }
+    const config = resolveConfig({ allocation: { capReductionFactor: 0.97 } })
     const [p] = players
-    const base = config.benchmark[p.industry]
+    const base = config.allocation.benchmark[p.industry]
     for (const year of [11, 12, 13]) {
       const allocation = CAP_MECHANISMS.benchmarking.allocate([p], year, 0, config)
       const expected = Math.round(base * Math.pow(0.97, year - 11) * 10) / 10
@@ -123,7 +124,7 @@ describe('auctioning', () => {
   })
 
   it('shrinks the supply by the reduction factor each year', () => {
-    const config = { ...DEFAULT_CONFIG, capReductionFactor: 0.9 }
+    const config = resolveConfig({ allocation: { capReductionFactor: 0.9 } })
     expect(CAP_MECHANISMS.auctioning.poolFor(players, 12, config, 1000)).toBe(900)
     expect(CAP_MECHANISMS.auctioning.poolFor(players, 13, config, 1000)).toBe(810)
   })

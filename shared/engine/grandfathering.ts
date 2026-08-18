@@ -1,4 +1,5 @@
-import type { Player, SessionConfig } from '../types'
+import type { GameConfig } from '../config/schema'
+import type { Player } from '../types'
 import type { CapMechanism } from './capMechanism'
 import { round1 } from './rng'
 
@@ -11,12 +12,12 @@ export function windowSum(player: Player, targetYear: number, historyWindow: num
   return sum
 }
 
-export function computeFreeCreditLimit(players: Player[], config: SessionConfig): number {
+export function computeFreeCreditLimit(players: Player[], config: GameConfig): number {
   const totalBaseline = players.reduce(
-    (sum, p) => sum + (p.emissions[config.baselineYear] ?? 0),
+    (sum, p) => sum + (p.emissions[config.emissions.baselineYear] ?? 0),
     0,
   )
-  return totalBaseline * config.freeCreditRatio
+  return totalBaseline * config.allocation.freeCreditRatio
 }
 
 /**
@@ -38,7 +39,7 @@ export const grandfathering: CapMechanism = {
   },
   allocate(players, targetYear, freeCreditLimit, config) {
     const sums = new Map(
-      players.map((p) => [p.id, windowSum(p, targetYear, config.historyWindow)]),
+      players.map((p) => [p.id, windowSum(p, targetYear, config.emissions.historyWindow)]),
     )
     const total = [...sums.values()].reduce((a, b) => a + b, 0)
     const allocation: Record<string, number> = {}
