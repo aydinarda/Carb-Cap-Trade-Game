@@ -20,3 +20,6 @@ pnpm-debug.log*
 
 # simulation output (single sqlite file, regenerated)
 sim/out/
+
+# throwaway sweep scripts (analysis, not part of the app)
+sim/sweeps/
