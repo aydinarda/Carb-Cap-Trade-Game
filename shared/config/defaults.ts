@@ -23,7 +23,7 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     maxNameLength: 40,
   },
   market: {
-    penaltyRate: 20,
+    penaltyRate: 100,
     openingReferenceFraction: 0.5,
     finalPriceFallbackFraction: 1,
   },
@@ -63,12 +63,12 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   bots: {
     seed: { marketMakerFrac: 0.18, speculatorFlat: 20 },
     maxStep: 40,
-    minPrice: 0.1,
+    minPrice: 0.5,
     sigma: { compliance: 0.05, marketMaker: 0.08, speculator: 0.12, noise: 0.2 },
     marketMaker: {
-      minMargin: 0.5,
+      minMargin: 2.5,
       spreadFrac: 0.06,
-      skew: 0.008,
+      skew: 0.04,
       skewCapFrac: 0.4,
       invFrac: 0.18,
       auctionAggr: 1.3,
@@ -83,6 +83,7 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       auctionJitter: 0.1,
       sizeJitter: 0.5,
     },
-    compliance: { minTradeSize: 0.5, priceStep: 0.1 },
+    // minTradeSize is TONNES and does not scale with money; priceStep is money.
+    compliance: { minTradeSize: 0.5, priceStep: 0.5 },
   },
 }

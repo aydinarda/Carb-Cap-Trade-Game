@@ -54,8 +54,8 @@ export const DEFAULT_BENCHMARK = Object.fromEntries(
  * differ (some decarbonise cheaply, some not), and the host can tune these.
  */
 export const DEFAULT_ABATEMENT: Record<Industry, { a: number; b: number }> = {
-  'Power & Utilities': { a: 2, b: 15 }, // cheap (renewables) → cuts a lot
-  'Manufacturing & Chemicals': { a: 4, b: 20 },
-  Transport: { a: 5, b: 20 },
-  'Heavy Materials': { a: 8, b: 30 }, // hard (cement/steel) → cuts little
+  'Power & Utilities': { a: 10, b: 75 }, // cheap (renewables) → cuts a lot
+  'Manufacturing & Chemicals': { a: 20, b: 100 },
+  Transport: { a: 25, b: 100 },
+  'Heavy Materials': { a: 40, b: 150 }, // hard (cement/steel) → cuts little
 }

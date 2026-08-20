@@ -83,7 +83,7 @@ export function bisectOptimal<P>(model: AbatementModel<P>, params: P, price: num
 
 const linear: AbatementModel<AbatementParamsByModel['linear']> = {
   id: 'linear',
-  defaults: { a: 4, b: 20 },
+  defaults: { a: 20, b: 100 },
   marginal: (f, { a, b }) => a + b * f,
   integral: (r, { a, b }) => a * r + (b * r * r) / 2,
   // Preserved verbatim from the original implementation, b <= 0 branch included.
@@ -96,7 +96,7 @@ const linear: AbatementModel<AbatementParamsByModel['linear']> = {
 
 const power: AbatementModel<AbatementParamsByModel['power']> = {
   id: 'power',
-  defaults: { a: 4, b: 20, n: 2 },
+  defaults: { a: 20, b: 100, n: 2 },
   marginal: (f, { a, b, n }) => a + b * Math.pow(f, n),
   integral: (r, { a, b, n }) => a * r + (b * Math.pow(r, n + 1)) / (n + 1),
   optimal: (price, { a, b, n }) => {
@@ -117,7 +117,7 @@ const power: AbatementModel<AbatementParamsByModel['power']> = {
 
 const exponential: AbatementModel<AbatementParamsByModel['exponential']> = {
   id: 'exponential',
-  defaults: { a: 3, k: 2.5 },
+  defaults: { a: 15, k: 2.5 },
   marginal: (f, { a, k }) => a * Math.exp(k * f),
   integral: (r, { a, k }) =>
     // The k → 0 limit is a·r; without the guard this is 0/0.
@@ -138,9 +138,9 @@ const tiered: AbatementModel<AbatementParamsByModel['tiered']> = {
   id: 'tiered',
   defaults: {
     tiers: [
-      { upTo: 0.3, rate: 5 },
-      { upTo: 0.6, rate: 18 },
-      { upTo: 1, rate: 60 },
+      { upTo: 0.3, rate: 25 },
+      { upTo: 0.6, rate: 90 },
+      { upTo: 1, rate: 300 },
     ],
   },
   marginal: (f, { tiers }) => (tiers.find((t) => f < t.upTo) ?? tiers[tiers.length - 1]).rate,

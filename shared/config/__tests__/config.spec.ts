@@ -11,8 +11,13 @@ import { DEFAULT_GAME_CONFIG, deepMerge, resolveConfig } from '../index'
 describe('DEFAULT_GAME_CONFIG reproduces the shipped constants', () => {
   it('carries the values the engine used before the refactor', () => {
     const c = DEFAULT_GAME_CONFIG
-    expect(c.market.penaltyRate).toBe(20)
+    expect(c.market.penaltyRate).toBe(100)
     expect(c.market.openingReferenceFraction).toBe(0.5) // was the literal penaltyRate / 2
+    // Money is denominated so the penalty matches the EU ETS Article 16 fine of EUR 100/t;
+    // the MAC coefficients and the money-denominated bot knobs are on the same scale.
+    expect(c.abatement.sectors['Power & Utilities']).toEqual({ model: 'linear', params: { a: 10, b: 75 } })
+    expect(c.bots.marketMaker.minMargin).toBe(2.5)
+    expect(c.bots.compliance.priceStep).toBe(0.5)
     expect(c.allocation.freeCreditRatio).toBe(0.8)
     expect(c.allocation.auctionCapRatio).toBe(1)
     expect(c.allocation.capReductionFactor).toBe(0.97)
@@ -83,7 +88,7 @@ describe('deepMerge', () => {
 
   it('treats undefined as "leave it alone"', () => {
     const c = deepMerge(DEFAULT_GAME_CONFIG, { market: { penaltyRate: undefined } })
-    expect(c.market.penaltyRate).toBe(20)
+    expect(c.market.penaltyRate).toBe(100)
   })
 })
 
