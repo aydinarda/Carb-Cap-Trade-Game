@@ -350,3 +350,42 @@ describe('trader-bot seed inventory', () => {
     expect(rec.primaryPrice).toBe(0) // no auction price until the cap stage closes
   })
 })
+
+describe('the optimum benchmark sees the carry', () => {
+  it('a debtor is not measured as though it still had the allowances it owes', () => {
+    // Year 11: no abatement, no trades -> P2 ends short and carries a make-good debt.
+    const s = grandfathering()
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    s.closeTrade()
+    const debt = s.getPlayer('P2')!.bankedCredits
+    expect(debt).toBeLessThan(0)
+
+    const optimalAfterY11 = s.getPlayer('P2')!.optimalScore
+    s.advanceYear()
+    s.closeCapStage()
+    s.openTrade()
+    s.closeTrade()
+    const y12Optimum = s.getPlayer('P2')!.optimalScore - optimalAfterY11
+
+    // Same year with the debt cleared: the benchmark must be strictly cheaper, because
+    // perfect play then starts with more allowances in hand.
+    const clean = grandfathering()
+    clean.startYear()
+    clean.closeCapStage()
+    clean.openTrade()
+    clean.closeTrade()
+    clean.getPlayer('P2')!.bankedCredits = 0 // wipe the carry, change nothing else
+    const optimalAfterY11Clean = clean.getPlayer('P2')!.optimalScore
+    clean.advanceYear()
+    clean.closeCapStage()
+    clean.openTrade()
+    clean.closeTrade()
+    const y12OptimumClean = clean.getPlayer('P2')!.optimalScore - optimalAfterY11Clean
+
+    // Carrying a debt raises the bar you are measured against, rather than leaving it
+    // where a debt-free company's would be — which used to punish the debt a third time.
+    expect(y12Optimum).toBeGreaterThan(y12OptimumClean)
+  })
+})

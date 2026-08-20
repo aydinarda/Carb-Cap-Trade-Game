@@ -479,10 +479,15 @@ export class Session {
       const expected = expectedEmission(player, record.year)
       const coeff = this.state.config.abatement.sectors[player.industry]
       abateCost[player.id] = abatementCost(expected, record.abatement[player.id] ?? 0, coeff)
-      const free = round1(
-        (record.freeAllocation[player.id] ?? 0) + (record.regulatorGranted[player.id] ?? 0),
+      // Everything the company starts the year holding — the carry included, so the
+      // benchmark faces the same debt or surplus the player actually faces. Matches
+      // what `creditsHeld` counts, which is what the real cost is measured against.
+      const credits = round1(
+        (record.freeAllocation[player.id] ?? 0) +
+          (record.regulatorGranted[player.id] ?? 0) +
+          (record.carriedIn[player.id] ?? 0),
       )
-      optimal[player.id] = optimalYearCost(expected, free, coeff, refPrice)
+      optimal[player.id] = optimalYearCost(expected, credits, coeff, refPrice, penaltyRate)
     }
     const { settlement } = settleYear(record.realized, held, purchaseCost, sellIncome, abateCost, {
       penaltyRate,

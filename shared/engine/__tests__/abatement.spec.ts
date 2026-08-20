@@ -52,3 +52,28 @@ describe('optimalYearCost & fairness', () => {
     expect(optimalYearCost(100, 40, { a: 20, b: 10 }, 10)).toBe(600)
   })
 })
+
+describe('optimalYearCost — carry and the penalty cap', () => {
+  const coeff = { a: 2, b: 20 } // r*(10) = 0.4, abatementCost(1000, .4) = 2400
+
+  it('settles the residual against the credits it is given', () => {
+    // Short by 100: 2400 abatement + 100 bought at 10.
+    expect(optimalYearCost(1000, 500, coeff, 10)).toBe(3400)
+    // Long by 200: the surplus is income, so the optimum is cheaper.
+    expect(optimalYearCost(1000, 800, coeff, 10)).toBe(400)
+    // A make-good debt is real credits to replace — fewer credits, dearer optimum.
+    expect(optimalYearCost(1000, 400, coeff, 10)).toBe(4400)
+  })
+
+  it('never pays more than the fine to cover a shortfall', () => {
+    // Buying at 10 would cost 1000 for the 100 t gap, but the fine is only 5/t.
+    expect(optimalYearCost(1000, 500, coeff, 10, 5)).toBe(2900)
+    // When the market is cheaper than the fine, the market price stands.
+    expect(optimalYearCost(1000, 500, coeff, 10, 50)).toBe(3400)
+  })
+
+  it('caps only the buying side — surplus is always sold at the market price', () => {
+    const withCap = optimalYearCost(1000, 800, coeff, 10, 1)
+    expect(withCap).toBe(optimalYearCost(1000, 800, coeff, 10))
+  })
+})

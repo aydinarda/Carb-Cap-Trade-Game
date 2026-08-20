@@ -151,9 +151,9 @@ describe('golden — grandfathering', () => {
           "P3": 3.6,
         },
         "optimalScore": {
-          "P1": -25593,
-          "P2": 872.5,
-          "P3": 12338.5,
+          "P1": -30303,
+          "P2": 1712.5,
+          "P3": 12818.5,
         },
         "primaryPrice": 60,
         "realized": {
@@ -301,9 +301,9 @@ describe('golden — benchmarking', () => {
           "P3": 610.5,
         },
         "optimalScore": {
-          "P1": 12189,
-          "P2": 656.5,
-          "P3": 48752.5,
+          "P1": 26139,
+          "P2": 1184.5,
+          "P3": 66740.5,
         },
         "primaryPrice": 60,
         "realized": {
@@ -455,9 +455,9 @@ describe('golden — auctioning', () => {
           "P3": 156.1,
         },
         "optimalScore": {
-          "P1": -24891,
-          "P2": -14067.5,
-          "P3": 21488.5,
+          "P1": -28941,
+          "P2": -20739.5,
+          "P3": 26276.5,
         },
         "primaryPrice": 45,
         "realized": {

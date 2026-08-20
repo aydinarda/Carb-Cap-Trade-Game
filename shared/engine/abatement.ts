@@ -53,21 +53,35 @@ export function optimalAbatement(input: AbatementInput, price: number): number {
 
 /**
  * The minimum achievable expected cost for a company playing perfectly: abate to
- * r*, then settle the residual against its free credits at the market price — buy
- * the shortfall or sell the surplus, both at `price`. Used as the per-company
- * benchmark so the leaderboard measures skill (distance from optimum), not luck.
+ * r*, then settle the residual against the credits it holds — buy the shortfall or
+ * sell the surplus. Used as the per-company benchmark so the leaderboard measures
+ * skill (distance from optimum), not luck or which sector the player drew.
+ *
+ * `credits` is everything the company starts the year with, INCLUDING the carry: a
+ * banked surplus is real credits it can sell, and a make-good debt is real credits
+ * it must replace. Leaving the carry out made the benchmark assume a debtor had
+ * allowances it did not have, which inflated its measured skill gap year after year
+ * and effectively punished the same debt a third time (after the fine and the
+ * obligation itself).
+ *
+ * `penaltyRate` caps what covering a shortfall can cost: nobody playing perfectly
+ * pays more than the fine to buy an allowance, so the residual is settled at
+ * min(price, penaltyRate). Surplus is always sold at the market price.
  */
 export function optimalYearCost(
   expected: number,
-  free: number,
+  credits: number,
   input: AbatementInput,
   price: number,
+  penaltyRate?: number,
 ): number {
   const spec = toSpec(input)
   const r = specOptimal(price, spec)
   const abated = expected * (1 - r)
-  // cover > 0 → buy the shortfall; cover < 0 → sell the surplus (income).
-  return round1(abatementCost(expected, r, spec) + price * (abated - free))
+  const cover = abated - credits // > 0 → buy the shortfall; < 0 → sell the surplus
+  const coverRate =
+    cover > 0 && penaltyRate !== undefined ? Math.min(price, penaltyRate) : price
+  return round1(abatementCost(expected, r, spec) + coverRate * cover)
 }
 
 export { parseSpec }
