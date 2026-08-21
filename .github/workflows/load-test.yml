@@ -27,7 +27,7 @@ on:
         default: '25'
         required: true
       join_grace:
-        description: Grace window to join in a browser before year 1 (seconds) — first session only
+        description: Grace window to join in a browser before year 1 (seconds) — applies to each of the 3 modes
         default: '90'
         required: true
 

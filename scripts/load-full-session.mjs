@@ -32,12 +32,11 @@ const YEARS_PER_MODE = Number(process.env.YEARS_PER_MODE || 3)
 const ROUND_WINDOW = Number(process.env.ROUND_WINDOW || 25) // trade window seconds
 const CAP_WINDOW = Number(process.env.CAP_WINDOW || 10) // auction cap-stage window seconds
 const REVIEW_GAP = Number(process.env.REVIEW_GAP || 3) // seconds between years
-// FIRST session only. Long enough to actually get in: GitHub Actions streams its logs
-// with a few seconds of lag, and joining is lobby-only — miss the window and the server
-// rejects you with a wrong-phase error once year 1 has started.
+// Applied to EVERY session — each mode is a fresh room with a fresh code, so you get the
+// same window to join each one. Long enough to actually get in: GitHub Actions streams its
+// logs with a few seconds of lag, and joining is lobby-only — miss the window and the
+// server rejects you with a wrong-phase error once year 1 has started.
 const JOIN_GRACE = Number(process.env.JOIN_GRACE || 90)
-// Later sessions just need a beat to settle; you have already had your look by then.
-const JOIN_GRACE_LATER = Number(process.env.JOIN_GRACE_LATER || 5)
 
 const INDUSTRIES = [
   'Power & Utilities',
@@ -259,10 +258,9 @@ async function main() {
     await sleep(5000)
   }
 
-  // Only the first session waits for a human — that is the one you watch.
   await runSession('grandfathering', { withBots: false, joinGrace: JOIN_GRACE })
-  await runSession('benchmarking', { withBots: true, joinGrace: JOIN_GRACE_LATER })
-  await runSession('auctioning', { withBots: true, joinGrace: JOIN_GRACE_LATER })
+  await runSession('benchmarking', { withBots: true, joinGrace: JOIN_GRACE })
+  await runSession('auctioning', { withBots: true, joinGrace: JOIN_GRACE })
 
   // ── summary + thresholds ──
   const p50 = pct(M.actionLatency, 50)
