@@ -17,6 +17,8 @@ function roomAll(code: string) {
 
 /** Push role-scoped snapshots to every connected socket of a session. */
 export async function broadcast(io: IO, session: Session) {
+  // Anything worth broadcasting is activity; this is the one place they all funnel through.
+  session.touch()
   const sockets = (await io.in(roomAll(session.state.roomCode)).fetchSockets()) as unknown as AppSocket[]
   for (const socket of sockets) {
     emitSnapshot(socket, session)

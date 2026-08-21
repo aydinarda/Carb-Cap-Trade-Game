@@ -36,7 +36,9 @@ ok(hs.classAggregate.submittedCount >= 4, `auction bids submitted by bots: ${hs.
 await call(human, 'player:submitBid', { qty: 200, price: 12 })
 await call(host, 'host:closeCapStage')
 await wait(50)
-const P = 20
+// Read the ceiling from the running server rather than hardcoding it — these scripts
+// silently went stale when penaltyRate moved from 20 to 100.
+const P = hs.config.penaltyRate
 ok(hs.auctionPrice !== null, `auction cleared at ${hs.auctionPrice}`)
 ok(hs.regulatorPool > 0, `regulatorPool (supply) = ${hs.regulatorPool}`)
 const traderGrant = hs.players.filter((p) => p.botType === 'marketMaker' || p.botType === 'speculator')

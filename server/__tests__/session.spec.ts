@@ -3,7 +3,7 @@ import { DEFAULT_GAME_CONFIG } from '../../shared/config'
 
 const FIRST_GAME_YEAR = DEFAULT_GAME_CONFIG.emissions.firstGameYear
 import { clearAuction, round1 } from '../../shared/engine'
-import { GameError, Session } from '../session'
+import { GameError, Session, SessionStore } from '../session'
 
 // Session is fully drivable without sockets; a numeric seed makes emission
 // realization deterministic. Tests assert invariants (computed from state) rather
@@ -397,5 +397,73 @@ describe('the optimum benchmark sees the carry', () => {
     // Carrying a debt raises the bar you are measured against, rather than leaving it
     // where a debt-free company's would be — which used to punish the debt a third time.
     expect(y12Optimum).toBeGreaterThan(y12OptimumClean)
+  })
+})
+
+describe('SessionStore lifecycle', () => {
+  const HOUR = 60 * 60_000
+
+  it('only ticks rooms that are worth ticking', () => {
+    const store = new SessionStore()
+    const noBots = store.create('benchmarking', 1)
+    noBots.addPlayer('Alice', 'Transport')
+
+    const withBots = store.create('benchmarking', 1)
+    withBots.addPlayer('Bob', 'Transport')
+    withBots.addBot('compliance')
+
+    const finished = store.create('benchmarking', 1)
+    finished.addPlayer('Cara', 'Transport')
+    finished.addBot('compliance')
+    finished.endGame()
+
+    // A room with no bots has nothing for the driver to do, and a finished one is over.
+    expect(store.activeSessions().map((x) => x.state.roomCode)).toEqual([withBots.state.roomCode])
+  })
+
+  it('drops finished rooms once the grace window has passed, and not before', () => {
+    const store = new SessionStore()
+    const s = store.create('benchmarking', 1)
+    s.addPlayer('Alice', 'Transport')
+    s.endGame()
+    const grace = s.state.config.session.endedGraceMs
+
+    expect(store.sweep(Date.now() + grace - 1_000)).toEqual([])
+    expect(store.get(s.state.roomCode)).toBeDefined()
+
+    expect(store.sweep(Date.now() + grace + 1_000)).toEqual([s.state.roomCode])
+    expect(store.get(s.state.roomCode)).toBeUndefined()
+  })
+
+  it('drops abandoned rooms but keeps one that still has somebody connected', () => {
+    const store = new SessionStore()
+    const abandoned = store.create('benchmarking', 1)
+    const { player } = abandoned.addPlayer('Alice', 'Transport')
+    player.connected = false
+
+    const live = store.create('benchmarking', 1)
+    live.addPlayer('Bob', 'Transport') // connected by default
+
+    const later = Date.now() + 3 * HOUR
+    expect(store.sweep(later)).toEqual([abandoned.state.roomCode])
+    expect(store.get(live.state.roomCode)).toBeDefined()
+  })
+
+  it('a bot-only room counts as abandoned — bots do not keep a class alive', () => {
+    const store = new SessionStore()
+    const s = store.create('benchmarking', 1)
+    s.addBot('compliance')
+    expect(store.sweep(Date.now() + 3 * HOUR)).toEqual([s.state.roomCode])
+  })
+
+  it('touch() keeps a room alive past the idle window', () => {
+    const store = new SessionStore()
+    const s = store.create('benchmarking', 1)
+    const { player } = s.addPlayer('Alice', 'Transport')
+    player.connected = false
+
+    const later = Date.now() + 3 * HOUR
+    s.lastActivity = later // as if something happened just now
+    expect(store.sweep(later)).toEqual([])
   })
 })

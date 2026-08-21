@@ -1,10 +1,16 @@
 import {
-  buildMarketView,
   expectedEmission,
   marginalCost,
   optimalAbatement,
 } from '../../shared/engine'
-import { anchorValue, clamp, referencePrice, tryPlace, trySell, trySubmitBid } from './helpers'
+import {
+  anchorValue,
+  clamp,
+  referencePrice,
+  sellCapacity,
+  syncQuote,
+  trySubmitBid,
+} from './helpers'
 import type { BotCtx } from './types'
 
 /**
@@ -22,7 +28,7 @@ export function trade(ctx: BotCtx): boolean {
   const P = session.state.config.market.penaltyRate
   const minPrice = session.state.config.bots.minPrice
   const coeff = session.state.config.abatement.sectors[bot.industry]
-  const mv = buildMarketView(record.orders, record.trades)
+  const mv = ctx.market
   const anchor = anchorValue(mv, referencePrice(session))
   const rStar = optimalAbatement(coeff, anchor)
   const fair = Math.min(P, marginalCost(rStar, coeff))
@@ -37,8 +43,14 @@ export function trade(ctx: BotCtx): boolean {
   const price = clamp(fair * (1 + bias + rng.uniform(-cfg.priceJitter, cfg.priceJitter)), minPrice, P)
   const qty = cfg.size * rng.uniform(1 - cfg.sizeJitter, 1 + cfg.sizeJitter)
 
-  if (side === 'sell') return trySell(session, record, bot.id, qty, price)
-  return tryPlace(session, bot.id, 'buy', qty, price)
+  // Still erratic, but it replaces its own stale order instead of stacking a new one on
+  // top every tick — the churn is what inflated the book, not the noise itself.
+  if (side === 'sell') {
+    const room = sellCapacity(session, record, bot.id)
+    if (room <= 0) return false
+    return syncQuote(session, record, bot.id, ctx.rt, 'sell', Math.min(qty, room), price)
+  }
+  return syncQuote(session, record, bot.id, ctx.rt, 'buy', qty, price)
 }
 
 export function auction(ctx: BotCtx): boolean {

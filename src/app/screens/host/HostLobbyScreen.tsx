@@ -170,7 +170,8 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
             <p className="text-[11px] text-muted-foreground font-mono mt-2">
               Bots trade in the order book, and bid in the auction where there is one. Compliance
               anchors price to fundamentals; market makers add liquidity; speculators &amp; noise add
-              realism.
+              realism. About five is the sweet spot — two market makers already keep the book
+              two-sided, and more past that buys very little.
               {snap.capMode === 'benchmarking' && (
                 <>
                   {' '}

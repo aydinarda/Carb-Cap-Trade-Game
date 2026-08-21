@@ -19,7 +19,7 @@ reference — never edit that folder). Currently implemented:
 | **Abatement** | ✅ each company chooses a cut fraction against its sector MAC curve (`a + b·f`); optimal play is where marginal cost meets the carbon price |
 | **Penalty settlement** | ✅ uncovered tonnes are charged `penaltyRate` each — the effective ceiling on the market price |
 | **Banking / make-good** | ✅ EU-ETS carry: a surplus year banks allowances, an uncovered year carries a make-good debt on top of the penalty; leftovers are monetized at the final price |
-| **Market bots** | ✅ four archetypes (compliance, market maker, speculator, noise) in any mode with a market; they anchor to the previous year's price with the penalty as the ceiling |
+| **Market bots** | ✅ four archetypes (compliance, market maker, speculator, noise) in any mode with a market; they anchor to the previous year's price with the penalty as the ceiling. **About five is the sweet spot** — two market makers already keep the book two-sided, and past that extra bots cost CPU without tightening the market |
 | **Mode switching** | ✅ instructor can change the cap mechanism in the lobby and between years |
 
 Scores are cumulative costs — abatement spend + credit purchases − sale income +

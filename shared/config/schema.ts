@@ -33,6 +33,13 @@ export interface SessionLimits {
   maxPlayers: number
   /** Max characters in a player name. */
   maxNameLength: number
+  /**
+   * How long a finished room is kept after `endGame` before the store drops it — long
+   * enough that everyone can still read the final leaderboard.
+   */
+  endedGraceMs: number
+  /** How long a room with nobody connected is kept before the store drops it. */
+  idleTtlMs: number
 }
 
 export interface MarketConfig {

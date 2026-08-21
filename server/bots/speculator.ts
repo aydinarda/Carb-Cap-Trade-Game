@@ -1,4 +1,3 @@
-import { buildMarketView } from '../../shared/engine'
 import { disperse, referencePrice, tryPlace, trySell, trySubmitBid } from './helpers'
 import type { BotCtx } from './types'
 
@@ -13,7 +12,7 @@ export function trade(ctx: BotCtx): boolean {
   if (!record) return false
   const P = session.state.config.market.penaltyRate
   const cfg = session.state.config.bots.speculator
-  const mv = buildMarketView(record.orders, record.trades)
+  const mv = ctx.market
   const last = mv.lastPrice ?? mv.vwap
   const prev = rt.lastSeenPrice
   if (last !== null) rt.lastSeenPrice = last

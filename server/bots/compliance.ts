@@ -1,5 +1,4 @@
 import {
-  buildMarketView,
   expectedEmission,
   marginalCost,
   optimalAbatement,
@@ -7,7 +6,16 @@ import {
   type AbatementSpec,
 } from '../../shared/engine'
 import { GameError } from '../session'
-import { disperse, marketMid, referencePrice, tryPlace, trySell, trySubmitBid } from './helpers'
+import {
+  disperse,
+  marketMid,
+  sellCapacity,
+  referencePrice,
+  syncQuote,
+  trySell,
+  trySubmitBid,
+  tryPlace,
+} from './helpers'
 import type { BotCtx } from './types'
 
 /**
@@ -47,7 +55,7 @@ export function trade(ctx: BotCtx): boolean {
   const P = session.state.config.market.penaltyRate
   const cfg = session.state.config.bots.compliance
   const coeff = session.state.config.abatement.sectors[bot.industry]
-  const mv = buildMarketView(record.orders, record.trades)
+  const mv = ctx.market
   const mid = marketMid(mv, referencePrice(session))
   const rStar = optimalAbatement(coeff, mid)
   try {
@@ -69,14 +77,21 @@ export function trade(ctx: BotCtx): boolean {
     if (mv.bestAsk !== null && mv.bestAsk < reservation) {
       return tryPlace(session, bot.id, 'buy', need, mv.bestAsk) // lift a cheap ask
     }
-    return tryPlace(session, bot.id, 'buy', need, reservationB - cfg.priceStep)
+    // `need` is derived from creditsHeld, which counts only EXECUTED trades — an unfilled
+    // bid of ours never reduces it, so a plain place stacked a fresh full-size order every
+    // tick. syncQuote keeps the one order and only reprices it when our view moves.
+    return syncQuote(session, record, bot.id, ctx.rt, 'buy', need, reservationB - cfg.priceStep)
   }
   if (need < -cfg.minTradeSize) {
     const surplus = -need
     if (mv.bestBid !== null && mv.bestBid > fair) {
       return trySell(session, record, bot.id, surplus, mv.bestBid) // hit a rich bid
     }
-    return trySell(session, record, bot.id, surplus, fairB + cfg.priceStep)
+    const room = sellCapacity(session, record, bot.id)
+    if (room <= 0) return false
+    return syncQuote(
+      session, record, bot.id, ctx.rt, 'sell', Math.min(surplus, room), fairB + cfg.priceStep,
+    )
   }
   return false
 }

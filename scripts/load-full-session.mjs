@@ -6,8 +6,8 @@
  *
  * Three sequential sessions (one per cap mechanism), because host:addBots is lobby-only:
  *   1. grandfathering — 1 host + 100 players, a few years played to completion
- *   2. benchmarking   — same + 25 bots (they trade the order book; no auction to bid into)
- *   3. auctioning     — same + 25 bots (15 noise / 5 compliance / 3 speculator / 2 marketMaker)
+ *   2. benchmarking   — same + 6 bots (they trade the order book; no auction to bid into)
+ *   3. auctioning     — same + 6 bots (2 marketMaker / 2 compliance / 1 noise / 1 speculator)
  *
  * Each session: create → 100 players join → (bots) → a JOIN grace window (join in the
  * browser now!) → per year: cap stage (auction bids, where the mode has an auction) →
@@ -44,11 +44,14 @@ const INDUSTRIES = [
   'Manufacturing & Chemicals',
   'Transport',
 ]
+// Six bots, not twenty-five. Measured: going 0 -> 5 bots drops one-sided ticks from 5.2%
+// to 1.0% and tightens the spread 2.24 -> 1.84; going 5 -> 25 leaves one-sided at 1.0% and
+// only reaches 1.39, for 5x the CPU and 3.7x the orders. Five or six is the knee.
 const BOT_PLAN = [
-  ['noise', 15],
-  ['compliance', 5],
-  ['speculator', 3],
   ['marketMaker', 2],
+  ['compliance', 2],
+  ['noise', 1],
+  ['speculator', 1],
 ]
 
 // ── tiny helpers ─────────────────────────────────────────────────────────────
@@ -197,7 +200,7 @@ async function runSession(capMode, { withBots, joinGrace }) {
       const r = await emit(host, 'host:addBots', { botType, count })
       if (!r.ok) M.errors++
     }
-    console.log(`added 25 bots (15 noise / 5 compliance / 3 speculator / 2 marketMaker)`)
+    console.log(`added 6 bots (2 marketMaker / 2 compliance / 1 noise / 1 speculator)`)
   }
 
   // ── JOIN WINDOW: hop in as a player now ──

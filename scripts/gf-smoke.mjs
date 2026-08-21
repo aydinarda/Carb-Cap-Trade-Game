@@ -62,7 +62,9 @@ await call(host, 'host:closeCapStage')
 await call(host, 'host:openTrade')
 await wait(26000) // ~10 bot ticks
 
-const P = 20
+// Read the ceiling from the running server rather than hardcoding it — these scripts
+// silently went stale when penaltyRate moved from 20 to 100.
+const P = hs.config.penaltyRate
 const mv = hs.market
 const prices = mv.trades.map((t) => t.price)
 ok(mv.trades.length > 0, `bots traded under grandfathering: ${mv.trades.length} trades`)

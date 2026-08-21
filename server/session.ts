@@ -63,6 +63,14 @@ export class GameError extends Error {
 export class Session {
   readonly state: GameState
   readonly hostToken: string
+  /**
+   * Wall-clock of the last thing that happened in this room. Drives store eviction —
+   * without it, finished classrooms were ticked 24×/min for the life of the process and
+   * never freed.
+   */
+  lastActivity = Date.now()
+  /** Set when the game ends, so the grace window is measured from the end, not from idle. */
+  endedAt: number | null = null
   /** player token -> playerId */
   readonly playerTokens = new Map<string, string>()
   private readonly rng: Rng
@@ -514,6 +522,11 @@ export class Session {
     this.openYear(this.state.currentYear + 1)
   }
 
+  /** Marks the room as alive right now. Called from every socket entry point. */
+  touch() {
+    this.lastActivity = Date.now()
+  }
+
   endGame() {
     // Settle leftover EU-ETS carry at the final market price: banked allowances are
     // cashed out (income → lower cost), a remaining make-good debt must be bought
@@ -526,6 +539,7 @@ export class Session {
       }
     }
     this.state.phase = 'ended'
+    this.endedAt = Date.now()
   }
 
   /** Most recent completed year's market VWAP; falls back to auction price / penalty. */
@@ -642,9 +656,39 @@ export class SessionStore {
     return this.byCode.get(roomCode.toUpperCase())
   }
 
-  /** All live sessions — used by the bot driver to tick each room. */
+  /**
+   * Rooms worth ticking. Finished games and rooms with no bots are skipped — the driver
+   * used to walk every session ever created, forever.
+   */
   activeSessions(): Session[] {
-    return [...this.byCode.values()]
+    const out: Session[] = []
+    for (const session of this.byCode.values()) {
+      if (session.state.phase === 'ended') continue
+      if (!session.state.players.some((p) => p.isBot)) continue
+      out.push(session)
+    }
+    return out
+  }
+
+  /**
+   * Drops finished and abandoned rooms, returning the codes removed so the caller can
+   * discard whatever it keyed by them. Nothing ever removed a session before this, so a
+   * long-lived server leaked one full Session — every year's orders and trades — per class.
+   */
+  sweep(now = Date.now()): string[] {
+    const dropped: string[] = []
+    for (const [code, session] of this.byCode) {
+      const { endedGraceMs, idleTtlMs } = session.state.config.session
+      const finished = session.endedAt !== null && now - session.endedAt > endedGraceMs
+      const abandoned =
+        !session.state.players.some((p) => p.connected && !p.isBot) &&
+        now - session.lastActivity > idleTtlMs
+      if (finished || abandoned) {
+        this.byCode.delete(code)
+        dropped.push(code)
+      }
+    }
+    return dropped
   }
 
   findByHostToken(token: string): Session | undefined {

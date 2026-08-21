@@ -21,6 +21,8 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   session: {
     maxPlayers: 0, // no limit — see SessionLimits.maxPlayers
     maxNameLength: 40,
+    endedGraceMs: 30 * 60_000, // 30 min
+    idleTtlMs: 2 * 60 * 60_000, // 2 h
   },
   market: {
     penaltyRate: 100,

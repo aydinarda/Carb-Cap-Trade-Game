@@ -51,7 +51,9 @@ await call(host, 'host:openTrade')
 
 // ===== TRADE =====
 await wait(26000) // ~10 bot ticks
-const P = 20
+// Read the ceiling from the running server rather than hardcoding it — these scripts
+// silently went stale when penaltyRate moved from 20 to 100.
+const P = hs.config.penaltyRate
 const mv = hs.market
 const prices = mv.trades.map((t) => t.price)
 ok(mv.trades.length > 0, `trades happened without any auction: ${mv.trades.length}`)

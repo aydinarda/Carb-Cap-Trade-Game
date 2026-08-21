@@ -2,11 +2,11 @@ import { buildMarketView } from '../../shared/engine'
 import {
   anchorValue,
   botAvgCost,
-  cancelAllOrders,
   clamp,
   disperse,
   referencePrice,
   sellCapacity,
+  syncQuote,
   tryPlace,
   trySell,
   trySubmitBid,
@@ -28,9 +28,14 @@ export function trade(ctx: BotCtx): boolean {
   const cfg = session.state.config.bots.marketMaker
   const minPrice = session.state.config.bots.minPrice
 
-  // Clear stale quotes first so the book's best reflects real (non-self) liquidity.
-  cancelAllOrders(session, record, bot.id)
-  const mv = buildMarketView(record.orders, record.trades)
+  // The maker must price against OTHER people's liquidity, or its opportunistic legs would
+  // chase its own resting quote. It used to get that by cancelling everything first, which
+  // is what churned the book every tick; filtering is the same view without the churn. Only
+  // one or two makers exist, so this stays O(orders), not O(bots × orders).
+  const mv = buildMarketView(
+    record.orders.filter((o) => o.playerId !== bot.id),
+    record.trades,
+  )
 
   const anchor = anchorValue(mv, referencePrice(session)) * (1 + (ctx.rt.bias ?? 0)) // personality-shifted value
   const margin = Math.max(cfg.minMargin, cfg.spreadFrac * anchor)
@@ -59,14 +64,17 @@ export function trade(ctx: BotCtx): boolean {
     acted = trySell(session, record, bot.id, cfg.quoteSize, mv.bestBid) || acted
   }
 
-  // Rest fresh two-sided quotes around the inventory-shifted centre.
+  // Rest two-sided quotes around the inventory-shifted centre. `syncQuote` leaves an
+  // already-correct quote exactly where it is, so a quiet market costs nothing.
   const bid = clamp(center - margin, minPrice, P - minPrice)
-  acted = tryPlace(session, bot.id, 'buy', cfg.quoteSize, bid) || acted
+  acted = syncQuote(session, record, bot.id, ctx.rt, 'buy', cfg.quoteSize, bid) || acted
   // Capped at the penalty like the bid. If that still clears our profit floor we
   // quote; if it does not, we sit out rather than sell the book at a loss.
   const ask = clamp(Math.max(center + margin, askFloor), minPrice, P)
-  if (ask >= askFloor && sellCapacity(session, record, bot.id) > 0) {
-    acted = trySell(session, record, bot.id, cfg.quoteSize, ask) || acted
+  const room = sellCapacity(session, record, bot.id)
+  if (ask >= askFloor && room > 0) {
+    acted =
+      syncQuote(session, record, bot.id, ctx.rt, 'sell', Math.min(cfg.quoteSize, room), ask) || acted
   }
   return acted
 }

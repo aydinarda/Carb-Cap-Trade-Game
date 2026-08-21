@@ -1,5 +1,6 @@
 import { openSellRemaining, round1, tradedCash } from '../../shared/engine'
-import type { MarketView, OrderSide, YearRecord } from '../../shared/types'
+import type { MarketView, Order, OrderSide, YearRecord } from '../../shared/types'
+import type { BotRuntime } from './types'
 import { GameError, type Session } from '../session'
 
 export const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
@@ -44,6 +45,72 @@ export function sellCapacity(session: Session, record: YearRecord, botId: string
 
 export function ownOpenOrders(record: YearRecord, botId: string) {
   return record.orders.filter((o) => o.playerId === botId && o.status === 'open')
+}
+
+/** A bot's open orders on one side of the book. */
+export function ownOpenOrdersOn(record: YearRecord, botId: string, side: OrderSide) {
+  return record.orders.filter(
+    (o) => o.playerId === botId && o.side === side && o.status === 'open',
+  )
+}
+
+/**
+ * Bring the bot's own resting quote on one side in line with what it now wants.
+ *
+ * Returns false — and leaves the book completely untouched — when that quote is already
+ * resting at the right price with enough size, which is the common case in a quiet market.
+ * Bots used to cancel and re-place their whole stack every tick, so `acted` was permanently
+ * true (a full broadcast to every socket, 24×/min) and `record.orders` grew without bound
+ * even when the book had not changed at all.
+ *
+ * It tracks the quote by ID rather than by price, so it never disturbs the bot's OTHER
+ * resting orders — notably the unfilled remainder of a marketable order, which is real
+ * depth the maker is providing.
+ */
+export function syncQuote(
+  session: Session,
+  record: YearRecord,
+  botId: string,
+  rt: BotRuntime,
+  side: OrderSide,
+  qty: number,
+  price: number,
+): boolean {
+  const q = round1(Math.min(qty, session.state.config.bots.maxStep))
+  const p = round1(price)
+  if (!(q > 0) || !(p > 0)) return false
+
+  const prevId = rt.quoteId?.[side]
+  const prev = prevId
+    ? record.orders.find((o) => o.id === prevId && o.status === 'open')
+    : undefined
+
+  // Same price, enough size still resting — leave it exactly where it is.
+  if (prev && prev.price === p && prev.remaining >= q) return false
+
+  let changed = false
+  if (prev) {
+    try {
+      session.cancelOrder(botId, prev.id)
+      changed = true
+    } catch (e) {
+      if (!(e instanceof GameError)) throw e
+    }
+  }
+  if (!tryPlace(session, botId, side, q, p)) {
+    if (changed) rt.quoteId = { ...rt.quoteId, [side]: undefined }
+    // A cancel with no replacement still changed the book.
+    return changed
+  }
+  // Remember what we just placed. A marketable quote can fill outright, in which case
+  // nothing is left resting and the next tick simply places a fresh one.
+  let newest: Order | undefined
+  for (const o of record.orders) {
+    if (o.playerId !== botId || o.side !== side || o.status !== 'open') continue
+    if (!newest || o.seq > newest.seq) newest = o
+  }
+  rt.quoteId = { ...rt.quoteId, [side]: newest?.id }
+  return true
 }
 
 /** Cancel all of a bot's resting orders (for requoting). Returns whether any were cancelled. */

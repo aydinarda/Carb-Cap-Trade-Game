@@ -1,4 +1,4 @@
-import type { Rng } from '../../shared/engine'
+import { buildMarketView, type Rng } from '../../shared/engine'
 import { GameError, type Session } from '../session'
 import * as compliance from './compliance'
 import * as marketMaker from './marketMaker'
@@ -35,6 +35,11 @@ export function stepBots(
   const bots = session.state.players.filter((p) => p.isBot && p.botType)
   if (bots.length === 0) return false
 
+  // Built ONCE and shared. Each view is O(orders) and the order array grows with the bot
+  // count, so rebuilding it per bot made the tick quadratic: 8× the bots cost 31× the time,
+  // essentially all of it in this one call repeated N times.
+  const market = buildMarketView(record.orders, record.trades)
+
   let acted = false
   for (const bot of bots) {
     // Cap stage: bid once (don't re-submit/re-broadcast every tick).
@@ -46,7 +51,7 @@ export function stepBots(
     if (rt.bias === undefined) {
       rt.bias = rng.normal(0, session.state.config.bots.sigma[bot.botType as BotType])
     }
-    const ctx: BotCtx = { session, bot, rng, rt }
+    const ctx: BotCtx = { session, bot, rng, rt, market }
     try {
       acted = (phase === 'cap' ? arch.auction : arch.trade)(ctx) || acted
     } catch (e) {

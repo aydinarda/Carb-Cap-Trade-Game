@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { createRng, expectedEmission, openSellRemaining, round1 } from '../../shared/engine'
+import {
+  buildMarketView,
+  createRng,
+  expectedEmission,
+  openSellRemaining,
+  round1,
+} from '../../shared/engine'
 import * as compliance from '../bots/compliance'
 import * as marketMaker from '../bots/marketMaker'
 import * as noise from '../bots/noise'
@@ -11,7 +17,16 @@ import type { BotCtx } from '../bots/types'
 const ARCHETYPES = { compliance, marketMaker, speculator, noise }
 
 function ctxFor(s: Session, botId: string, seed = 42): BotCtx {
-  return { session: s, bot: s.getPlayer(botId)!, rng: createRng(seed), rt: {} }
+  const rec = s.currentYearRecord()
+  return {
+    session: s,
+    bot: s.getPlayer(botId)!,
+    rng: createRng(seed),
+    rt: {},
+    // stepBots builds this once per tick and shares it; rebuild it here so each call
+    // sees the book as it stands right now.
+    market: buildMarketView(rec?.orders ?? [], rec?.trades ?? []),
+  }
 }
 
 describe('bot helpers', () => {
