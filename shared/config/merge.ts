@@ -69,7 +69,8 @@ export function validateConfig(config: GameConfig): GameConfig {
   if (!Number.isFinite(lrf) || lrf <= 0 || lrf > 1) {
     throw new ConfigError('allocation.capReductionFactor must be in (0, 1].')
   }
-  if (config.session.maxPlayers < 1) throw new ConfigError('session.maxPlayers must be >= 1.')
+  // 0 = unlimited; anything negative is a mistake.
+  if (config.session.maxPlayers < 0) throw new ConfigError('session.maxPlayers must be >= 0.')
   if (config.emissions.historyYears < 2) {
     // The generator interpolates across historyYears − 1 gaps.
     throw new ConfigError('emissions.historyYears must be >= 2.')

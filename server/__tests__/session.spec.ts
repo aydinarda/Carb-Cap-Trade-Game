@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_GAME_CONFIG } from '../../shared/config'
 
 const FIRST_GAME_YEAR = DEFAULT_GAME_CONFIG.emissions.firstGameYear
-const MAX_PLAYERS = DEFAULT_GAME_CONFIG.session.maxPlayers
 import { clearAuction, round1 } from '../../shared/engine'
 import { GameError, Session } from '../session'
 
@@ -245,11 +244,22 @@ describe('lobby management', () => {
     expect(s.state.players.map((p) => p.id)).toEqual(['P1'])
   })
 
-  it('enforces the MAX_PLAYERS cap', () => {
+  it('is uncapped by default — a room takes as many players as you throw at it', () => {
     const s = new Session('grandfathering', 1)
-    for (let i = 0; i < MAX_PLAYERS; i++) s.addPlayer(`P${i}`, 'Transport')
-    expect(() => s.addPlayer('overflow', 'Transport')).toThrow(GameError)
-    expect(s.state.players).toHaveLength(MAX_PLAYERS)
+    expect(s.state.config.session.maxPlayers).toBe(0)
+    for (let i = 0; i < 120; i++) s.addPlayer(`P${i}`, 'Transport')
+    expect(s.state.players).toHaveLength(120)
+  })
+
+  it('honours an explicit cap, and bots consume the same quota', () => {
+    const s = new Session('grandfathering', 1, { session: { maxPlayers: 5 } })
+    for (let i = 0; i < 3; i++) s.addPlayer(`P${i}`, 'Transport')
+    s.addBot('compliance')
+    s.addBot('noise')
+    // Five seats taken — three humans and two bots — so the sixth is refused.
+    expect(() => s.addPlayer('overflow', 'Transport')).toThrow(/full/i)
+    expect(() => s.addBot('noise')).toThrow(/full/i)
+    expect(s.state.players).toHaveLength(5)
   })
 
   it('only allows startYear from the lobby with players', () => {

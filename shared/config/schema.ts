@@ -25,7 +25,11 @@ export interface GameConfig {
 }
 
 export interface SessionLimits {
-  /** Session capacity. Bots and humans share it. (was `MAX_PLAYERS`) */
+  /**
+    * Session capacity — bots and humans share it. **0 means no limit**, which is the
+    * shipped default: the real ceiling is the broadcast cost, not a fixed number.
+    * Set a positive value to cap a room deliberately.
+    */
   maxPlayers: number
   /** Max characters in a player name. */
   maxNameLength: number

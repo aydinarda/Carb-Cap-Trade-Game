@@ -19,7 +19,7 @@ import type { GameConfig } from './schema'
  */
 export const DEFAULT_GAME_CONFIG: GameConfig = {
   session: {
-    maxPlayers: 60,
+    maxPlayers: 0, // no limit — see SessionLimits.maxPlayers
     maxNameLength: 40,
   },
   market: {

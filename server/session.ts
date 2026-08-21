@@ -100,6 +100,14 @@ export class Session {
     return this.state.years[this.state.currentYear] ?? null
   }
 
+  /** Capacity guard shared by humans and bots. `maxPlayers: 0` means no limit. */
+  private requireRoom() {
+    const { maxPlayers } = this.state.config.session
+    if (maxPlayers > 0 && this.state.players.length >= maxPlayers) {
+      throw new GameError('FULL', 'This session is full.')
+    }
+  }
+
   private requirePhase(...phases: GameState['phase'][]) {
     if (!phases.includes(this.state.phase)) {
       throw new GameError(
@@ -185,9 +193,7 @@ export class Session {
     if (!INDUSTRY_NAMES.includes(industry)) {
       throw new GameError('BAD_INDUSTRY', 'Please pick an industry.')
     }
-    if (this.state.players.length >= this.state.config.session.maxPlayers) {
-      throw new GameError('FULL', 'This session is full.')
-    }
+    this.requireRoom()
     const profile = generateHistoryForIndustry(industry, this.rng, this.state.config.emissions)
     const player: Player = {
       id: `P${this.state.players.length + 1}`,
@@ -208,9 +214,7 @@ export class Session {
    * history; pure-trader archetypes get a near-zero one (financial players). */
   addBot(botType: BotType, industry?: Industry): Player {
     this.requirePhase('lobby')
-    if (this.state.players.length >= this.state.config.session.maxPlayers) {
-      throw new GameError('FULL', 'This session is full.')
-    }
+    this.requireRoom()
     const ind = industry ?? INDUSTRY_NAMES[Math.floor(this.rng.uniform(0, INDUSTRY_NAMES.length))]
     const isEmitter = botType === 'compliance' || botType === 'noise'
     const profile = isEmitter

@@ -26,7 +26,7 @@ describe('DEFAULT_GAME_CONFIG reproduces the shipped constants', () => {
     expect(c.emissions.historyWindow).toBe(10)
     expect(c.emissions.baselineYear).toBe(10)
     expect(c.emissions.firstGameYear).toBe(11)
-    expect(c.session.maxPlayers).toBe(60)
+    expect(c.session.maxPlayers).toBe(0) // 0 = no cap; the broadcast cost is the real ceiling
     expect(c.bots.maxStep).toBe(40)
     expect(c.bots.marketMaker.invFrac).toBe(0.18)
     expect(c.bots.seed.marketMakerFrac).toBe(0.18)
@@ -127,7 +127,9 @@ describe('validateConfig', () => {
     expect(() => resolveConfig({ market: { penaltyRate: -1 } })).toThrow(/penaltyRate/)
     expect(() => resolveConfig({ allocation: { capReductionFactor: 0 } })).toThrow(/\(0, 1]/)
     expect(() => resolveConfig({ allocation: { capReductionFactor: 1.5 } })).toThrow(/\(0, 1]/)
-    expect(() => resolveConfig({ session: { maxPlayers: 0 } })).toThrow(/maxPlayers/)
+    expect(() => resolveConfig({ session: { maxPlayers: -1 } })).toThrow(/maxPlayers/)
+    // 0 is legal and means unlimited.
+    expect(resolveConfig({ session: { maxPlayers: 0 } }).session.maxPlayers).toBe(0)
     expect(() =>
       resolveConfig({ emissions: { industries: { Transport: { low: 500, high: 100 } } } }),
     ).toThrow(/low <= high/)
