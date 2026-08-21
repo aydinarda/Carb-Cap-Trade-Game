@@ -87,5 +87,12 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     },
     // minTradeSize is TONNES and does not scale with money; priceStep is money.
     compliance: { minTradeSize: 0.5, priceStep: 0.5 },
+    // All off: the shipped game keeps the behaviour it has until a sweep says otherwise.
+    fixes: {
+      noiseAbatement: false,
+      complianceReservation: false,
+      marketMakerIncrementalBid: false,
+      marketMakerShareByCount: false,
+    },
   },
 }

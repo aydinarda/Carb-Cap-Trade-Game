@@ -34,10 +34,16 @@ function reservationPrice(
   held: number,
   coeff: AbatementSpec,
   penaltyRate: number,
+  strictBoundary = false,
 ): number {
   if (expected <= 0) return penaltyRate
   const rCover = 1 - held / expected
-  if (rCover >= 1) return penaltyRate
+  // At rCover === 1 the firm holds nothing but a full cut still covers it, so the right
+  // reservation is the cost of that cut — min(P, MAC(1)) — not the penalty. Only rCover > 1
+  // means even a 100% cut leaves it short. Under auctioning `held` starts at 0 every year,
+  // so the loose boundary put the bot at the ceiling on tick 1 of every trade window.
+  // Gated: see bots.fixes.complianceReservation.
+  if (strictBoundary ? rCover > 1 : rCover >= 1) return penaltyRate
   return Math.min(penaltyRate, marginalCost(Math.max(0, rCover), coeff))
 }
 
@@ -72,7 +78,10 @@ export function trade(ctx: BotCtx): boolean {
   if (need > cfg.minTradeSize) {
     // Short after abating: bid at what the shortfall is actually worth to us, which
     // rises toward the penalty the further we are from covering it.
-    const reservation = reservationPrice(expected, held, coeff, P)
+    const reservation = reservationPrice(
+      expected, held, coeff, P,
+      session.state.config.bots.fixes.complianceReservation,
+    )
     const reservationB = disperse(reservation, ctx.rt.bias ?? 0, P)
     if (mv.bestAsk !== null && mv.bestAsk < reservation) {
       return tryPlace(session, bot.id, 'buy', need, mv.bestAsk) // lift a cheap ask

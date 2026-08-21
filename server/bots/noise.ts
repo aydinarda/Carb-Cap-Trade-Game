@@ -3,6 +3,7 @@ import {
   marginalCost,
   optimalAbatement,
 } from '../../shared/engine'
+import { GameError } from '../session'
 import {
   anchorValue,
   clamp,
@@ -31,6 +32,16 @@ export function trade(ctx: BotCtx): boolean {
   const mv = ctx.market
   const anchor = anchorValue(mv, referencePrice(session))
   const rStar = optimalAbatement(coeff, anchor)
+  // Without this the bot prices and sizes its order as though it had cut to r*, while its
+  // recorded abatement stays 0 — so it is short by `expected × rStar` at settlement every
+  // single year. Gated: see bots.fixes.noiseAbatement.
+  if (session.state.config.bots.fixes.noiseAbatement) {
+    try {
+      session.setAbatement(bot.id, rStar)
+    } catch (e) {
+      if (!(e instanceof GameError)) throw e
+    }
+  }
   const fair = Math.min(P, marginalCost(rStar, coeff))
   const expected = expectedEmission(bot, record.year)
   const held = session.creditsHeld(bot.id)

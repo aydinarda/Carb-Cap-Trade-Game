@@ -162,4 +162,36 @@ export interface BotsConfig {
     /** How far inside its reservation/fair value it rests an order. */
     priceStep: number
   }
+  /**
+   * Corrections to bot behaviour, each off by default so the shipped game is unchanged and
+   * a calibration sweep can measure before and after on the same seeds. Turn one on only
+   * with evidence — see sim/sweeps/price-calibration.ts.
+   */
+  fixes: {
+    /**
+     * The noise bot sizes its order as `expected × (1 − r*) − held` but never calls
+     * setAbatement, so it trades as if it had cut while its recorded abatement stays 0. It
+     * is then short at settlement by `expected × r*`, pays the penalty, and the shortfall
+     * compounds through bankedCredits → carriedIn → creditsHeld.
+     */
+    noiseAbatement: boolean
+    /**
+     * `reservationPrice` returns penaltyRate outright at `rCover >= 1`, i.e. whenever the
+     * firm holds nothing. Under auctioning that is the normal state, so the bot bids the
+     * ceiling on the first tick. At exactly rCover === 1 the right answer is the cost of a
+     * full cut, min(P, MAC(1)) = a + b.
+     */
+    complianceReservation: boolean
+    /**
+     * The market maker's auction bid is a target inventory *level* submitted as an
+     * incremental *purchase* every year, with no `− held` term, so its holdings compound
+     * without bound. Bid the gap to target instead.
+     */
+    marketMakerIncrementalBid: boolean
+    /**
+     * Each market maker targets `invFrac × circulatingCap()` independently, so N makers
+     * chase N × 18% of the whole pool. Divide the target by the number of makers.
+     */
+    marketMakerShareByCount: boolean
+  }
 }

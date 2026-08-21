@@ -163,6 +163,109 @@ describe('grandfathering bots', () => {
   })
 })
 
+/**
+ * Corrections to bot behaviour, each off by default. These assert the GATED behaviour with
+ * the flag explicitly on, so the fixes stay covered while the shipped game keeps the
+ * behaviour it has. Every one of them was found by a price-calibration sweep — see
+ * sim/sweeps/price-calibration.ts.
+ */
+describe('bots.fixes', () => {
+  it('noiseAbatement: the noise bot records the cut it already priced into its order', () => {
+    const off = new Session('benchmarking', 5)
+    const offBot = off.addBot('noise', 'Power & Utilities')
+    off.addPlayer('Human', 'Transport')
+    off.startYear()
+    off.closeCapStage()
+    off.openTrade()
+    for (let i = 0; i < 4; i++) noise.trade(ctxFor(off, offBot.id))
+    // The defect: it sizes its order as `expected × (1 − r*) − held` but never abates.
+    expect(off.currentYearRecord()!.abatement[offBot.id] ?? 0).toBe(0)
+
+    const on = new Session('benchmarking', 5, { bots: { fixes: { noiseAbatement: true } } })
+    const onBot = on.addBot('noise', 'Power & Utilities')
+    on.addPlayer('Human', 'Transport')
+    on.startYear()
+    on.closeCapStage()
+    on.openTrade()
+    for (let i = 0; i < 4; i++) noise.trade(ctxFor(on, onBot.id))
+    expect(on.currentYearRecord()!.abatement[onBot.id]).toBeGreaterThan(0)
+  })
+
+  it('complianceReservation: holding nothing means a full cut, not the penalty', () => {
+    const make = (strict: boolean) => {
+      const s = new Session(
+        'auctioning',
+        5,
+        strict ? { bots: { fixes: { complianceReservation: true } } } : {},
+      )
+      const bot = s.addBot('compliance', 'Power & Utilities')
+      s.addPlayer('Human', 'Transport')
+      s.startYear()
+      s.closeCapStage() // nobody bid, so the bot wins nothing and holds zero
+      s.openTrade()
+      expect(s.creditsHeld(bot.id)).toBe(0)
+      compliance.trade(ctxFor(s, bot.id))
+      return s
+        .currentYearRecord()!
+        .orders.find((o) => o.playerId === bot.id && o.side === 'buy')!
+    }
+
+    const P = new Session('auctioning', 5).state.config.market.penaltyRate
+    // Loose boundary: rCover === 1 falls into the `>= 1` branch and returns P outright.
+    expect(make(false).price).toBeCloseTo(P - 0.5, 5)
+    // Strict: the cost of cutting 100% is a + b = 10 + 75 for Power & Utilities.
+    expect(make(true).price).toBeCloseTo(85 - 0.5, 5)
+  })
+
+  it('marketMakerIncrementalBid: inventory stops compounding year over year', () => {
+    const play = (fix: boolean) => {
+      const s = new Session(
+        'auctioning',
+        5,
+        fix ? { bots: { fixes: { marketMakerIncrementalBid: true } } } : {},
+      )
+      const mm = s.addBot('marketMaker')
+      s.addPlayer('A', 'Power & Utilities')
+      s.addPlayer('B', 'Heavy Materials')
+      const grants: number[] = []
+      for (let y = 0; y < 3; y++) {
+        if (y === 0) s.startYear()
+        else s.advanceYear()
+        marketMaker.auction(ctxFor(s, mm.id))
+        s.closeCapStage()
+        grants.push(s.currentYearRecord()!.regulatorGranted[mm.id] ?? 0)
+        s.openTrade()
+        s.closeTrade()
+      }
+      return grants
+    }
+
+    const loose = play(false)
+    const fixed = play(true)
+    // Unfixed, the target is re-bought in full every year regardless of what it already holds.
+    expect(loose[2]).toBeGreaterThan(0)
+    // Fixed, it only tops up the gap — so by year 3 it buys far less than it did unfixed.
+    expect(fixed[2]).toBeLessThan(loose[2])
+  })
+
+  it('marketMakerShareByCount: N makers split the target instead of each taking all of it', () => {
+    const grantFor = (share: boolean) => {
+      const s = new Session(
+        'auctioning',
+        5,
+        share ? { bots: { fixes: { marketMakerShareByCount: true } } } : {},
+      )
+      const mms = [s.addBot('marketMaker'), s.addBot('marketMaker'), s.addBot('marketMaker')]
+      s.addPlayer('A', 'Power & Utilities')
+      s.startYear()
+      for (const mm of mms) marketMaker.auction(ctxFor(s, mm.id))
+      const rec = s.currentYearRecord()!
+      return rec.auctionBid[mms[0].id]?.qty ?? 0
+    }
+    expect(grantFor(true)).toBeCloseTo(grantFor(false) / 3, 1)
+  })
+})
+
 describe('bot archetypes under benchmarking (no primary auction)', () => {
   for (const [name, arch] of Object.entries(ARCHETYPES)) {
     it(`${name}: trades on free allocation without shorting`, () => {

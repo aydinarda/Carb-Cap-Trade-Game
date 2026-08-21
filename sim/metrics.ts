@@ -85,6 +85,20 @@ export interface YearMetrics {
   priceImpact: number | null
   botVolumeShare: number
   unfilledDemand: number
+  // primary market — all four exist on YearRecord but were never recorded
+  /** Uniform clearing price of the sealed-bid auction; null under the free-allocation modes. */
+  auctionPrice: number | null
+  /** Credits actually sold at the cap stage. Under the free-allocation modes this is the
+   *  trader-bot opening book, not a class auction. */
+  auctionAwarded: number
+  /** Total quantity bid into the auction. Against `regulatorPool` this is the bid-to-cover
+   *  ratio — the number that shows whether a few bidders are taking the whole pool. */
+  auctionBidQty: number
+  /** Everything issued this year, free or sold. Mirrors Session.circulatingCap(). */
+  issuance: number
+  /** (need − issuance) / need. The organising variable: it makes the three cap regimes
+   *  comparable on one axis, which their own knobs do not. */
+  shortageRatio: number
   // outcomes
   volume: number
   tradeCount: number
@@ -143,6 +157,10 @@ export function yearMetrics(
   )
   const spreads = samples.map((s) => s.spread).filter((x): x is number => x !== null)
 
+  const freeAllocation = round1(Object.values(record.freeAllocation).reduce((a, b) => a + b, 0))
+  const issuance = round1(freeAllocation + record.regulatorPool)
+  const expectedTotal = round1(totalExpected)
+
   return {
     vwap: mv.vwap,
     lastPrice: mv.lastPrice,
@@ -161,11 +179,18 @@ export function yearMetrics(
     priceImpact: impact,
     botVolumeShare: volume > 0 ? botVolume / volume : 0,
     unfilledDemand: round1(openBuyQty),
+    auctionPrice: record.auctionPrice ?? null,
+    auctionAwarded: round1(Object.values(record.regulatorGranted).reduce((a, b) => a + b, 0)),
+    auctionBidQty: round1(Object.values(record.auctionBid).reduce((s, b) => s + b.qty, 0)),
+    issuance,
+    // Guarded: sim.spec.ts asserts every numeric metric is finite, and a class with no
+    // expected emissions at all would otherwise divide by zero.
+    shortageRatio: expectedTotal > 0 ? round1((expectedTotal - issuance) / expectedTotal) : 0,
     volume,
     tradeCount: record.trades.length,
-    freeAllocation: round1(Object.values(record.freeAllocation).reduce((a, b) => a + b, 0)),
+    freeAllocation,
     regulatorPool: record.regulatorPool,
-    totalExpected: round1(totalExpected),
+    totalExpected: expectedTotal,
     totalRealized: round1(Object.values(record.realized).reduce((a, b) => a + b, 0)),
     totalAbated: round1(totalAbated),
     totalPenalty: round1(Object.values(settlement).reduce((s, x) => s + x.penaltyCost, 0)),

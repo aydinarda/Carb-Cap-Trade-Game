@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS years (
   spread_mean        REAL, depth_mean REAL, one_sided_frac REAL,
   order_to_trade     REAL, fill_rate REAL, price_impact REAL,
   bot_volume_share   REAL, unfilled_demand REAL,
+  auction_price      REAL, auction_awarded REAL, auction_bid_qty REAL,
+  issuance           REAL, shortage_ratio REAL,
   volume             REAL, trade_count INTEGER,
   free_allocation    REAL, regulator_pool REAL,
   total_expected     REAL, total_realized REAL, total_abated REAL,
@@ -156,10 +158,26 @@ export class SimDb {
   }
 
   insertYear(runId: string, year: number, m: YearMetrics) {
+    // Columns are named explicitly. This used to be a bare `INSERT INTO years VALUES (?×28)`,
+    // which silently coupled argument order to the DDL — adding a metric in the middle of
+    // YearMetrics would have written every later value into the wrong column.
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO years VALUES (
-           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO years (
+           run_id, year,
+           vwap, last_price, price_min, price_max, price_stdev, ceiling_frac,
+           efficient_price, price_vs_efficient,
+           spread_mean, depth_mean, one_sided_frac,
+           order_to_trade, fill_rate, price_impact,
+           bot_volume_share, unfilled_demand,
+           auction_price, auction_awarded, auction_bid_qty, issuance, shortage_ratio,
+           volume, trade_count,
+           free_allocation, regulator_pool,
+           total_expected, total_realized, total_abated,
+           total_penalty, class_cost, optimal_cost
+         ) VALUES (
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         runId, year,
@@ -168,6 +186,7 @@ export class SimDb {
         m.spreadMean, m.depthMean, m.oneSidedFrac,
         m.orderToTrade, m.fillRate, m.priceImpact,
         m.botVolumeShare, m.unfilledDemand,
+        m.auctionPrice, m.auctionAwarded, m.auctionBidQty, m.issuance, m.shortageRatio,
         m.volume, m.tradeCount,
         m.freeAllocation, m.regulatorPool,
         m.totalExpected, m.totalRealized, m.totalAbated,

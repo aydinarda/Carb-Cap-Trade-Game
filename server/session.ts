@@ -591,6 +591,11 @@ export class Session {
     if (!Number.isFinite(price) || price <= 0) {
       throw new GameError('BAD_ORDER', 'Price must be a positive number.')
     }
+    // Deliberately NO price ceiling here. The penalty rate is a *soft* ceiling that rational
+    // agents impose on themselves — nobody should pay more per tonne than the fine — and
+    // whether the market actually holds it is a measurement of the agents, not something to
+    // be assumed by rule. Trades printing above the penalty mean somebody is not weighing
+    // abatement against the fine; that is a finding, not an input to sanitise away.
     const record = this.currentYearRecord()!
     const roundedQty = round1(qty)
     if (side === 'sell') {

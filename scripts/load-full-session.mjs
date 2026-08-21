@@ -18,6 +18,15 @@
  * measure the ack round-trip. Expected 4xx (no-shorting, wrong-phase races) are counted
  * separately, not as failures.
  *
+ * NOTE ON PRICES. This is a *load* test, but its price path gets read as a finding, so the
+ * synthetic players have to stay economically plausible: they abate to their sector's
+ * cost-minimising point and value a tonne at `min(penaltyRate, marginalCost(r*))`, the same
+ * valuation the engine's bots and the headless sim's students use. Quote noise must stay
+ * SYMMETRIC around that value. An earlier version quoted `lastPrice × U(1.0, 1.1)` to buy
+ * and `× U(0.9, 1.0)` to sell, reading `lastPrice` back from its own prints — a feedback
+ * loop with ±5% drift that compounded to €400 (short class) or €3 (long class) and had
+ * nothing to do with the game's own parameters. Do not reintroduce asymmetric drift here.
+ *
  *   node scripts/load-full-session.mjs
  *   BASE_URL=https://carb-cap-trade-api.onrender.com HOST_KEY=admin123 \
  *     N_PLAYERS=100 YEARS_PER_MODE=3 ROUND_WINDOW=25 node scripts/load-full-session.mjs
@@ -101,60 +110,122 @@ function emit(sock, event, payload, { measure = false } = {}) {
 }
 
 // ── a simulated player ───────────────────────────────────────────────────────
+/**
+ * Marginal abatement cost of the next tonne at cut fraction `f`, from the sector MAC spec
+ * the player snapshot already carries. Mirrors `specMarginal` in shared/engine — inlined
+ * because this is a plain .mjs script and cannot import the TypeScript engine.
+ */
+function marginalCost(f, spec) {
+  if (!spec) return null
+  const p = spec.params ?? spec
+  switch (spec.model ?? 'linear') {
+    case 'power': return p.a + p.b * Math.pow(f, p.n)
+    case 'exponential': return p.a * Math.exp(p.k * f)
+    default: return p.a + p.b * f
+  }
+}
+
+/** Cost-minimising cut fraction: where marginal cost meets the price. Linear form inverted. */
+function optimalAbatement(price, spec) {
+  if (!spec) return 0
+  const p = spec.params ?? spec
+  let r
+  switch (spec.model ?? 'linear') {
+    case 'power': r = p.b > 0 ? Math.pow(Math.max(0, (price - p.a) / p.b), 1 / p.n) : 0; break
+    case 'exponential': r = p.k > 0 && p.a > 0 ? Math.log(Math.max(1e-9, price / p.a)) / p.k : 0; break
+    default: r = p.b > 0 ? (price - p.a) / p.b : 0
+  }
+  return clamp(r, 0, 1)
+}
+
 class Player {
-  constructor(sock, id) {
+  constructor(sock, id, penaltyRate) {
     this.sock = sock
     this.id = id
     this.snap = null
+    this.penaltyRate = penaltyRate
     sock.on('session:snapshot', (s) => {
       this.snap = s
       M.snapshots++
     })
   }
 
-  /** Auctioning cap stage: submit one sealed bid around the reference price. */
+  /**
+   * What this company thinks a tonne is worth: the cost of cutting it itself, capped by the
+   * fine it would otherwise pay. This is the same valuation the engine's own bots and the
+   * headless sim's students use, and it is what makes the penalty a ceiling *endogenously* —
+   * nothing in the engine enforces one.
+   */
+  fairValue() {
+    const s = this.snap
+    const ref = this.refPrice()
+    const spec = s?.abatement
+    const rStar = optimalAbatement(ref, spec)
+    const mc = marginalCost(rStar, spec)
+    if (mc === null) return ref
+    return Math.min(this.penaltyRate, mc)
+  }
+
+  /** Auctioning cap stage: submit one sealed bid at what a tonne is worth to this company. */
   async submitAuctionBid() {
     const y = this.snap?.you
     const expected = y?.expectedEmission ?? 100
-    const ref = this.refPrice()
+    const fair = this.fairValue()
     const res = await emit(
       this.sock,
       'player:submitBid',
-      { qty: round1(expected * rand(0.6, 1.0)), price: round1(ref * rand(0.9, 1.15)) },
+      { qty: round1(expected * rand(0.6, 1.0)), price: round1(fair * rand(0.92, 1.08)) },
       { measure: true },
     )
     this.tally(res)
   }
 
-  /** Trade window: cover a shortfall (bid) or sell a surplus (ask); sometimes abate. */
+  /**
+   * Trade window: cut what is worth cutting, then cover the residual (bid) or sell the
+   * surplus (ask).
+   *
+   * The quote is centred on `fairValue()` with SYMMETRIC noise. It used to be
+   * `ref × U(1.0, 1.1)` to buy and `ref × U(0.9, 1.0)` to sell, with `ref` read back from
+   * the lastPrice these very orders set — a closed feedback loop with ±5% drift and no
+   * anchor, which compounded geometrically over a trade window and drove the price to
+   * either €400 or €3 depending only on which side happened to dominate. The noise was
+   * never the problem; the drift was.
+   */
   async tradeTick() {
     const s = this.snap
     if (!s || s.phase !== 'trade') return
     const y = s.you
     const held = y?.creditsHeld ?? 0
     const expected = y?.expectedEmission ?? 0
-    const ref = this.refPrice()
-    const need = expected - held // >0 short, <0 surplus
+    const fair = this.fairValue()
 
+    // Abate to the cost-minimising point first — that is what makes the residual, and
+    // what makes the penalty bite as a ceiling rather than a formality.
+    const rStar = optimalAbatement(this.refPrice(), s.abatement)
+    if (Math.random() < 0.3) {
+      this.tally(await emit(this.sock, 'player:abate', { fraction: round1(rStar) }))
+    }
+
+    const need = expected * (1 - rStar) - held // >0 short, <0 surplus
     if (need > 1) {
       const qty = round1(clamp(need * rand(0.3, 1), 1, need))
       this.tally(await emit(this.sock, 'player:placeOrder',
-        { side: 'buy', qty, price: round1(ref * rand(1.0, 1.1)) }, { measure: true }))
+        { side: 'buy', qty, price: round1(fair * rand(0.95, 1.05)) }, { measure: true }))
     } else if (need < -1) {
       // Stay well under holdings so the no-shorting guard rarely trips.
       const qty = round1(clamp(-need * rand(0.3, 1), 1, held * 0.8))
       if (qty >= 1) this.tally(await emit(this.sock, 'player:placeOrder',
-        { side: 'sell', qty, price: round1(ref * rand(0.9, 1.0)) }, { measure: true }))
-    }
-    if (Math.random() < 0.2) {
-      this.tally(await emit(this.sock, 'player:abate', { fraction: round1(rand(0, 0.5)) }))
+        { side: 'sell', qty, price: round1(fair * rand(0.95, 1.05)) }, { measure: true }))
     }
   }
 
   refPrice() {
     const s = this.snap
     const mv = s?.market
-    return mv?.lastPrice ?? mv?.vwap ?? s?.prevMarketPrice ?? s?.auctionPrice ?? 10
+    // Cold start matches the engine's own openingReference (penaltyRate × 0.5), not an
+    // arbitrary 10 — otherwise the harness and the bots anchor to different prices.
+    return mv?.lastPrice ?? mv?.vwap ?? s?.prevMarketPrice ?? s?.auctionPrice
+      ?? this.penaltyRate * 0.5
   }
 
   tally(res) {
@@ -169,9 +240,16 @@ class Player {
 async function runSession(capMode, { withBots, joinGrace }) {
   console.log(`\n══════════ ${capMode.toUpperCase()} ══════════`)
   const host = await connect({ role: 'host' })
+  // The players value a tonne against the fine, so they need the rate in force. Only the
+  // host snapshot carries it.
+  let hostSnap = null
+  host.on('session:snapshot', (s) => { if (s.role === 'host') hostSnap = s })
   const created = await emit(host, 'host:createSession', { hostKey: HOST_KEY, capMode })
   if (!created.ok) throw new Error(`createSession failed: ${created.error} (check HOST_KEY)`)
   const roomCode = created.roomCode
+  await sleep(200)
+  const penaltyRate = hostSnap?.config?.penaltyRate ?? 100
+  console.log(`penalty rate in force: ${penaltyRate}`)
 
   // Join players (batched to avoid a connection storm).
   const players = []
@@ -187,7 +265,7 @@ async function runSession(capMode, { withBots, joinGrace }) {
             industry: INDUSTRIES[n % INDUSTRIES.length],
           })
           if (!j.ok) { M.errors++; sock.close(); return null }
-          return new Player(sock, j.playerId)
+          return new Player(sock, j.playerId, penaltyRate)
         } catch { M.connectFail++; return null }
       }),
     )
@@ -238,7 +316,16 @@ async function runSession(capMode, { withBots, joinGrace }) {
 
     await emit(host, 'host:closeTrade', {})
     const lb = players[0]?.snap?.leaderboard
-    console.log(`  year ${year}/${YEARS_PER_MODE} settled` + (lb ? ` | leader ${lb[0]?.name} (${lb[0]?.normalizedScore})` : ''))
+    // Print the discovered price: this harness's price path is read as a result, so a
+    // runaway must be visible in the log rather than only in a browser.
+    const mv = hostSnap?.market
+    const price = mv?.vwap ?? mv?.lastPrice
+    const priceStr = price != null
+      ? ` | vwap ${price} (min ${mv.trades?.length ? Math.min(...mv.trades.map((t) => t.price)) : '—'}` +
+        ` max ${mv.trades?.length ? Math.max(...mv.trades.map((t) => t.price)) : '—'})`
+      : ' | no trades'
+    console.log(`  year ${year}/${YEARS_PER_MODE} settled` + priceStr +
+      (lb ? ` | leader ${lb[0]?.name} (${lb[0]?.normalizedScore})` : ''))
     if (year < YEARS_PER_MODE) await sleep(REVIEW_GAP * 1000)
   }
 

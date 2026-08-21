@@ -85,7 +85,20 @@ export function auction(ctx: BotCtx): boolean {
   if (!record) return false
   const P = session.state.config.market.penaltyRate
   const cfg = session.state.config.bots.marketMaker
-  const target = cfg.invFrac * session.circulatingCap() // deep inventory to two-side the market
+  const fixes = session.state.config.bots.fixes
+  let target = cfg.invFrac * session.circulatingCap() // deep inventory to two-side the market
+  // Every maker sizes its target off the WHOLE pool, so N makers chase N × invFrac of it —
+  // four of them bid 72% of the cap. Gated: bots.fixes.marketMakerShareByCount.
+  if (fixes.marketMakerShareByCount) {
+    const makers = session.state.players.filter((p) => p.botType === 'marketMaker').length
+    if (makers > 1) target /= makers
+  }
+  // The target is a LEVEL, but it was bid every year as an incremental purchase — nothing
+  // subtracted what the maker already held, so its inventory compounded without bound and
+  // it ended up sitting on credits nobody could buy. Gated: bots.fixes.marketMakerIncrementalBid.
+  if (fixes.marketMakerIncrementalBid) {
+    target = Math.max(0, target - session.creditsHeld(bot.id))
+  }
   if (target <= 0) return false
   // Bid above the discovered reference (to win inventory), capped at P and dispersed.
   const price = disperse(Math.min(P, referencePrice(session) * cfg.auctionAggr), ctx.rt.bias ?? 0, P)
