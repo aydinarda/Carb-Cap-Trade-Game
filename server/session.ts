@@ -593,11 +593,15 @@ export class Session {
     if (!Number.isFinite(price) || price <= 0) {
       throw new GameError('BAD_ORDER', 'Price must be a positive number.')
     }
-    // Deliberately NO price ceiling here. The penalty rate is a *soft* ceiling that rational
-    // agents impose on themselves — nobody should pay more per tonne than the fine — and
-    // whether the market actually holds it is a measurement of the agents, not something to
-    // be assumed by rule. Trades printing above the penalty mean somebody is not weighing
-    // abatement against the fine; that is a finding, not an input to sanitise away.
+    // Deliberately NO price ceiling here, and `penaltyRate` is NOT one either.
+    //
+    // Paying the fine does not discharge the obligation: an uncovered tonne is penalised
+    // AND carried into next year as a make-good debt (see shared/engine/settlement.ts and
+    // the carry into `bankedCredits` below). Defaulting therefore costs the fine *plus*
+    // buying the same tonne later, so a rational firm's willingness to pay sits ABOVE
+    // `penaltyRate`, not at it. Clamping orders to the penalty would forbid a trade that
+    // is genuinely worth making. Where the ceiling actually falls is for the market to
+    // discover — and for the simulator to measure.
     const record = this.currentYearRecord()!
     const roundedQty = round1(qty)
     if (side === 'sell') {

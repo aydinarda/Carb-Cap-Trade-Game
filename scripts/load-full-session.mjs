@@ -20,8 +20,8 @@
  *
  * NOTE ON PRICES. This is a *load* test, but its price path gets read as a finding, so the
  * synthetic players have to stay economically plausible: they abate to their sector's
- * cost-minimising point and value a tonne at `min(penaltyRate, marginalCost(r*))`, the same
- * valuation the engine's bots and the headless sim's students use. Quote noise must stay
+ * cost-minimising point and value a tonne against what defaulting on it would really cost —
+ * the fine PLUS the carried make-good obligation, not the fine alone. Quote noise must stay
  * SYMMETRIC around that value. An earlier version quoted `lastPrice × U(1.0, 1.1)` to buy
  * and `× U(0.9, 1.0)` to sell, reading `lastPrice` back from its own prints — a feedback
  * loop with ±5% drift that compounded to €400 (short class) or €3 (long class) and had
@@ -154,10 +154,17 @@ class Player {
   }
 
   /**
-   * What this company thinks a tonne is worth: the cost of cutting it itself, capped by the
-   * fine it would otherwise pay. This is the same valuation the engine's own bots and the
-   * headless sim's students use, and it is what makes the penalty a ceiling *endogenously* —
-   * nothing in the engine enforces one.
+   * What this company thinks a tonne is worth.
+   *
+   * The obvious answer — "never pay more than the fine" — is WRONG in this game, and the
+   * engine says so itself (shared/engine/settlement.ts): paying the penalty does NOT
+   * discharge the obligation. An uncovered tonne is fined AND carried into next year as a
+   * make-good debt, where it lowers `creditsHeld`, gets fined again if it is still not
+   * covered, and is finally cashed out at the closing price.
+   *
+   * So the alternative to buying a tonne today is not `penaltyRate` — it is `penaltyRate`
+   * PLUS the cost of eventually settling the same tonne. That puts the rational ceiling
+   * ABOVE the fine, which is exactly why the engine enforces no hard cap.
    */
   fairValue() {
     const s = this.snap
@@ -165,8 +172,11 @@ class Player {
     const spec = s?.abatement
     const rStar = optimalAbatement(ref, spec, s?.maxAbatement ?? 1)
     const mc = marginalCost(rStar, spec)
-    if (mc === null) return ref
-    return Math.min(this.penaltyRate, mc)
+    // Default now, settle later: the fine plus roughly today's price for the tonne we
+    // would still owe. A one-period approximation of a debt that can outlive the year.
+    const defaultCost = this.penaltyRate + ref
+    if (mc === null) return Math.min(defaultCost, ref)
+    return Math.min(defaultCost, mc)
   }
 
   /** Auctioning cap stage: submit one sealed bid at what a tonne is worth to this company. */
