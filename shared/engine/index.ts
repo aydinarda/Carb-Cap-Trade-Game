@@ -46,6 +46,7 @@ export {
   matchOrder,
   cancelOrder,
   tradedNet,
+  tradedNetAll,
   tradedCash,
   openSellRemaining,
   buildMarketView,

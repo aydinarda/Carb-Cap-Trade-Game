@@ -48,12 +48,18 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
   const [capReduction, setCapReduction] = useState(String(config.capReductionFactor))
   const [busy, setBusy] = useState(false)
 
+  // Compared by value, not identity: `config.benchmark` arrives over the wire, so JSON.parse
+  // hands us a fresh object on every snapshot. As an effect dependency that re-ran this
+  // resync several times a second and wiped whatever the instructor was mid-way through
+  // typing. The scalars above are primitives and compare fine as they are.
+  const benchmarkKey = JSON.stringify(config.benchmark)
   useEffect(() => {
     setPenalty(String(config.penaltyRate))
     setAuctionCapRatio(String(config.auctionCapRatio))
     setCapReduction(String(config.capReductionFactor))
     setBenchmark(Object.fromEntries(Object.entries(config.benchmark).map(([k, v]) => [k, String(v)])))
-  }, [config.penaltyRate, config.auctionCapRatio, config.capReductionFactor, config.benchmark])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.penaltyRate, config.auctionCapRatio, config.capReductionFactor, benchmarkKey])
 
   const save = async () => {
     setBusy(true)

@@ -174,13 +174,15 @@ export interface YouView {
   emissions: Record<number, number>
   score: number
   freeAllocation: number | null
-  regulatorGranted: number | null
   /** Auctioning mode: this company's submitted bid. */
   auctionBid: { qty: number; price: number } | null
-  /** Auctioning mode: credits won at the auction (= regulatorGranted). */
+  /** Auctioning mode: credits won at the auction. */
   auctionAward: number | null
-  /** This company's own orders and executed trades in the market. */
-  myOrders: Order[]
+  /**
+   * This company's executed trades. Its *open orders* are not carried here — the trade
+   * screen reads them out of `market.bids`/`market.asks` filtered by player id, so a
+   * `myOrders` copy was pure duplicated payload.
+   */
   myTrades: Trade[]
   /** Fraction of expected emissions this company chose to abate (0..1). */
   abatement: number | null
@@ -220,7 +222,6 @@ export interface PlayerSnapshot {
   currentYear: number
   playerCount: number
   roster: PublicPlayerInfo[]
-  freeCreditLimit: number | null
   /** This player's sector MAC curve, for the live abatement-cost preview. The client
    *  evaluates it with the same shared functions the server settles with. */
   abatement: AbatementSpec
@@ -250,7 +251,6 @@ export interface IndustryBreakdownRow {
 
 export interface ClassAggregate {
   totalBaselineEmissions: number
-  freeCreditLimit: number | null
   totalFreeAllocation: number | null
   totalRegulatorRequests: number | null
   submittedCount: number
@@ -302,13 +302,11 @@ export interface PlayerHistoryYear {
 export interface HostSnapshot {
   role: 'host'
   roomCode: string
-  seed: number
   capMode: CapMode | null
   phase: Phase
   currentYear: number
   players: HostPlayerRow[]
   classAggregate: ClassAggregate
-  freeCreditLimit: number | null
   regulatorPool: number | null
   config: HostConfigView
   leaderboard: LeaderboardRow[]

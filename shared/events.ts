@@ -1,5 +1,5 @@
 import type { Industry } from './constants'
-import type { BotType, CapMode, OrderSide, Phase, PlayerProfile, Snapshot } from './types'
+import type { BotType, CapMode, OrderSide, PlayerProfile, Snapshot } from './types'
 
 export type Ack<T = unknown> = (
   response: ({ ok: true } & T) | { ok: false; error: string },
@@ -48,9 +48,13 @@ export interface ClientToServerEvents {
 }
 
 export interface ServerToClientEvents {
+  /**
+   * The whole role-scoped view of the session, pushed after every mutation. Errors travel
+   * back on the originating action's ack rather than as a separate event, and the phase is
+   * carried here — two declared-but-never-emitted events (`phase:changed`, `session:error`)
+   * were removed once it was clear nothing had ever listened for them.
+   */
   'session:snapshot': (snapshot: Snapshot) => void
-  'phase:changed': (payload: { phase: Phase; year: number }) => void
-  'session:error': (payload: { code: string; message: string }) => void
 }
 
 /** Sent by the client in the Socket.IO handshake `auth` field. */

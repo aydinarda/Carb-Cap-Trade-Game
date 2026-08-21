@@ -79,6 +79,23 @@ export function tradedNet(trades: Trade[], playerId: string): number {
   return round1(net)
 }
 
+/**
+ * Net traded position for *every* player, in one pass over the tape.
+ *
+ * The per-player `tradedNet` above is right when you want one player, but calling it inside
+ * a players×years loop rescans the whole year's trades once per player — which is what made
+ * building the host's year-by-year history quadratic in class size.
+ */
+export function tradedNetAll(trades: Trade[]): Record<string, number> {
+  const net: Record<string, number> = {}
+  for (const t of trades) {
+    net[t.buyerId] = (net[t.buyerId] ?? 0) + t.qty
+    net[t.sellerId] = (net[t.sellerId] ?? 0) - t.qty
+  }
+  for (const id of Object.keys(net)) net[id] = round1(net[id])
+  return net
+}
+
 /** Cash a player spent buying and earned selling via executed trades. */
 export function tradedCash(trades: Trade[], playerId: string): { buyCash: number; sellCash: number } {
   let buyCash = 0

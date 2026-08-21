@@ -39,13 +39,56 @@ let socket: AppSocket | null = null
  */
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? ''
 
+/** Set once if the WebSocket handshake fails, so a refresh does not repeat the failure. */
+const FALLBACK_KEY = 'capgame:transport-fallback'
+
+function initialTransports(): ('websocket' | 'polling')[] {
+  try {
+    return sessionStorage.getItem(FALLBACK_KEY) ? ['websocket', 'polling'] : ['websocket']
+  } catch {
+    return ['websocket']
+  }
+}
+
+/**
+ * Re-read on every connection attempt rather than captured once.
+ *
+ * The bug this fixes: a student who lands on the join screen constructs the socket with an
+ * empty auth, and `joinAsPlayer` then writes their token to localStorage — but the live
+ * socket still held the empty object. One Wi-Fi blip later it reconnected anonymously, the
+ * server restored no identity, no snapshot ever arrived, and the resume watchdog dumped
+ * them back to the join screen mid-round.
+ */
+function buildAuth(): SocketAuth {
+  const identity = loadIdentity()
+  return identity
+    ? { role: identity.role, roomCode: identity.roomCode, token: identity.token }
+    : {}
+}
+
 export function getSocket(): AppSocket {
   if (!socket) {
-    const identity = loadIdentity()
-    const auth: SocketAuth = identity
-      ? { role: identity.role, roomCode: identity.roomCode, token: identity.token }
-      : {}
-    socket = SERVER_URL ? io(SERVER_URL, { auth }) : io({ auth })
+    // WebSocket only: the default is an HTTP long-polling handshake that then upgrades,
+    // which costs three needless HTTP requests per connection and doubles the visible
+    // request count on the backend.
+    const opts = { auth: (cb: (d: object) => void) => cb(buildAuth()), transports: initialTransports() }
+    const s: AppSocket = SERVER_URL ? io(SERVER_URL, opts) : io(opts)
+    socket = s
+
+    // Safety net for a network that blocks WebSocket outright (some school proxies do).
+    // Mutating the manager's options rather than rebuilding the socket keeps every
+    // listener GameContext has already registered.
+    let downgraded = false
+    s.on('connect_error', () => {
+      if (downgraded || s.connected) return
+      downgraded = true
+      try {
+        sessionStorage.setItem(FALLBACK_KEY, '1')
+      } catch {
+        /* private mode — the downgrade still applies for this page load */
+      }
+      s.io.opts.transports = ['websocket', 'polling']
+    })
   }
   return socket
 }

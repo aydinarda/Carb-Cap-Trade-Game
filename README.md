@@ -84,12 +84,25 @@ node scripts/gf-smoke.mjs      # grandfathering: bots quote both sides
 
 ## Deploy to Render
 
-Single **Web Service**:
+Two shapes are supported. **The live classroom deploy is the split one** — frontend and
+backend are separate Render services that deploy independently, so a change to the wire
+contract has to survive one side being a version ahead of the other.
 
-- Build command: `corepack enable && pnpm install && pnpm build`
-- Start command: `pnpm start`
-- Env vars: `HOST_KEY` (instructor secret — set this!), optional `SEED` for a
-  reproducible session.
+**Split (what is deployed):**
+
+- Backend — Web Service. Build `corepack enable && pnpm install && pnpm build:server`,
+  start `pnpm start`. Env: `HOST_KEY` (instructor secret — set this!), `CLIENT_ORIGIN`
+  (the frontend URL), optional `SEED`, optional `BROADCAST_FLUSH_MS`.
+- Frontend — Static Site. Build `corepack enable && pnpm install && pnpm build`, publish
+  `dist/client`. Env: `VITE_SERVER_URL` (the backend URL).
+
+**Single service** (simpler, everything on one origin): build
+`corepack enable && pnpm install && pnpm build`, start `pnpm start`. `dist/client` is
+present so the server serves the SPA too, and neither `CLIENT_ORIGIN` nor
+`VITE_SERVER_URL` is needed.
+
+`BROADCAST_FLUSH_MS` (default 100) is the coalescing window for state pushes — see
+Architecture. Lower it for a snappier order book, raise it if the instance is CPU-bound.
 
 ⚠️ **Free-tier warning**: the instance spins down after ~15 min idle. Game state
 lives in memory, so a spin-down wipes the session, and the first request after idle
@@ -107,6 +120,7 @@ shared/           types, constants (the sector tables), event contract, game eng
                   abatement MAC curves behind one AbatementModel interface
 server/bots/      four bot archetypes; stepBots() advances them one tick and is
                   shared by the live BotManager interval and the simulator
+server/broadcaster.ts  owns when and to whom state is pushed (see below)
 server/           Express + Socket.IO: Session state machine, role-scoped views
 src/app/          React client: net/ (socket + context), screens/player, screens/host
 sim/              headless scenario harness (see below)
@@ -160,6 +174,24 @@ previous year's discovered price plus the penalty ceiling.
 
 All game logic runs server-side; clients render role-scoped snapshots pushed after
 every mutation. Players never see others' private numbers or unrevealed emissions.
+
+### Broadcast discipline
+
+At 100 players a snapshot fan-out is the most expensive thing the server does, and
+`/healthz` shares that event loop — so a class big enough to saturate it fails Render's
+health check. `server/broadcaster.ts` owns the two levers:
+
+- **Coalescing.** Player actions and bot ticks `schedule()` a flush (trailing debounce,
+  `BROADCAST_FLUSH_MS`, default 100 ms) instead of fanning out inline. Host actions —
+  phase transitions, settings, roster edits — call `flushNow()`, because a delay between
+  "Open the market" and the class seeing it is the one place lag is noticed.
+- **Targeted sends.** A join or reconnect `sync()`s that one socket rather than pushing
+  the full room; the host snapshot is built once per flush rather than once per host tab.
+
+Measured on a 100-player, 6-year grandfathering session with no bots: 4 773 MB pushed →
+271 MB, action-ack p95 513 ms → 4 ms, `/healthz` p95 519 ms → 18 ms. `buildPlayerHistory`
+(host-only, and by far the heaviest view) is one pass per year with completed years
+memoized — 0.87 ms → 0.04 ms per call at 100 players × 8 years.
 
 ### Open questions for the game designer
 

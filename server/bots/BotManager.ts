@@ -1,13 +1,19 @@
-import type { Server } from 'socket.io'
-import type { ClientToServerEvents, ServerToClientEvents } from '../../shared/events'
 import { createRng, type Rng } from '../../shared/engine'
 import { BOT_TICK_MS } from '../config'
 import type { Session, SessionStore } from '../session'
 import { stepBots } from './step'
 import type { BotRuntime } from './types'
 
-type IO = Server<ClientToServerEvents, ServerToClientEvents>
-type Broadcast = (io: IO, session: Session) => void | Promise<void>
+/**
+ * What the manager needs from the socket layer. Narrow on purpose — the bot loop has no
+ * business knowing about `io`, and this keeps it testable without a server.
+ */
+export interface BotBroadcast {
+  /** Coalesced state push for a room a bot just changed. */
+  schedule(session: Session): void
+  /** Release per-room state for a room that has been swept. */
+  forget(roomCode: string): void
+}
 
 /** Sweep for dead rooms every N ticks — cheap, but no reason to do it 24×/min. */
 const SWEEP_EVERY_TICKS = 60
@@ -26,9 +32,8 @@ export class BotManager {
   private ticks = 0
 
   constructor(
-    private io: IO,
     private store: SessionStore,
-    private broadcast: Broadcast,
+    private broadcast: BotBroadcast,
   ) {}
 
   start() {
@@ -66,7 +71,7 @@ export class BotManager {
       const acted = stepBots(session, this.rngFor(session), (playerId) =>
         this.rtFor(session.state.roomCode, playerId),
       )
-      if (acted) void this.broadcast(this.io, session)
+      if (acted) this.broadcast.schedule(session)
     }
     if (++this.ticks % SWEEP_EVERY_TICKS === 0) this.sweep()
   }
@@ -75,6 +80,9 @@ export class BotManager {
   private sweep() {
     for (const code of this.store.sweep()) {
       this.rngs.delete(code)
+      // The broadcaster keeps per-room timers and a member registry; without this they
+      // outlive the room exactly the way the runtime map below would.
+      this.broadcast.forget(code)
       // Runtime is keyed `room:playerId`, so the room's entries go with it — otherwise
       // the leak would simply move from the store into here.
       const prefix = `${code}:`

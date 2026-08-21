@@ -6,6 +6,7 @@ import {
   expectedEmission,
   isPureTrader,
   tradedNet,
+  tradedNetAll,
   windowSum,
 } from '../shared/engine'
 import type {
@@ -140,7 +141,6 @@ function classAggregate(session: Session): ClassAggregate {
 
   return {
     totalBaselineEmissions: totalBaseline,
-    freeCreditLimit: state.freeCreditLimit !== null ? round1(state.freeCreditLimit) : null,
     totalFreeAllocation: record ? sum(record.freeAllocation) : null,
     totalRegulatorRequests: capDemand,
     submittedCount: capSubmitted,
@@ -178,7 +178,6 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     currentYear: state.currentYear,
     playerCount: state.players.length,
     roster: publicRoster(session),
-    freeCreditLimit: state.freeCreditLimit !== null ? round1(state.freeCreditLimit) : null,
     abatement: state.config.abatement.sectors[player.industry],
     auctionSupply: session.usesAuction ? (record?.regulatorPool ?? 0) : 0,
     auctionPrice: record?.auctionPrice ?? null,
@@ -204,18 +203,11 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
       emissions: player.emissions,
       score: player.score,
       freeAllocation: record?.freeAllocation[player.id] ?? null,
-      regulatorGranted:
-        record && Object.keys(record.regulatorGranted).length > 0
-          ? (record.regulatorGranted[player.id] ?? 0)
-          : null,
       auctionBid: record?.auctionBid[player.id] ?? null,
       auctionAward:
         record && record.auctionPrice !== null
           ? (record.regulatorGranted[player.id] ?? 0)
           : null,
-      myOrders: record
-        ? [...record.orders.filter((o) => o.playerId === player.id)].reverse()
-        : [],
       myTrades: record
         ? [...record.trades.filter((t) => t.buyerId === player.id || t.sellerId === player.id)].reverse()
         : [],
@@ -230,30 +222,70 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
   }
 }
 
-function buildPlayerHistory(session: Session): Record<string, PlayerHistoryYear[]> {
+/**
+ * Completed years, keyed by session then year. A year strictly before `currentYear` is
+ * frozen — nothing in Session writes back into a past YearRecord, and `expectedEmission`
+ * only ever looks *backwards*, so a later year's realization cannot change an earlier row.
+ *
+ * A WeakMap so the memo dies with the session; no sweep hook to keep in sync.
+ */
+const historyMemo = new WeakMap<Session, Map<number, Record<string, PlayerHistoryYear>>>()
+
+/** Every player's row for one year, in a single pass over that year's tape. */
+function historyRowsForYear(
+  session: Session,
+  y: Session['state']['years'][number],
+): Record<string, PlayerHistoryYear> {
+  // One pass for the whole class rather than one pass per player: this is what made the
+  // host snapshot quadratic in class size.
+  const traded = tradedNetAll(y.trades)
+  const rows: Record<string, PlayerHistoryYear> = {}
+  for (const p of session.state.players) {
+    const free = round1(y.freeAllocation[p.id] ?? 0)
+    const granted = round1(y.regulatorGranted[p.id] ?? 0)
+    const carriedIn = round1(y.carriedIn[p.id] ?? 0)
+    const net = traded[p.id] ?? 0
+    rows[p.id] = {
+      year: y.year,
+      expected: round1(expectedEmission(p, y.year)),
+      realized: y.realized[p.id] ?? null,
+      free,
+      regulatorGranted: granted,
+      traded: net,
+      abatement: round1(y.abatement[p.id] ?? 0),
+      banked: carriedIn,
+      creditsHeld: round1(free + granted + carriedIn + net),
+      netPosition: y.netPosition[p.id] ?? null,
+      settlement: y.settlement?.[p.id] ?? null,
+    }
+  }
+  return rows
+}
+
+export function buildPlayerHistory(session: Session): Record<string, PlayerHistoryYear[]> {
   const { state } = session
+  let memo = historyMemo.get(session)
+  if (!memo) {
+    memo = new Map()
+    historyMemo.set(session, memo)
+  }
+
+  // Hoisted: this used to be re-sorted on every call.
   const years = Object.values(state.years).sort((a, b) => a.year - b.year)
+  const byYear = years.map((y) => {
+    const frozen = y.year < state.currentYear
+    const hit = frozen ? memo.get(y.year) : undefined
+    // A cached year predating a roster change would be missing that player; recompute
+    // rather than silently dropping a row.
+    if (hit && state.players.every((p) => hit[p.id] !== undefined)) return hit
+    const rows = historyRowsForYear(session, y)
+    if (frozen) memo.set(y.year, rows)
+    return rows
+  })
+
   const history: Record<string, PlayerHistoryYear[]> = {}
   for (const p of state.players) {
-    history[p.id] = years.map((y) => {
-      const free = round1(y.freeAllocation[p.id] ?? 0)
-      const granted = round1(y.regulatorGranted[p.id] ?? 0)
-      const carriedIn = round1(y.carriedIn[p.id] ?? 0)
-      const traded = tradedNet(y.trades, p.id)
-      return {
-        year: y.year,
-        expected: round1(expectedEmission(p, y.year)),
-        realized: y.realized[p.id] ?? null,
-        free,
-        regulatorGranted: granted,
-        traded,
-        abatement: round1(y.abatement[p.id] ?? 0),
-        banked: carriedIn,
-        creditsHeld: round1(free + granted + carriedIn + traded),
-        netPosition: y.netPosition[p.id] ?? null,
-        settlement: y.settlement?.[p.id] ?? null,
-      }
-    })
+    history[p.id] = byYear.map((rows) => rows[p.id])
   }
   return history
 }
@@ -265,11 +297,9 @@ export function hostSnapshot(session: Session): HostSnapshot {
   return {
     role: 'host',
     roomCode: state.roomCode,
-    seed: state.seed,
     capMode: state.capMode,
     phase: state.phase,
     currentYear: state.currentYear,
-    freeCreditLimit: state.freeCreditLimit !== null ? round1(state.freeCreditLimit) : null,
     regulatorPool: record?.regulatorPool ?? null,
     config: hostConfigView(state.config),
     classAggregate: classAggregate(session),

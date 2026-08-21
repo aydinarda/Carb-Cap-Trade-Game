@@ -1,37 +1,9 @@
-import type { Server, Socket } from 'socket.io'
-import type { Ack, ClientToServerEvents, ServerToClientEvents, SocketAuth } from '../shared/events'
+import type { Ack, SocketAuth } from '../shared/events'
+import { Broadcaster, type AppSocket, type IO } from './broadcaster'
 import { HOST_KEY, SEED } from './config'
 import { GameError, Session, SessionStore } from './session'
-import { hostSnapshot, playerSnapshot } from './views'
-
-type IO = Server<ClientToServerEvents, ServerToClientEvents>
-type AppSocket = Socket<ClientToServerEvents, ServerToClientEvents> & {
-  data: { role?: 'player' | 'host'; roomCode?: string; playerId?: string }
-}
 
 export const store = new SessionStore()
-
-function roomAll(code: string) {
-  return `${code}:all`
-}
-
-/** Push role-scoped snapshots to every connected socket of a session. */
-export async function broadcast(io: IO, session: Session) {
-  // Anything worth broadcasting is activity; this is the one place they all funnel through.
-  session.touch()
-  const sockets = (await io.in(roomAll(session.state.roomCode)).fetchSockets()) as unknown as AppSocket[]
-  for (const socket of sockets) {
-    emitSnapshot(socket, session)
-  }
-}
-
-function emitSnapshot(socket: AppSocket, session: Session) {
-  if (socket.data.role === 'host') {
-    socket.emit('session:snapshot', hostSnapshot(session))
-  } else if (socket.data.playerId && session.getPlayer(socket.data.playerId)) {
-    socket.emit('session:snapshot', playerSnapshot(session, socket.data.playerId))
-  }
-}
 
 function fail(ack: Ack<never>, error: unknown) {
   if (error instanceof GameError) {
@@ -42,8 +14,19 @@ function fail(ack: Ack<never>, error: unknown) {
   }
 }
 
-/** Wraps a host action: validates the socket is this session's host, runs, broadcasts. */
-function hostAction(io: IO, socket: AppSocket, ack: Ack, action: (session: Session) => void) {
+/**
+ * Wraps a host action: validates the socket is this session's host, runs, pushes.
+ *
+ * Host actions flush immediately rather than coalescing. They are all phase transitions,
+ * roster edits or settings changes — a handful per year, driven off a projector, where a
+ * delay between clicking "Open the market" and the class seeing it would be noticed.
+ */
+function hostAction(
+  broadcaster: Broadcaster,
+  socket: AppSocket,
+  ack: Ack,
+  action: (session: Session) => void,
+) {
   try {
     const session = socket.data.role === 'host' && socket.data.roomCode
       ? store.get(socket.data.roomCode)
@@ -51,13 +34,15 @@ function hostAction(io: IO, socket: AppSocket, ack: Ack, action: (session: Sessi
     if (!session) throw new GameError('NOT_HOST', 'Not authorized as host.')
     action(session)
     ack({ ok: true })
-    void broadcast(io, session)
+    broadcaster.flushNow(session)
   } catch (error) {
     fail(ack, error)
   }
 }
 
-export function registerSockets(io: IO) {
+export function registerSockets(io: IO): Broadcaster {
+  const broadcaster = new Broadcaster(io)
+
   io.use((socket, next) => {
     // Reconnect path: map handshake token back to an identity
     const auth = socket.handshake.auth as SocketAuth
@@ -88,12 +73,15 @@ export function registerSockets(io: IO) {
     if (socket.data.roomCode) {
       const session = store.get(socket.data.roomCode)
       if (session) {
-        void socket.join(roomAll(session.state.roomCode))
+        broadcaster.join(socket, session)
         if (socket.data.playerId) {
           const player = session.getPlayer(socket.data.playerId)
           if (player) player.connected = true
         }
-        void broadcast(io, session)
+        // This socket needs its state now; the rest of the room only needs to learn that
+        // the dot went green, which can ride the next coalesced flush.
+        broadcaster.sync(socket, session)
+        broadcaster.schedule(session)
       }
     }
 
@@ -103,39 +91,39 @@ export function registerSockets(io: IO) {
         const session = store.create(capMode, seed ?? SEED)
         socket.data.role = 'host'
         socket.data.roomCode = session.state.roomCode
-        void socket.join(roomAll(session.state.roomCode))
+        broadcaster.join(socket, session)
         ack({ ok: true, roomCode: session.state.roomCode, hostToken: session.hostToken })
-        emitSnapshot(socket, session)
+        broadcaster.sync(socket, session)
       } catch (error) {
         fail(ack, error)
       }
     })
 
     socket.on('host:setCapMode', ({ mode }, ack) =>
-      hostAction(io, socket, ack, (s) => s.setCapMode(mode)))
+      hostAction(broadcaster, socket, ack, (s) => s.setCapMode(mode)))
     socket.on('host:updateSettings', (settings, ack) =>
-      hostAction(io, socket, ack, (s) => s.updateSettings(settings)))
+      hostAction(broadcaster, socket, ack, (s) => s.updateSettings(settings)))
     socket.on('host:startYear', (_p, ack) =>
-      hostAction(io, socket, ack, (s) => s.startYear()))
+      hostAction(broadcaster, socket, ack, (s) => s.startYear()))
     socket.on('host:closeCapStage', (_p, ack) =>
-      hostAction(io, socket, ack, (s) => s.closeCapStage()))
+      hostAction(broadcaster, socket, ack, (s) => s.closeCapStage()))
     socket.on('host:openTrade', (_p, ack) =>
-      hostAction(io, socket, ack, (s) => s.openTrade()))
+      hostAction(broadcaster, socket, ack, (s) => s.openTrade()))
     socket.on('host:closeTrade', (_p, ack) =>
-      hostAction(io, socket, ack, (s) => s.closeTrade()))
+      hostAction(broadcaster, socket, ack, (s) => s.closeTrade()))
     socket.on('host:advanceYear', (_p, ack) =>
-      hostAction(io, socket, ack, (s) => s.advanceYear()))
+      hostAction(broadcaster, socket, ack, (s) => s.advanceYear()))
     socket.on('host:endGame', (_p, ack) =>
-      hostAction(io, socket, ack, (s) => s.endGame()))
+      hostAction(broadcaster, socket, ack, (s) => s.endGame()))
     socket.on('host:kickPlayer', ({ playerId }, ack) =>
-      hostAction(io, socket, ack, (s) => s.kickPlayer(playerId)))
+      hostAction(broadcaster, socket, ack, (s) => s.kickPlayer(playerId)))
     socket.on('host:addBots', ({ botType, count }, ack) =>
-      hostAction(io, socket, ack, (s) => {
+      hostAction(broadcaster, socket, ack, (s) => {
         const n = Math.max(1, Math.min(20, Math.floor(Number(count) || 1)))
         for (let i = 0; i < n; i++) s.addBot(botType)
       }))
     socket.on('host:removeBot', ({ playerId }, ack) =>
-      hostAction(io, socket, ack, (s) => s.removeBot(playerId)))
+      hostAction(broadcaster, socket, ack, (s) => s.removeBot(playerId)))
 
     socket.on('player:join', ({ roomCode, name, industry }, ack) => {
       try {
@@ -145,14 +133,18 @@ export function registerSockets(io: IO) {
         socket.data.role = 'player'
         socket.data.roomCode = session.state.roomCode
         socket.data.playerId = player.id
-        void socket.join(roomAll(session.state.roomCode))
+        broadcaster.join(socket, session)
         ack({
           ok: true,
           playerId: player.id,
           token,
           profile: { industry: player.industry, emissions: player.emissions },
         })
-        void broadcast(io, session)
+        // The joiner gets state immediately; everyone else learns about the new roster row
+        // on the next coalesced flush. A join used to cost a full fan-out per arrival,
+        // which is what made a 100-student lobby the worst moment in the game.
+        broadcaster.sync(socket, session)
+        broadcaster.schedule(session)
       } catch (error) {
         fail(ack, error)
       }
@@ -169,7 +161,8 @@ export function registerSockets(io: IO) {
         }
         action(session, socket.data.playerId)
         ack({ ok: true })
-        void broadcast(io, session)
+        // Coalesced: during trade this is the highest-frequency path in the game.
+        broadcaster.schedule(session)
       } catch (error) {
         fail(ack, error)
       }
@@ -185,13 +178,16 @@ export function registerSockets(io: IO) {
       playerAction(ack, (s, pid) => s.setAbatement(pid, Number(fraction))))
 
     socket.on('disconnect', () => {
+      broadcaster.leave(socket)
       if (!socket.data.roomCode || !socket.data.playerId) return
       const session = store.get(socket.data.roomCode)
       const player = session?.getPlayer(socket.data.playerId)
       if (session && player) {
         player.connected = false
-        void broadcast(io, session)
+        broadcaster.schedule(session)
       }
     })
   })
+
+  return broadcaster
 }

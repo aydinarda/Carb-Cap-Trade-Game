@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { round1 } from '../../shared/engine'
+import { expectedEmission, round1, tradedNet } from '../../shared/engine'
+import type { PlayerHistoryYear } from '../../shared/types'
 import { Session } from '../session'
-import { hostSnapshot, playerSnapshot } from '../views'
+import { buildPlayerHistory, hostSnapshot, playerSnapshot } from '../views'
 
 // leaderboard() and classAggregate() are internal to views.ts; exercise them
 // through hostSnapshot(), which embeds both.
@@ -87,6 +88,101 @@ describe('classAggregate', () => {
     expect(yearHistory).toHaveLength(2)
     // The chart's cap line must track the allocation, not the once-computed limit.
     expect(yearHistory[1].cap).toBe(round1(yearHistory[0].cap * 0.9))
+  })
+})
+
+/**
+ * The original, deliberately naive implementation: one full rescan of each year's tape per
+ * player, and no memo. Kept here as the oracle — `buildPlayerHistory` was rewritten to be
+ * one pass per year plus a cache of completed years, and that must not have moved a number.
+ */
+function naivePlayerHistory(session: Session): Record<string, PlayerHistoryYear[]> {
+  const { state } = session
+  const years = Object.values(state.years).sort((a, b) => a.year - b.year)
+  const history: Record<string, PlayerHistoryYear[]> = {}
+  for (const p of state.players) {
+    history[p.id] = years.map((y) => {
+      const free = round1(y.freeAllocation[p.id] ?? 0)
+      const granted = round1(y.regulatorGranted[p.id] ?? 0)
+      const carriedIn = round1(y.carriedIn[p.id] ?? 0)
+      const traded = tradedNet(y.trades, p.id)
+      return {
+        year: y.year,
+        expected: round1(expectedEmission(p, y.year)),
+        realized: y.realized[p.id] ?? null,
+        free,
+        regulatorGranted: granted,
+        traded,
+        abatement: round1(y.abatement[p.id] ?? 0),
+        banked: carriedIn,
+        creditsHeld: round1(free + granted + carriedIn + traded),
+        netPosition: y.netPosition[p.id] ?? null,
+        settlement: y.settlement?.[p.id] ?? null,
+      }
+    })
+  }
+  return history
+}
+
+describe('buildPlayerHistory', () => {
+  /** `advanceYear` already leaves the session in `cap`, so only year 11 opens with startYear. */
+  function tradedYear(s: Session, first = false) {
+    if (first) s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    s.placeOrder('P1', 'sell', 12, 50)
+    s.placeOrder('P2', 'buy', 12, 50)
+    s.placeOrder('P3', 'buy', 7, 55)
+    s.placeOrder('P1', 'sell', 7, 55)
+    s.closeTrade()
+  }
+
+  function seeded() {
+    const s = new Session('grandfathering', 7)
+    s.addPlayer('Alice', 'Power & Utilities') // P1
+    s.addPlayer('Bob', 'Transport') // P2
+    s.addPlayer('Cara', 'Heavy Materials') // P3
+    return s
+  }
+
+  it('matches the naive implementation across three played years', () => {
+    const s = seeded()
+    for (let i = 0; i < 3; i++) {
+      tradedYear(s, i === 0)
+      expect(buildPlayerHistory(s)).toEqual(naivePlayerHistory(s))
+      if (i < 2) s.advanceYear()
+    }
+  })
+
+  it('returns the same answer on a second call, once years are memoized', () => {
+    const s = seeded()
+    tradedYear(s, true)
+    s.advanceYear()
+    tradedYear(s)
+    // The first call fills the memo for the now-completed year 11; the second reads it.
+    const first = buildPlayerHistory(s)
+    const second = buildPlayerHistory(s)
+    expect(second).toEqual(first)
+    expect(second).toEqual(naivePlayerHistory(s))
+  })
+
+  it('does not serve a cached year that predates a roster change', () => {
+    const s = seeded()
+    tradedYear(s, true)
+    s.advanceYear()
+    tradedYear(s)
+    buildPlayerHistory(s) // memoizes year 11 for P1..P3
+
+    // The roster is locked at startYear today — addPlayer and kickPlayer are both
+    // lobby-only — so this reaches into state directly. It guards the memo against a
+    // future mechanism that lets someone join mid-game: a year cached before they
+    // existed must not be handed back missing their row.
+    s.state.players.push({ ...s.state.players[0], id: 'PX', name: 'Late' })
+
+    const after = buildPlayerHistory(s)
+    expect(Object.keys(after).sort()).toEqual(['P1', 'P2', 'P3', 'PX'])
+    expect(after.PX).toHaveLength(2)
+    expect(after).toEqual(naivePlayerHistory(s))
   })
 })
 

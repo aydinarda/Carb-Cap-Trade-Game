@@ -7,7 +7,7 @@ import { Server } from 'socket.io'
 import type { ClientToServerEvents, ServerToClientEvents } from '../shared/events'
 import { BotManager } from './bots/BotManager'
 import { PORT } from './config'
-import { broadcast, registerSockets, store } from './sockets'
+import { registerSockets, store } from './sockets'
 
 const app = express()
 const httpServer = createServer(app)
@@ -21,10 +21,10 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
   cors: { origin: clientOrigin ?? true },
 })
 
-registerSockets(io)
+const broadcaster = registerSockets(io)
 
 // Backend bots (auctioning mode) run on a slow global tick.
-new BotManager(io, store, broadcast).start()
+new BotManager(store, broadcaster).start()
 
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true })
