@@ -225,6 +225,9 @@ export interface PlayerSnapshot {
   /** This player's sector MAC curve, for the live abatement-cost preview. The client
    *  evaluates it with the same shared functions the server settles with. */
   abatement: AbatementSpec
+  /** Most of one year's emissions this company may cut — the slider's ceiling. The server
+   *  clamps to the same number, so this is a UI affordance, not the enforcement. */
+  maxAbatement: number
   /** Auctioning mode: total supply on offer this year (= the cap). */
   auctionSupply: number
   /** Auctioning mode: uniform clearing price, once the auction has closed. */

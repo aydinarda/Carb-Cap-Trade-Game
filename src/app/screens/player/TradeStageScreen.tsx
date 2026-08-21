@@ -17,6 +17,9 @@ const r1 = (n: number) => Math.round(n * 10) / 10
 export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   const { placeOrder, cancelOrder, abate } = useGame()
   const abatementSpec = snap.abatement
+  // A plant cannot switch itself off. The server clamps to this too — the fallback covers a
+  // client running ahead of a backend that does not send the field yet.
+  const maxAbate = snap.maxAbatement ?? 1
   const market = snap.market
   const marketPrice = market?.lastPrice ?? market?.vwap ?? null
   const auctionPrice = snap.auctionPrice
@@ -122,6 +125,10 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
             <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider">
               <Leaf size={12} className="text-primary" />
               Cut emissions (abatement)
+              {/* Say why the slider stops, or it reads as a bug. */}
+              <span className="normal-case tracking-normal text-[10px] text-muted-foreground/70">
+                — max {Math.round(maxAbate * 100)}% a year
+              </span>
             </div>
             <span
               className={cn(
@@ -137,8 +144,8 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
           <div className="flex items-center gap-4">
             <Slider
               value={[Math.round(abateFrac * 100)]}
-              onValueChange={([v]) => setAbateFrac(v / 100)}
-              max={100}
+              onValueChange={([v]) => setAbateFrac(Math.min(v / 100, maxAbate))}
+              max={Math.round(maxAbate * 100)}
               step={1}
               className="flex-1"
             />

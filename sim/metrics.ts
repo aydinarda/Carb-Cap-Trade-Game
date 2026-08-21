@@ -49,7 +49,7 @@ export function efficientPrice(session: Session, record: YearRecord): number | n
   const demandAt = (price: number) =>
     players.reduce((sum, p) => {
       const spec = cfg.abatement.sectors[p.industry]
-      const r = optimalAbatement(spec, price)
+      const r = optimalAbatement(spec, price, cfg.abatement.maxFraction)
       return sum + expectedEmission(p, record.year) * (1 - r)
     }, 0)
 

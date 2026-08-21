@@ -102,6 +102,19 @@ export interface AllocationConfig {
 export interface AbatementConfig {
   /** Per-sector marginal abatement cost curve. */
   sectors: Record<Industry, AbatementSpec>
+  /**
+   * The most of its own emissions a company can cut in one year, as a fraction.
+   *
+   * A real installation cannot go to zero: it can retrofit, switch fuel or cut output at
+   * the margin, but the plant still has to run. Without this the optimum at a high enough
+   * price is a 100% cut, which is both physically impossible and pedagogically wrong — it
+   * makes the carbon price look like it can solve compliance on its own.
+   *
+   * This binds everywhere: the slider a student sees, what `Session.setAbatement` will
+   * accept, the r* every bot and simulated student targets, the per-company optimum the
+   * leaderboard scores against, and the efficient price the simulator reports.
+   */
+  maxFraction: number
 }
 
 export interface MarketMakerConfig {

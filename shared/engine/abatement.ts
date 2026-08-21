@@ -46,9 +46,24 @@ export function abatementCost(
   return round1(expected * specIntegral(fraction, toSpec(input)))
 }
 
-/** Cost-minimising abatement fraction: where marginal cost meets the price, clamped to [0,1]. */
-export function optimalAbatement(input: AbatementInput, price: number): number {
-  return specOptimal(price, toSpec(input))
+/**
+ * Cost-minimising abatement fraction: where marginal cost meets the price.
+ *
+ * `maxFraction` is the physical ceiling on how much of a year's emissions a company can
+ * cut (`config.abatement.maxFraction`). Above it the curve is irrelevant — no price buys a
+ * cut that cannot be made — so demand becomes perfectly inelastic there. Callers that omit
+ * it get the unbounded optimum, which is only correct for questions about the curve itself.
+ */
+export function optimalAbatement(
+  input: AbatementInput,
+  price: number,
+  maxFraction = 1,
+): number {
+  return Math.min(specOptimal(price, toSpec(input)), clamp01(maxFraction))
+}
+
+function clamp01(x: number): number {
+  return Math.max(0, Math.min(1, x))
 }
 
 /**
@@ -74,9 +89,12 @@ export function optimalYearCost(
   input: AbatementInput,
   price: number,
   penaltyRate?: number,
+  maxFraction = 1,
 ): number {
   const spec = toSpec(input)
-  const r = specOptimal(price, spec)
+  // Perfect play cannot cut more than the plant physically can, so the benchmark the
+  // leaderboard scores against must respect the same ceiling the player is held to.
+  const r = optimalAbatement(spec, price, maxFraction)
   const abated = expected * (1 - r)
   const cover = abated - credits // > 0 → buy the shortfall; < 0 → sell the surplus
   const coverRate =

@@ -125,8 +125,11 @@ function marginalCost(f, spec) {
   }
 }
 
-/** Cost-minimising cut fraction: where marginal cost meets the price. Linear form inverted. */
-function optimalAbatement(price, spec) {
+/**
+ * Cost-minimising cut fraction: where marginal cost meets the price. Linear form inverted.
+ * `maxFraction` is the plant's physical ceiling — a company cannot switch itself off.
+ */
+function optimalAbatement(price, spec, maxFraction = 1) {
   if (!spec) return 0
   const p = spec.params ?? spec
   let r
@@ -135,7 +138,7 @@ function optimalAbatement(price, spec) {
     case 'exponential': r = p.k > 0 && p.a > 0 ? Math.log(Math.max(1e-9, price / p.a)) / p.k : 0; break
     default: r = p.b > 0 ? (price - p.a) / p.b : 0
   }
-  return clamp(r, 0, 1)
+  return clamp(r, 0, clamp(maxFraction, 0, 1))
 }
 
 class Player {
@@ -160,7 +163,7 @@ class Player {
     const s = this.snap
     const ref = this.refPrice()
     const spec = s?.abatement
-    const rStar = optimalAbatement(ref, spec)
+    const rStar = optimalAbatement(ref, spec, s?.maxAbatement ?? 1)
     const mc = marginalCost(rStar, spec)
     if (mc === null) return ref
     return Math.min(this.penaltyRate, mc)
@@ -201,7 +204,7 @@ class Player {
 
     // Abate to the cost-minimising point first — that is what makes the residual, and
     // what makes the penalty bite as a ceiling rather than a formality.
-    const rStar = optimalAbatement(this.refPrice(), s.abatement)
+    const rStar = optimalAbatement(this.refPrice(), s.abatement, s.maxAbatement ?? 1)
     if (Math.random() < 0.3) {
       this.tally(await emit(this.sock, 'player:abate', { fraction: round1(rStar) }))
     }

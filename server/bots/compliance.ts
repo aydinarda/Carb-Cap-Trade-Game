@@ -63,7 +63,7 @@ export function trade(ctx: BotCtx): boolean {
   const coeff = session.state.config.abatement.sectors[bot.industry]
   const mv = ctx.market
   const mid = marketMid(mv, referencePrice(session))
-  const rStar = optimalAbatement(coeff, mid)
+  const rStar = optimalAbatement(coeff, mid, session.maxAbatement)
   try {
     session.setAbatement(bot.id, rStar)
   } catch (e) {
@@ -113,7 +113,7 @@ export function auction(ctx: BotCtx): boolean {
   const coeff = session.state.config.abatement.sectors[bot.industry]
   const ref = referencePrice(session)
   // Abate to the market-implied point; the residual is what it still needs to buy.
-  const rStar = optimalAbatement(coeff, ref)
+  const rStar = optimalAbatement(coeff, ref, session.maxAbatement)
   const expected = expectedEmission(bot, record.year)
   const held = session.creditsHeld(bot.id)
   const residual = round1(expected * (1 - rStar) - held)

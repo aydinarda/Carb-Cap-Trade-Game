@@ -499,7 +499,9 @@ export class Session {
           (record.regulatorGranted[player.id] ?? 0) +
           (record.carriedIn[player.id] ?? 0),
       )
-      optimal[player.id] = optimalYearCost(expected, credits, coeff, refPrice, penaltyRate)
+      optimal[player.id] = optimalYearCost(
+        expected, credits, coeff, refPrice, penaltyRate, this.maxAbatement,
+      )
     }
     const { settlement } = settleYear(record.realized, held, purchaseCost, sellIncome, abateCost, {
       penaltyRate,
@@ -631,8 +633,12 @@ export class Session {
   }
 
   /**
-   * Trade stage: choose to abate a fraction (0..1) of expected emissions. Lowers
-   * the realized mean at year end, at a per-sector convex cost. Cumulative set.
+   * Trade stage: choose to abate a fraction of expected emissions. Lowers the realized
+   * mean at year end, at a per-sector convex cost. Cumulative set.
+   *
+   * Capped at `config.abatement.maxFraction` — a plant cannot switch itself off. Clamped
+   * rather than rejected, matching how an over-1 fraction has always been handled, and the
+   * client's slider is bounded by the same number so it never has to be hit from the UI.
    */
   setAbatement(playerId: string, fraction: number) {
     this.requirePhase('trade')
@@ -640,7 +646,16 @@ export class Session {
       throw new GameError('BAD_ABATE', 'Abatement fraction must be a non-negative number.')
     }
     const record = this.currentYearRecord()!
-    record.abatement[playerId] = round1(Math.min(1, fraction))
+    // Two decimals, not one. `round1` here meant the stored fraction snapped to 10% steps,
+    // which was survivable when the range was 0-100% but leaves only three usable choices
+    // once the ceiling is 20% — and it silently contradicted the client's 1% slider.
+    const capped = Math.min(this.maxAbatement, fraction)
+    record.abatement[playerId] = Math.round(capped * 100) / 100
+  }
+
+  /** The most of one year's emissions any company here may cut. */
+  get maxAbatement(): number {
+    return Math.max(0, Math.min(1, this.state.config.abatement.maxFraction))
   }
 
   getPlayer(playerId: string): Player | undefined {

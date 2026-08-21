@@ -31,7 +31,7 @@ export function trade(ctx: BotCtx): boolean {
   const coeff = session.state.config.abatement.sectors[bot.industry]
   const mv = ctx.market
   const anchor = anchorValue(mv, referencePrice(session))
-  const rStar = optimalAbatement(coeff, anchor)
+  const rStar = optimalAbatement(coeff, anchor, session.maxAbatement)
   // Without this the bot prices and sizes its order as though it had cut to r*, while its
   // recorded abatement stays 0 — so it is short by `expected × rStar` at settlement every
   // single year. Gated: see bots.fixes.noiseAbatement.

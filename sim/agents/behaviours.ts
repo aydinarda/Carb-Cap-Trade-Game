@@ -117,7 +117,10 @@ export function actTrade(
   const reference = mv.lastPrice ?? mv.vwap ?? session.openingReference()
 
   // Abate toward the market-implied optimum, scaled by how keen this archetype is to cut.
-  const rStar = clamp(optimalAbatement(spec, reference) * t.abatementBias, 0, 1)
+  // Keenness scales the optimum, but nothing gets past the plant's physical ceiling.
+  const rStar = clamp(
+    optimalAbatement(spec, reference) * t.abatementBias, 0, session.maxAbatement,
+  )
   try {
     session.setAbatement(agent.playerId, rStar)
   } catch (e) {
@@ -164,7 +167,10 @@ export function actAuction(session: Session, agent: AgentState, rng: Rng): boole
   const P = cfg.market.penaltyRate
   const spec = cfg.abatement.sectors[player.industry]
   const reference = session.openingReference()
-  const rStar = clamp(optimalAbatement(spec, reference) * t.abatementBias, 0, 1)
+  // Keenness scales the optimum, but nothing gets past the plant's physical ceiling.
+  const rStar = clamp(
+    optimalAbatement(spec, reference) * t.abatementBias, 0, session.maxAbatement,
+  )
   const expected = expectedEmission(player, record.year)
   const qty = round1(expected * (1 - rStar) * t.coverTarget - session.creditsHeld(agent.playerId))
   if (qty <= 0) return false

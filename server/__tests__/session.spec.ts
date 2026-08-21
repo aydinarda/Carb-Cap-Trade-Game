@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_GAME_CONFIG } from '../../shared/config'
+import { DEFAULT_GAME_CONFIG, type DeepPartial, type GameConfig } from '../../shared/config'
 
 const FIRST_GAME_YEAR = DEFAULT_GAME_CONFIG.emissions.firstGameYear
 import { clearAuction, round1 } from '../../shared/engine'
@@ -9,11 +9,22 @@ import { GameError, Session, SessionStore } from '../session'
 // realization deterministic. Tests assert invariants (computed from state) rather
 // than seed-dependent magic numbers.
 
-function grandfathering(seed = 1) {
-  const s = new Session('grandfathering', seed)
+function grandfathering(seed = 1, override?: DeepPartial<GameConfig>) {
+  const s = new Session('grandfathering', seed, override)
   s.addPlayer('Alice', 'Power & Utilities')
   s.addPlayer('Bob', 'Transport')
   return s
+}
+
+/**
+ * A session where a company may cut everything. The shipped cap is
+ * `abatement.maxFraction = 0.2` (a plant cannot switch itself off), but the banking tests
+ * below are about what happens at the EXTREMES of the carry — a full surplus and a full
+ * shortfall — and driving one player's realized emissions to ~0 is the cleanest way to get
+ * there. Unlimited here on purpose; the cap itself is tested separately.
+ */
+function unlimitedAbatement(seed = 1) {
+  return grandfathering(seed, { abatement: { maxFraction: 1 } })
 }
 
 function auctioning(seed = 1) {
@@ -25,7 +36,7 @@ function auctioning(seed = 1) {
 
 describe('EU-ETS banking & make-good debt carry', () => {
   it('carries the year-end net position: surplus banked, shortfall as debt', () => {
-    const s = grandfathering()
+    const s = unlimitedAbatement()
     s.startYear()
     s.closeCapStage()
     s.openTrade()
@@ -51,7 +62,7 @@ describe('EU-ETS banking & make-good debt carry', () => {
   })
 
   it('carries the banked balance into next year as carriedIn and into creditsHeld', () => {
-    const s = grandfathering()
+    const s = unlimitedAbatement()
     s.startYear()
     s.closeCapStage()
     s.openTrade()
@@ -129,6 +140,68 @@ describe('closeTrade cost-ledger wiring (auctioning)', () => {
     expect(rec.settlement!.P1.sellIncome).toBe(0)
     // Cumulative score advanced by this year's cost.
     expect(s.getPlayer('P1')!.score).toBe(rec.settlement!.P1.yearCost)
+  })
+})
+
+describe('maximum abatement (a plant cannot switch itself off)', () => {
+  it('clamps a request above the ceiling instead of honouring it', () => {
+    const s = grandfathering()
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    s.setAbatement('P1', 1)
+    expect(s.currentYearRecord()!.abatement.P1).toBe(0.2)
+    expect(s.maxAbatement).toBe(0.2)
+  })
+
+  it('leaves a request inside the ceiling untouched', () => {
+    const s = grandfathering()
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    s.setAbatement('P1', 0.15)
+    expect(s.currentYearRecord()!.abatement.P1).toBe(0.15)
+  })
+
+  it('binds under every cap mechanism, not just one', () => {
+    for (const mode of ['grandfathering', 'benchmarking', 'auctioning'] as const) {
+      const s = new Session(mode, 1)
+      s.addPlayer('Alice', 'Power & Utilities')
+      s.startYear()
+      s.closeCapStage()
+      s.openTrade()
+      s.setAbatement('P1', 0.9)
+      expect(s.currentYearRecord()!.abatement.P1, mode).toBe(0.2)
+    }
+  })
+
+  it('is configurable, and a company can never cut below zero emissions', () => {
+    const s = grandfathering(1, { abatement: { maxFraction: 0.45 } })
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    s.setAbatement('P1', 1)
+    expect(s.currentYearRecord()!.abatement.P1).toBe(0.45)
+    s.closeTrade()
+    // Realized emissions therefore keep a floor: the cut can never reach 100%.
+    const rec = s.currentYearRecord()!
+    expect(rec.realized.P1).toBeGreaterThan(0)
+  })
+
+  it('caps the optimum the leaderboard scores against, not just the player', () => {
+    // Perfect play must be held to the same ceiling, or every company looks worse than it is.
+    const capped = grandfathering(3)
+    const uncapped = grandfathering(3, { abatement: { maxFraction: 1 } })
+    for (const s of [capped, uncapped]) {
+      s.startYear()
+      s.closeCapStage()
+      s.openTrade()
+      s.closeTrade()
+    }
+    // The uncapped optimum may cut more, so it can reach a cost the capped one cannot.
+    expect(capped.getPlayer('P1')!.optimalScore).not.toBe(
+      uncapped.getPlayer('P1')!.optimalScore,
+    )
   })
 })
 

@@ -61,6 +61,9 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
         { model: 'linear', params: { ...DEFAULT_ABATEMENT[i] } } satisfies AbatementSpec,
       ]),
     ) as Record<Industry, AbatementSpec>,
+    // A plant cannot switch itself off: 20% is the most of one year's emissions a company
+    // can cut. Applies to every cap mechanism.
+    maxFraction: 0.2,
   },
   bots: {
     seed: { marketMakerFrac: 0.18, speculatorFlat: 20 },
