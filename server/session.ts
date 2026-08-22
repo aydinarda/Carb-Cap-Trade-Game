@@ -1,6 +1,6 @@
 import { customAlphabet, nanoid } from 'nanoid'
 import { resolveConfig, type DeepPartial, type GameConfig } from '../shared/config'
-import { INDUSTRY_NAMES, type Industry } from '../shared/constants'
+import { INDUSTRY_NAMES, RESERVE_ID, type Industry } from '../shared/constants'
 import {
   abatementCost,
   buildMarketView,
@@ -13,8 +13,12 @@ import {
   generateHistoryForIndustry,
   isPureTrader,
   matchOrder,
+  meanOfLast,
   openSellRemaining,
   optimalYearCost,
+  plannedRelease,
+  reserveBase,
+  reservePot,
   realizeYear,
   round1,
   settleYear,
@@ -184,7 +188,8 @@ export class Session {
     const record = this.currentYearRecord()
     if (!record) return 0
     const free = Object.values(record.freeAllocation).reduce((a, b) => a + b, 0)
-    return round1(record.regulatorPool + free)
+    // Reserve credits only count once SOLD — an unfilled rung is an offer, not supply.
+    return round1(record.regulatorPool + free + record.reserveReleased)
   }
 
   /** Whether this session's mechanism runs a sealed-bid auction at the cap stage. */
@@ -264,6 +269,7 @@ export class Session {
     capReductionFactor?: number
     benchmark?: Partial<Record<Industry, number>>
     abatement?: Partial<Record<Industry, { a: number; b: number }>>
+    reserveEnabled?: boolean
   }) {
     this.requirePhase('lobby', 'yearSummary')
     if (settings.penaltyRate !== undefined) {
@@ -271,6 +277,11 @@ export class Session {
         throw new GameError('BAD_SETTING', 'penaltyRate must be a non-negative number.')
       }
       this.state.config.market.penaltyRate = round1(settings.penaltyRate)
+    }
+    if (settings.reserveEnabled !== undefined) {
+      // The pot is sized at year open regardless, so this is a pure on/off — a teacher can
+      // play the same year with and without the ceiling and compare.
+      this.state.config.allocation.reserve.enabled = !!settings.reserveEnabled
     }
     if (settings.auctionCapRatio !== undefined) {
       if (!Number.isFinite(settings.auctionCapRatio) || settings.auctionCapRatio < 0) {
@@ -402,6 +413,21 @@ export class Session {
       primaryPrice: null,
       settlement: null,
       netPosition: {},
+      // Cost containment reserve: sized once, from the shortfall this year opens with.
+      // `issuance` matches circulatingCap()'s definition (free + pool) so the two agree.
+      reservePot: reservePot(
+        this.state.config.allocation.reserve,
+        reserveBase(
+          this.state.config.allocation.reserve,
+          round1(
+            this.state.players.reduce((s, p) => s + expectedEmission(p, year), 0),
+          ),
+          round1(Object.values(freeAllocation).reduce((a, b) => a + b, 0) + pool),
+        ),
+      ),
+      reserveReleased: 0,
+      reserveCommitted: 0,
+      reserveRevenue: 0,
     }
     record.primaryPrice = mechanism.primaryPrice(record, this.state.config, this.openingReference())
     this.seedTraderBots(record, mechanism.usesAuction)
@@ -613,19 +639,69 @@ export class Session {
         )
       }
     }
+    this.submitOrder(playerId, side, roundedQty, price)
+    // After matching, so the reserve reacts to the price that was just discovered rather
+    // than to a stale one. Not inside submitOrder: releaseReserve calls that, and this
+    // would recurse.
+    this.maybeReleaseReserve()
+  }
+
+  /**
+   * Build an order, match it, and book any reserve fills. The mechanical half of
+   * `placeOrder`, split out so the reserve can reach it without the no-shorting gate —
+   * `creditsHeld(RESERVE_ID)` is 0 and turns negative after the first fill, so the gate
+   * would reject every reserve ask forever.
+   */
+  private submitOrder(playerId: string, side: OrderSide, qty: number, price: number) {
+    const record = this.currentYearRecord()!
     this.orderSeq += 1
     const order: Order = {
       id: nanoid(8),
       playerId,
       side,
-      qty: roundedQty,
-      remaining: roundedQty,
+      qty,
+      remaining: qty,
       price: round1(price),
       status: 'open',
       seq: this.orderSeq,
     }
     const { trades } = matchOrder(record.orders, order, () => nanoid(8), this.blockedPair)
     record.trades.push(...trades)
+
+    // Only the fills just produced — O(fills), never a rescan of the tape, which reaches
+    // thousands within a year. Catches both directions: the reserve's own marketable ask,
+    // and a player's buy crossing a rung that was already resting.
+    for (const t of trades) {
+      if (t.sellerId !== RESERVE_ID) continue
+      record.reserveReleased = round1(record.reserveReleased + t.qty)
+      record.reserveRevenue = round1(record.reserveRevenue + t.qty * t.price)
+    }
+  }
+
+  /**
+   * Offer whatever rungs of the cost containment reserve the current price has unlocked.
+   *
+   * The trigger is the mean of this year's last few prints — not `bestBid` (one small bid
+   * would unlock a rung) and not `lastPrice` (one outlier would, permanently, since the
+   * ladder only ratchets one way).
+   */
+  private maybeReleaseReserve() {
+    const cfg = this.state.config.allocation.reserve
+    if (!cfg.enabled) return
+    const record = this.currentYearRecord()
+    if (!record || record.reservePot <= 0) return
+    // Nothing has printed this year, so there is no discovered price and no ceiling to
+    // defend. Deliberately NOT falling back to last year's price: that would flood the
+    // ladder before anyone had traded, and destroy the causal story — the price rose, and
+    // THEN the regulator stepped in.
+    const price = meanOfLast(record.trades, cfg.triggerTrades)
+    if (price === null) return
+
+    const base = round1(record.reservePot / cfg.steps[cfg.steps.length - 1].cumulativeFraction)
+    for (const rung of plannedRelease(cfg, base, price, record.reserveCommitted)) {
+      record.reserveCommitted = round1(record.reserveCommitted + rung.qty)
+      this.submitOrder(RESERVE_ID, 'sell', rung.qty, rung.price)
+    }
   }
 
   /**

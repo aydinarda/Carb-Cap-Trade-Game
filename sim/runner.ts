@@ -1,6 +1,7 @@
 import { stepBots } from '../server/bots/step'
 import type { BotRuntime } from '../server/bots/types'
 import { Session } from '../server/session'
+import { RESERVE_ID } from '../shared/constants'
 import { buildMarketView, createRng, round1, tradedNet } from '../shared/engine'
 import type { BotType, CapMode, Industry } from './scenarios'
 import type { DeepPartial, GameConfig } from '../shared/config'
@@ -111,6 +112,7 @@ export function runScenario(spec: RunSpec): RunResult {
     session.closeTrade()
 
     const kindOf = (id: string) => {
+      if (id === RESERVE_ID) return 'regulator'
       const p = session.getPlayer(id)
       if (!p) return 'unknown'
       return p.isBot ? `bot:${p.botType}` : `student:${behaviourOf.get(id) ?? '?'}`

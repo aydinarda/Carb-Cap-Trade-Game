@@ -48,6 +48,8 @@ function hostConfigView(config: GameConfig): HostConfigView {
     benchmark: { ...config.allocation.benchmark },
     sectorAverage: sectorAverages(config),
     abatement: { ...config.abatement.sectors },
+    reserveEnabled: config.allocation.reserve.enabled,
+    reserveSteps: config.allocation.reserve.steps.map((s) => ({ ...s })),
   }
 }
 
@@ -126,7 +128,7 @@ function classAggregate(session: Session): ClassAggregate {
       // The cap actually in force that year: everything issued, free or sold. Taken
       // per-year rather than from state.freeCreditLimit, which is computed once and
       // so would draw a flat line under a tightening benchmark or auction supply.
-      cap: round1(sum(y.freeAllocation) + y.regulatorPool),
+      cap: round1(sum(y.freeAllocation) + y.regulatorPool + y.reserveReleased),
     }))
 
   const settlement = record?.settlement
@@ -153,6 +155,8 @@ function classAggregate(session: Session): ClassAggregate {
       : null,
     industryBreakdown,
     yearHistory,
+    reservePot: record?.reservePot ?? 0,
+    reserveReleased: record?.reserveReleased ?? 0,
   }
 }
 

@@ -1,4 +1,4 @@
-import { openSellRemaining, round1, tradedCash } from '../../shared/engine'
+import { meanOfLast, openSellRemaining, round1, tradedCash } from '../../shared/engine'
 import type { MarketView, Order, OrderSide, YearRecord } from '../../shared/types'
 import type { BotRuntime } from './types'
 import { GameError, type Session } from '../session'
@@ -67,10 +67,7 @@ export function anchorValue(mv: MarketView, ref: number): number {
  * still has a sensible centre.
  */
 export function recentPrice(session: Session, record: YearRecord, n: number): number {
-  const { trades } = record
-  if (trades.length === 0) return referencePrice(session)
-  const tail = trades.slice(-Math.max(1, n))
-  return round1(tail.reduce((sum, t) => sum + t.price, 0) / tail.length)
+  return meanOfLast(record.trades, n) ?? referencePrice(session)
 }
 
 /** Credits a bot can still offer without shorting (held minus its open asks). */

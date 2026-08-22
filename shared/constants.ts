@@ -59,3 +59,14 @@ export const DEFAULT_ABATEMENT: Record<Industry, { a: number; b: number }> = {
   Transport: { a: 25, b: 100 },
   'Heavy Materials': { a: 40, b: 150 }, // hard (cement/steel) → cuts little
 }
+
+/**
+ * Counterparty id for the cost containment reserve.
+ *
+ * The reserve is deliberately NOT a `Player`: everything that walks `state.players` would
+ * otherwise see it — `realizeYear` would give it an emission, `settleYear` a settlement row,
+ * and the leaderboard would rank its sale proceeds first every single year. `matchOrder` is
+ * purely string-keyed, so a bare id is all the order book needs. Cannot collide with a
+ * player id, which is always `P${n}`.
+ */
+export const RESERVE_ID = 'RESERVE'

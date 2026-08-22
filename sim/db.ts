@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS years (
   bot_volume_share   REAL, unfilled_demand REAL,
   auction_price      REAL, auction_awarded REAL, auction_bid_qty REAL,
   issuance           REAL, shortage_ratio REAL,
+  reserve_pot        REAL, reserve_released REAL, reserve_revenue REAL,
   volume             REAL, trade_count INTEGER,
   free_allocation    REAL, regulator_pool REAL,
   total_expected     REAL, total_realized REAL, total_abated REAL,
@@ -171,13 +172,14 @@ export class SimDb {
            order_to_trade, fill_rate, price_impact,
            bot_volume_share, unfilled_demand,
            auction_price, auction_awarded, auction_bid_qty, issuance, shortage_ratio,
+           reserve_pot, reserve_released, reserve_revenue,
            volume, trade_count,
            free_allocation, regulator_pool,
            total_expected, total_realized, total_abated,
            total_penalty, class_cost, optimal_cost
          ) VALUES (
            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         runId, year,
@@ -187,6 +189,7 @@ export class SimDb {
         m.orderToTrade, m.fillRate, m.priceImpact,
         m.botVolumeShare, m.unfilledDemand,
         m.auctionPrice, m.auctionAwarded, m.auctionBidQty, m.issuance, m.shortageRatio,
+        m.reservePot, m.reserveReleased, m.reserveRevenue,
         m.volume, m.tradeCount,
         m.freeAllocation, m.regulatorPool,
         m.totalExpected, m.totalRealized, m.totalAbated,

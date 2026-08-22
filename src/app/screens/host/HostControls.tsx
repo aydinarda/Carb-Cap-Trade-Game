@@ -102,6 +102,30 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
       {field('Penalty rate', penalty, setPenalty, 'cost per tCO₂ uncovered — market price ceiling')}
       {field('Auction supply ratio', auctionCapRatio, setAuctionCapRatio, '× baseline (auctioning; ≤1 = scarcer)')}
       {field('Cap reduction / year', capReduction, setCapReduction, 'auction supply AND benchmark × this each year (EU-ETS LRF; 0.97 = −3%/yr)')}
+      {/* Applies immediately — the pot is sized at year open either way, so a class can play
+          the same year with and without the ceiling and compare. */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs text-foreground">Price reserve</div>
+          <div className="text-[10px] text-muted-foreground font-mono">
+            releases up to 25% of the year's shortfall in steps from €
+            {config.reserveSteps[0]?.triggerPrice ?? '—'}
+          </div>
+        </div>
+        <button
+          onClick={() =>
+            void hostAction('host:updateSettings', { reserveEnabled: !config.reserveEnabled })
+          }
+          className={cn(
+            'shrink-0 text-[10px] font-mono uppercase tracking-wider border rounded-full px-3 py-1 transition-colors',
+            config.reserveEnabled
+              ? 'text-primary border-primary/40 bg-primary/10'
+              : 'text-muted-foreground border-border',
+          )}
+        >
+          {config.reserveEnabled ? 'on' : 'off'}
+        </button>
+      </div>
       <div className="pt-1 mt-1 border-t border-border">
         <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-2">
           Benchmark free credits (benchmarking mode)

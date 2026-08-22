@@ -19,6 +19,8 @@ export interface ClientToServerEvents {
       abatement?: Partial<Record<Industry, { a: number; b: number }>>
       auctionCapRatio?: number
       capReductionFactor?: number
+      /** Turn the cost containment reserve on or off between years. */
+      reserveEnabled?: boolean
     },
     ack: Ack,
   ) => void

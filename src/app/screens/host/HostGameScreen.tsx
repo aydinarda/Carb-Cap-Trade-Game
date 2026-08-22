@@ -164,6 +164,23 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
             icon={<Landmark size={12} />}
           />
         )}
+        {agg.reservePot > 0 && (
+          // The cost containment reserve only appears once it has something to give — a
+          // year that opened with no shortfall has no pot, and showing an empty one would
+          // just be noise on a projector.
+          <StatCard
+            label="Price reserve"
+            value={`${agg.reserveReleased.toLocaleString()} / ${agg.reservePot.toLocaleString()}`}
+            unit="cr"
+            tone={agg.reserveReleased > 0 ? 'good' : 'default'}
+            hint={
+              agg.reserveReleased > 0
+                ? 'released — the market reached a trigger price'
+                : 'held back; releases in steps as the price rises'
+            }
+            icon={<Landmark size={12} />}
+          />
+        )}
         <StatCard
           label={agg.totalRealized !== null ? 'Class realized' : 'Class expected'}
           value={agg.totalRealized ?? agg.totalExpected ?? '—'}

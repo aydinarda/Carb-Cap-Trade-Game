@@ -52,6 +52,31 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     auctionCapRatio: 1,
     capReductionFactor: 0.97,
     applyLRFToGrandfathering: false,
+    reserve: {
+      enabled: true,
+      basis: 'shortfall',
+      triggerTrades: 5, // matches bots.marketMaker.recentTrades
+      /**
+       * Absolute euros, not fractions of penaltyRate: these are meaningful against the MAC
+       * curves (every sector hits the 20% abatement cap between 25 and 70), not against the
+       * fine.
+       *
+       * The first rung sits at the TOP of the €60-70 target band, not inside it. Measured:
+       * a rung's price effect comes from where it sits, not from how much it sells — it is
+       * the cheapest ask in the book, so it caps every print regardless of size (halving the
+       * pot moved the price 2 €; raising the rung 10 € moved it 6 €). A rung inside the band
+       * therefore suppresses the market before it ever reaches the target. Starting at 70
+       * left the first six years' price path almost identical to having no reserve at all,
+       * while cutting trades pinned at the fine from 6-12% to 0-1%. See §10 of
+       * sim/sweeps/price-calibration.ipynb.
+       */
+      steps: [
+        { triggerPrice: 70, cumulativeFraction: 0.08 },
+        { triggerPrice: 78, cumulativeFraction: 0.13 },
+        { triggerPrice: 86, cumulativeFraction: 0.19 },
+        { triggerPrice: 95, cumulativeFraction: 0.25 },
+      ],
+    },
   },
   abatement: {
     // The game has always used the linear MAC; the other models exist for scenarios.

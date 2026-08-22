@@ -1,3 +1,4 @@
+import { RESERVE_ID } from '@shared/constants'
 import { Activity, X } from 'lucide-react'
 import type { MarketView, Order, Trade } from '@shared/types'
 import { cn } from './theme'
@@ -37,13 +38,17 @@ function OrderRow({
   anonymous: boolean
   onCancel?: (id: string) => void
 }) {
-  // Anonymised for players (only your own orders are labelled); host sees ids.
-  const label = mine ? 'you' : anonymous ? '•' : order.playerId
+  // Anonymised for players (only your own orders are labelled); host sees ids. The cost
+  // containment reserve is never anonymised — the whole point of resting its ladder in the
+  // book is that the class can SEE where the regulator is willing to sell.
+  const isReserve = order.playerId === RESERVE_ID
+  const label = isReserve ? 'REGULATOR' : mine ? 'you' : anonymous ? '•' : order.playerId
   return (
     <div
       className={cn(
         'flex items-center justify-between text-xs font-mono py-1 px-2 rounded',
         mine && 'bg-primary/10 border border-primary/30',
+        isReserve && 'bg-accent/10 border border-accent/40',
       )}
     >
       <span className={cn('font-bold w-9', mine ? 'text-primary' : 'text-muted-foreground')}>

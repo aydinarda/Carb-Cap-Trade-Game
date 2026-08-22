@@ -84,6 +84,34 @@ export function validateConfig(config: GameConfig): GameConfig {
       throw new ConfigError(`emissions.industries.${industry} must satisfy 0 <= low <= high.`)
     }
   }
+  const reserve = config.allocation.reserve
+  if (reserve.triggerTrades < 1) {
+    throw new ConfigError('allocation.reserve.triggerTrades must be >= 1.')
+  }
+  if (reserve.basis !== 'shortfall' && reserve.basis !== 'need') {
+    throw new ConfigError("allocation.reserve.basis must be 'shortfall' or 'need'.")
+  }
+  if (reserve.enabled && reserve.steps.length === 0) {
+    throw new ConfigError('allocation.reserve.steps must be non-empty when enabled.')
+  }
+  // Strictly increasing in BOTH fields: the ladder's whole meaning is that a higher price
+  // unlocks strictly more supply at a strictly higher offer.
+  let prevPrice = -Infinity
+  let prevFrac = 0
+  reserve.steps.forEach((step, i) => {
+    positive(step.triggerPrice, `allocation.reserve.steps[${i}].triggerPrice`)
+    if (step.triggerPrice <= prevPrice) {
+      throw new ConfigError(`allocation.reserve.steps[${i}].triggerPrice must ascend.`)
+    }
+    if (!(step.cumulativeFraction > prevFrac) || step.cumulativeFraction > 1) {
+      throw new ConfigError(
+        `allocation.reserve.steps[${i}].cumulativeFraction must ascend and stay <= 1.`,
+      )
+    }
+    prevPrice = step.triggerPrice
+    prevFrac = step.cumulativeFraction
+  })
+
   return config
 }
 

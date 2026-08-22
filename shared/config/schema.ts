@@ -80,6 +80,42 @@ export interface EmissionsConfig {
   traderHistoryLevel: number
 }
 
+export interface ReserveStep {
+  /** Market price at or above which this rung unlocks — AND the price it offers at (€/t). */
+  triggerPrice: number
+  /** Cumulative share of the base releasable once this rung is unlocked (0..1]. */
+  cumulativeFraction: number
+}
+
+/**
+ * Cost containment reserve: a finite pot of extra allowances the regulator offers into the
+ * market as the price climbs, in steps. Modelled on RGGI's CCR.
+ *
+ * It exists because a shortage larger than the class can physically abate
+ * (`abatement.maxFraction`) is otherwise uncoverable — the price simply pins to the fine and
+ * there is nothing to buy at any price. It is a *secondary* mechanism: sized to relieve a
+ * squeeze, not to set the price.
+ */
+export interface ReserveConfig {
+  enabled: boolean
+  /**
+   * What the pot is a share of, recomputed at each year open.
+   * `shortfall` = max(0, totalExpected − issuance); `need` = totalExpected.
+   *
+   * NOTE `shortfall` is ZERO under auctioning at `auctionCapRatio >= 1`, because supply is
+   * issued equal to (or above) need — so the reserve is correctly inert there. Switch to
+   * `need` if you want it armed in that case too.
+   */
+  basis: 'shortfall' | 'need'
+  /** How many of this year's prints the trigger price averages over. */
+  triggerTrades: number
+  /**
+   * The ladder, strictly increasing in both fields. The pot is the LAST rung's fraction —
+   * there is deliberately no separate size knob, which could contradict the ladder.
+   */
+  steps: ReserveStep[]
+}
+
 export interface AllocationConfig {
   /** Grandfathering cap = this × Σbaseline. (was `FREE_CREDIT_RATIO`) */
   freeCreditRatio: number
@@ -97,6 +133,8 @@ export interface AllocationConfig {
    * on to compare the three modes on equal footing.
    */
   applyLRFToGrandfathering: boolean
+  /** Price-triggered supply release. Applies to all three cap mechanisms. */
+  reserve: ReserveConfig
 }
 
 export interface AbatementConfig {

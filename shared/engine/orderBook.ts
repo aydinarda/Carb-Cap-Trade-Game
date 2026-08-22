@@ -108,6 +108,13 @@ export function tradedNetAll(trades: Trade[]): Record<string, number> {
   return net
 }
 
+/** Mean price of the last `n` prints. Returns null when nothing has traded. */
+export function meanOfLast(trades: Trade[], n: number): number | null {
+  if (trades.length === 0) return null
+  const tail = trades.slice(-Math.max(1, n))
+  return round1(tail.reduce((sum, t) => sum + t.price, 0) / tail.length)
+}
+
 /** Cash a player spent buying and earned selling via executed trades. */
 export function tradedCash(trades: Trade[], playerId: string): { buyCash: number; sellCash: number } {
   let buyCash = 0

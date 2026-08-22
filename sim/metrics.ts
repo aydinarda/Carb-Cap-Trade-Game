@@ -45,7 +45,12 @@ export function efficientPrice(session: Session, record: YearRecord): number | n
   const cfg = session.state.config
   const P = cfg.market.penaltyRate
   const players = session.state.players
-  const supply = Object.values(record.freeAllocation).reduce((a, b) => a + b, 0) + record.regulatorPool
+  // Reserve credits count once SOLD — otherwise this yardstick reports scarcity the
+  // reserve has already relieved, and every reserve run reads as a permanent price bias.
+  const supply =
+    Object.values(record.freeAllocation).reduce((a, b) => a + b, 0) +
+    record.regulatorPool +
+    record.reserveReleased
   const demandAt = (price: number) =>
     players.reduce((sum, p) => {
       const spec = cfg.abatement.sectors[p.industry]
@@ -99,6 +104,11 @@ export interface YearMetrics {
   /** (need − issuance) / need. The organising variable: it makes the three cap regimes
    *  comparable on one axis, which their own knobs do not. */
   shortageRatio: number
+  /** Cost containment reserve: the year's pot, what it sold, and what it collected.
+   *  0/0/0 when the reserve is disabled or the year opened with no shortfall. */
+  reservePot: number
+  reserveReleased: number
+  reserveRevenue: number
   // outcomes
   volume: number
   tradeCount: number
@@ -158,7 +168,7 @@ export function yearMetrics(
   const spreads = samples.map((s) => s.spread).filter((x): x is number => x !== null)
 
   const freeAllocation = round1(Object.values(record.freeAllocation).reduce((a, b) => a + b, 0))
-  const issuance = round1(freeAllocation + record.regulatorPool)
+  const issuance = round1(freeAllocation + record.regulatorPool + record.reserveReleased)
   const expectedTotal = round1(totalExpected)
 
   return {
@@ -183,6 +193,9 @@ export function yearMetrics(
     auctionAwarded: round1(Object.values(record.regulatorGranted).reduce((a, b) => a + b, 0)),
     auctionBidQty: round1(Object.values(record.auctionBid).reduce((s, b) => s + b.qty, 0)),
     issuance,
+    reservePot: record.reservePot,
+    reserveReleased: record.reserveReleased,
+    reserveRevenue: record.reserveRevenue,
     // Guarded: sim.spec.ts asserts every numeric metric is finite, and a class with no
     // expected emissions at all would otherwise divide by zero.
     shortageRatio: expectedTotal > 0 ? round1((expectedTotal - issuance) / expectedTotal) : 0,

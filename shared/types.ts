@@ -116,6 +116,21 @@ export interface YearRecord {
   primaryPrice: number | null
   settlement: Record<string, PlayerSettlement> | null
   netPosition: Record<string, number>
+  /**
+   * Cost containment reserve. Fixed at year open; 0 means inert for this year — which is the
+   * correct state whenever issuance already meets need (auctioning at auctionCapRatio >= 1).
+   */
+  reservePot: number
+  /** Credits the reserve has actually SOLD this year. */
+  reserveReleased: number
+  /**
+   * Sold PLUS still resting unsold. This is what the ladder measures itself against, and it
+   * is tracked incrementally rather than derived: scanning open orders on every placeOrder
+   * would be O(orders) per order, and `orders` reaches thousands in a full year.
+   */
+  reserveCommitted: number
+  /** Cash the reserve collected. Belongs to nobody — never enters a player's ledger. */
+  reserveRevenue: number
 }
 
 /**
@@ -140,6 +155,9 @@ export interface HostConfigView {
   sectorAverage: Record<Industry, number>
   /** Read-only display of the active MAC curve per sector. */
   abatement: Record<Industry, AbatementSpec>
+  /** Cost containment reserve: whether it is armed, and the ladder it would release on. */
+  reserveEnabled: boolean
+  reserveSteps: { triggerPrice: number; cumulativeFraction: number }[]
 }
 
 export interface GameState {
@@ -265,6 +283,10 @@ export interface ClassAggregate {
   industryBreakdown: IndustryBreakdownRow[]
   /** Total emissions vs cap per completed year, for the class chart. */
   yearHistory: { year: number; totalRealized: number; cap: number }[]
+  /** Cost containment reserve this year: the pot it was sized at, and what it has sold.
+   *  Both 0 when the reserve is disabled or the year opened with no shortfall. */
+  reservePot: number
+  reserveReleased: number
 }
 
 export interface HostPlayerRow extends PublicPlayerInfo {
