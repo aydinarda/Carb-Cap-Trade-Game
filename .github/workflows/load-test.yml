@@ -30,6 +30,25 @@ on:
         description: Grace window to join in a browser before year 1 (seconds) — applies to each of the 3 modes
         default: '90'
         required: true
+      # Calibration knobs. Blank = whatever shared/config/defaults.ts ships, which is what
+      # you want for a plain load test; set them to reproduce a candidate from
+      # sim/sweeps/price-calibration.ipynb against the real server.
+      penalty_rate:
+        description: 'penaltyRate (blank = shipped default)'
+        default: ''
+        required: false
+      auction_cap_ratio:
+        description: 'auctionCapRatio — auction supply as a multiple of class baseline (blank = shipped)'
+        default: ''
+        required: false
+      cap_reduction_factor:
+        description: 'capReductionFactor — yearly tightening; 0.97 ships, ~0.86 tracks the fall in need'
+        default: ''
+        required: false
+      benchmark_stringency:
+        description: 'benchmark as a fraction of sector average (0.6 ships)'
+        default: ''
+        required: false
 
 jobs:
   load:
@@ -61,4 +80,8 @@ jobs:
           YEARS_PER_MODE: ${{ inputs.years_per_mode }}
           ROUND_WINDOW: ${{ inputs.round_window }}
           JOIN_GRACE: ${{ inputs.join_grace }}
+          PENALTY_RATE: ${{ inputs.penalty_rate }}
+          AUCTION_CAP_RATIO: ${{ inputs.auction_cap_ratio }}
+          CAP_REDUCTION_FACTOR: ${{ inputs.cap_reduction_factor }}
+          BENCHMARK_STRINGENCY: ${{ inputs.benchmark_stringency }}
         run: node scripts/load-full-session.mjs

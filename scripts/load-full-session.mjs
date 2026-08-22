@@ -19,13 +19,21 @@
  * separately, not as failures.
  *
  * NOTE ON PRICES. This is a *load* test, but its price path gets read as a finding, so the
- * synthetic players have to stay economically plausible: they abate to their sector's
- * cost-minimising point and value a tonne against what defaulting on it would really cost —
- * the fine PLUS the carried make-good obligation, not the fine alone. Quote noise must stay
- * SYMMETRIC around that value. An earlier version quoted `lastPrice × U(1.0, 1.1)` to buy
- * and `× U(0.9, 1.0)` to sell, reading `lastPrice` back from its own prints — a feedback
- * loop with ±5% drift that compounded to €400 (short class) or €3 (long class) and had
- * nothing to do with the game's own parameters. Do not reintroduce asymmetric drift here.
+ * synthetic players must behave like the ones the simulator models: abate to the sector's
+ * cost-minimising point (capped by `maxAbatement`), value a tonne at `min(penaltyRate,
+ * MAC(r*))` — the same ceiling every bot uses — and quote with SYMMETRIC noise around it.
+ *
+ * An earlier version quoted `lastPrice × U(1.0, 1.1)` to buy and `× U(0.9, 1.0)` to sell,
+ * reading `lastPrice` back from its own prints — a feedback loop with ±5% drift that
+ * compounded to €400 (short class) or €3 (long class) and had nothing to do with the game's
+ * own parameters. Do not reintroduce asymmetric drift here.
+ *
+ * KNOWN DIVERGENCES from sim/sweeps/price-calibration.ipynb, which uses a different class:
+ *   - every player here is identical; the simulator has four behaviour archetypes, one of
+ *     which (`passive`, 25% of the class) never abates. This class therefore cuts MORE, so
+ *     it clears at a lower price than the notebook predicts.
+ *   - 6 bots here vs 22 there, and 3 years vs 10 by default.
+ * Set YEARS_PER_MODE=10 and the calibration env vars below to compare like for like.
  *
  *   node scripts/load-full-session.mjs
  *   BASE_URL=https://carb-cap-trade-api.onrender.com HOST_KEY=admin123 \
@@ -46,6 +54,26 @@ const REVIEW_GAP = Number(process.env.REVIEW_GAP || 3) // seconds between years
 // logs with a few seconds of lag, and joining is lobby-only — miss the window and the
 // server rejects you with a wrong-phase error once year 1 has started.
 const JOIN_GRACE = Number(process.env.JOIN_GRACE || 90)
+
+// Calibration knobs, applied per session via host:updateSettings. Unset = shipped default,
+// so the workflow keeps testing the shipped game unless you deliberately ask otherwise.
+// These are the numbers sim/sweeps/price-calibration.ipynb searches over — without them the
+// load test cannot exercise a calibration at all, only whatever defaults.ts happens to hold.
+const PENALTY_RATE = process.env.PENALTY_RATE ? Number(process.env.PENALTY_RATE) : null
+const AUCTION_CAP_RATIO = process.env.AUCTION_CAP_RATIO ? Number(process.env.AUCTION_CAP_RATIO) : null
+const CAP_REDUCTION = process.env.CAP_REDUCTION_FACTOR ? Number(process.env.CAP_REDUCTION_FACTOR) : null
+const FREE_CREDIT_RATIO = process.env.FREE_CREDIT_RATIO ? Number(process.env.FREE_CREDIT_RATIO) : null
+const BENCHMARK_STRINGENCY = process.env.BENCHMARK_STRINGENCY
+  ? Number(process.env.BENCHMARK_STRINGENCY)
+  : null
+// Sector averages, mirroring shared/constants.ts — the benchmark table is what
+// `benchmarkFor` reads; `allocation.benchmarkStringency` is dead config and does nothing.
+const SECTOR_AVERAGE = {
+  'Power & Utilities': 1000,
+  'Heavy Materials': 800,
+  'Manufacturing & Chemicals': 525,
+  Transport: 300,
+}
 
 const INDUSTRIES = [
   'Power & Utilities',
@@ -154,17 +182,18 @@ class Player {
   }
 
   /**
-   * What this company thinks a tonne is worth.
+   * What this company thinks a tonne is worth: its own cost of cutting it, capped at the
+   * ceiling every agent in the game observes.
    *
-   * The obvious answer — "never pay more than the fine" — is WRONG in this game, and the
-   * engine says so itself (shared/engine/settlement.ts): paying the penalty does NOT
-   * discharge the obligation. An uncovered tonne is fined AND carried into next year as a
-   * make-good debt, where it lowers `creditsHeld`, gets fined again if it is still not
-   * covered, and is finally cashed out at the closing price.
+   * MUST MATCH `priceCeiling` in server/bots/helpers.ts. Economically the fine is NOT a
+   * ceiling — paying it does not discharge the obligation, the tonne carries forward as
+   * make-good debt (shared/engine/settlement.ts) — and the engine can price that carry via
+   * `bots.fixes.ceilingIncludesCarry`. But that flag ships OFF, so every bot clamps at
+   * `penaltyRate`, and a harness player valuing tonnes at `penaltyRate + reference` would
+   * outbid all of them and print above the fine. The load test would then be measuring a
+   * class the simulator never modelled.
    *
-   * So the alternative to buying a tonne today is not `penaltyRate` — it is `penaltyRate`
-   * PLUS the cost of eventually settling the same tonne. That puts the rational ceiling
-   * ABOVE the fine, which is exactly why the engine enforces no hard cap.
+   * If that flag is ever turned on, this has to move with it.
    */
   fairValue() {
     const s = this.snap
@@ -172,11 +201,9 @@ class Player {
     const spec = s?.abatement
     const rStar = optimalAbatement(ref, spec, s?.maxAbatement ?? 1)
     const mc = marginalCost(rStar, spec)
-    // Default now, settle later: the fine plus roughly today's price for the tonne we
-    // would still owe. A one-period approximation of a debt that can outlive the year.
-    const defaultCost = this.penaltyRate + ref
-    if (mc === null) return Math.min(defaultCost, ref)
-    return Math.min(defaultCost, mc)
+    const ceiling = this.penaltyRate
+    if (mc === null) return Math.min(ceiling, ref)
+    return Math.min(ceiling, mc)
   }
 
   /** Auctioning cap stage: submit one sealed bid at what a tonne is worth to this company. */
@@ -261,8 +288,33 @@ async function runSession(capMode, { withBots, joinGrace }) {
   if (!created.ok) throw new Error(`createSession failed: ${created.error} (check HOST_KEY)`)
   const roomCode = created.roomCode
   await sleep(200)
+
+  // Apply the calibration before anyone joins. updateSettings is lobby-only, and
+  // freeCreditRatio has to be in place before startYear computes the free credit limit.
+  const settings = {}
+  if (PENALTY_RATE !== null) settings.penaltyRate = PENALTY_RATE
+  if (AUCTION_CAP_RATIO !== null) settings.auctionCapRatio = AUCTION_CAP_RATIO
+  if (CAP_REDUCTION !== null) settings.capReductionFactor = CAP_REDUCTION
+  if (BENCHMARK_STRINGENCY !== null) {
+    settings.benchmark = Object.fromEntries(
+      Object.entries(SECTOR_AVERAGE).map(([k, v]) => [k, Math.round(v * BENCHMARK_STRINGENCY * 10) / 10]),
+    )
+  }
+  if (Object.keys(settings).length) {
+    const r = await emit(host, 'host:updateSettings', settings)
+    if (!r.ok) throw new Error(`updateSettings failed: ${r.error}`)
+    console.log(`settings applied: ${JSON.stringify(settings)}`)
+  }
+  if (FREE_CREDIT_RATIO !== null) {
+    console.log(`  ⚠ FREE_CREDIT_RATIO=${FREE_CREDIT_RATIO} ignored — host:updateSettings has no`)
+    console.log('    field for it; set allocation.freeCreditRatio in defaults.ts to test it.')
+  }
+
+  await sleep(150)
   const penaltyRate = hostSnap?.config?.penaltyRate ?? 100
-  console.log(`penalty rate in force: ${penaltyRate}`)
+  console.log(`penalty rate in force: ${penaltyRate}` +
+    `  ·  capReduction ${hostSnap?.config?.capReductionFactor ?? '?'}` +
+    `  ·  auctionCapRatio ${hostSnap?.config?.auctionCapRatio ?? '?'}`)
 
   // Join players (batched to avoid a connection storm).
   const players = []
