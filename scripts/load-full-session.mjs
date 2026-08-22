@@ -4,10 +4,13 @@
  * Classroom-paced, end-to-end load, run against the DEPLOYED backend so you can join
  * in a browser and feel the latency while 100 simulated players hammer the server.
  *
- * Three sequential sessions (one per cap mechanism), because host:addBots is lobby-only:
+ * One session per cap mechanism, played in sequence, because host:addBots is lobby-only:
  *   1. grandfathering — 1 host + 100 players, a few years played to completion
  *   2. benchmarking   — same + 6 bots (they trade the order book; no auction to bid into)
  *   3. auctioning     — same + 6 bots (2 marketMaker / 2 compliance / 1 noise / 1 speculator)
+ *
+ * Set MODES to play only some of them — `MODES=auctioning` goes straight there instead of
+ * sitting through two full games first.
  *
  * Each session: create → 100 players join → (bots) → a JOIN grace window (join in the
  * browser now!) → per year: cap stage (auction bids, where the mode has an auction) →
@@ -36,6 +39,7 @@
  * Set YEARS_PER_MODE=10 and the calibration env vars below to compare like for like.
  *
  *   node scripts/load-full-session.mjs
+ *   MODES=auctioning YEARS_PER_MODE=10 node scripts/load-full-session.mjs
  *   BASE_URL=https://carb-cap-trade-api.onrender.com HOST_KEY=admin123 \
  *     N_PLAYERS=100 YEARS_PER_MODE=3 ROUND_WINDOW=25 node scripts/load-full-session.mjs
  */
@@ -74,6 +78,33 @@ const SECTOR_AVERAGE = {
   'Manufacturing & Chemicals': 525,
   Transport: 300,
 }
+
+/**
+ * Which cap mechanisms to play, in order. `all` (default) plays the three sequentially.
+ * Name one — or a comma-separated subset — to skip straight to it: testing auctioning meant
+ * sitting through two full games first, which at 90 s join grace and 3 years each is most of
+ * a quarter of an hour before the mode you came for even starts.
+ */
+const ALL_MODES = ['grandfathering', 'benchmarking', 'auctioning']
+const MODES = (() => {
+  const raw = (process.env.MODES || 'all').trim().toLowerCase()
+  if (!raw || raw === 'all') return ALL_MODES
+  const picked = raw.split(',').map((m) => m.trim()).filter(Boolean)
+  const unknown = picked.filter((m) => !ALL_MODES.includes(m))
+  if (unknown.length) {
+    throw new Error(`unknown mode(s): ${unknown.join(', ')} — pick from ${ALL_MODES.join(', ')} or "all"`)
+  }
+  // Keep the canonical order however they were listed, so logs stay comparable.
+  return ALL_MODES.filter((m) => picked.includes(m))
+})()
+
+/**
+ * Bots per mode. Grandfathering ships without them because that is how the broadcast-load
+ * failure was originally reproduced; override with BOTS=on/off to make the three comparable.
+ */
+const BOTS_OVERRIDE = process.env.BOTS ? process.env.BOTS.trim().toLowerCase() : null
+const withBotsFor = (mode) =>
+  BOTS_OVERRIDE ? BOTS_OVERRIDE === 'on' || BOTS_OVERRIDE === 'true' : mode !== 'grandfathering'
 
 const INDUSTRIES = [
   'Power & Utilities',
@@ -403,6 +434,7 @@ async function runSession(capMode, { withBots, joinGrace }) {
 // ── main ─────────────────────────────────────────────────────────────────────
 async function main() {
   console.log(`Load test → ${BASE}  (${N_PLAYERS} players, ${YEARS_PER_MODE} yrs/mode)`)
+  console.log(`modes: ${MODES.join(' → ')}`)
   // Wake the (possibly sleeping) Render instance first.
   for (let i = 0; i < 10; i++) {
     try {
@@ -413,9 +445,9 @@ async function main() {
     await sleep(5000)
   }
 
-  await runSession('grandfathering', { withBots: false, joinGrace: JOIN_GRACE })
-  await runSession('benchmarking', { withBots: true, joinGrace: JOIN_GRACE })
-  await runSession('auctioning', { withBots: true, joinGrace: JOIN_GRACE })
+  for (const mode of MODES) {
+    await runSession(mode, { withBots: withBotsFor(mode), joinGrace: JOIN_GRACE })
+  }
 
   // ── summary + thresholds ──
   const p50 = pct(M.actionLatency, 50)

@@ -14,6 +14,25 @@ on:
         description: Frontend URL (optional — shown in the "join now" hint)
         default: ''
         required: false
+      modes:
+        description: Which cap mechanism(s) to play
+        type: choice
+        default: all
+        required: true
+        options:
+          - all
+          - grandfathering
+          - benchmarking
+          - auctioning
+      bots:
+        description: Market bots — 'default' keeps grandfathering bot-free, 'on'/'off' forces both ways
+        type: choice
+        default: default
+        required: false
+        options:
+          - default
+          - 'on'
+          - 'off'
       n_players:
         description: Simulated players
         default: '100'
@@ -80,6 +99,8 @@ jobs:
           YEARS_PER_MODE: ${{ inputs.years_per_mode }}
           ROUND_WINDOW: ${{ inputs.round_window }}
           JOIN_GRACE: ${{ inputs.join_grace }}
+          MODES: ${{ inputs.modes }}
+          BOTS: ${{ inputs.bots == 'default' && '' || inputs.bots }}
           PENALTY_RATE: ${{ inputs.penalty_rate }}
           AUCTION_CAP_RATIO: ${{ inputs.auction_cap_ratio }}
           CAP_REDUCTION_FACTOR: ${{ inputs.cap_reduction_factor }}
