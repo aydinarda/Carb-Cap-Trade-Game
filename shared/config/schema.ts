@@ -132,6 +132,15 @@ export interface MarketMakerConfig {
   auctionAggr: number
   /** Resting quote size each side. */
   quoteSize: number
+  /**
+   * How far either quote may sit from the recent price, as a fraction. The maker buys within
+   * `[ref × (1 − bandFrac), ref]` and sells within `[ref, ref × (1 + bandFrac)]`, so it can
+   * never drag the market away from where it is actually trading — the failure the
+   * inventory-skewed centre allowed, where a long maker's centre fell far below the market.
+   */
+  bandFrac: number
+  /** How many recent trades the reference price averages over. */
+  recentTrades: number
 }
 
 export interface BotsConfig {
@@ -206,5 +215,17 @@ export interface BotsConfig {
      * chase N × 18% of the whole pool. Divide the target by the number of makers.
      */
     marketMakerShareByCount: boolean
+    /**
+     * Every agent clamps its own quote to `penaltyRate`, which puts an artificial ceiling on
+     * the market that the engine itself does not impose — and that the economics does not
+     * justify, because the fine does not discharge the obligation (see `settleYear`): an
+     * uncovered tonne is fined AND carried as make-good debt. The true cost of defaulting is
+     * the fine PLUS settling the same tonne later, so willingness to pay sits above the fine.
+     *
+     * With this on, the agents' quote ceiling becomes `penaltyRate + referencePrice` — a
+     * one-period approximation of that carry. It is what lets a genuinely uncoverable
+     * shortage price above the fine instead of pinning just under it.
+     */
+    ceilingIncludesCarry: boolean
   }
 }

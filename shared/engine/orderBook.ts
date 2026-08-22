@@ -12,11 +12,22 @@ import { round1 } from './rng'
  *  - the trade executes at the RESTING order's price
  *  - partial fills leave the remainder resting in the book
  *  - a player's order never matches their own resting orders (skipped, left intact)
+ *  - `blocked` can veto a pair beyond that — see the market-maker rule below
  */
 export function matchOrder(
   orders: Order[],
   incoming: Order,
   makeTradeId: () => string,
+  /**
+   * Optional veto on a counterparty pair, applied on top of self-match prevention.
+   *
+   * Used to stop market makers trading with each other. Several makers quoting a band
+   * around the same reference price inevitably cross, and those fills are not liquidity —
+   * they are inventory moving between market makers, at prices that then feed back into the
+   * reference every maker quotes from. Left alone it is a closed loop that generates volume
+   * and moves the price without any emitter ever being served.
+   */
+  blocked?: (a: string, b: string) => boolean,
 ): { trades: Trade[] } {
   const trades: Trade[] = []
   const oppositeSide: OrderSide = incoming.side === 'buy' ? 'sell' : 'buy'
@@ -32,7 +43,8 @@ export function matchOrder(
           o.side === oppositeSide &&
           o.playerId !== incoming.playerId &&
           o.remaining > 0 &&
-          crosses(o),
+          crosses(o) &&
+          !blocked?.(incoming.playerId, o.playerId),
       )
       .sort((a, b) =>
         incoming.side === 'buy'

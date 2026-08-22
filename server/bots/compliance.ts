@@ -9,12 +9,13 @@ import { GameError } from '../session'
 import {
   disperse,
   marketMid,
-  sellCapacity,
+  priceCeiling,
   referencePrice,
+  sellCapacity,
   syncQuote,
+  tryPlace,
   trySell,
   trySubmitBid,
-  tryPlace,
 } from './helpers'
 import type { BotCtx } from './types'
 
@@ -58,7 +59,7 @@ export function trade(ctx: BotCtx): boolean {
   const { session, bot } = ctx
   const record = session.currentYearRecord()
   if (!record) return false
-  const P = session.state.config.market.penaltyRate
+  const P = priceCeiling(session)
   const cfg = session.state.config.bots.compliance
   const coeff = session.state.config.abatement.sectors[bot.industry]
   const mv = ctx.market
@@ -109,7 +110,7 @@ export function auction(ctx: BotCtx): boolean {
   const { session, bot } = ctx
   const record = session.currentYearRecord()
   if (!record) return false
-  const P = session.state.config.market.penaltyRate
+  const P = priceCeiling(session)
   const coeff = session.state.config.abatement.sectors[bot.industry]
   const ref = referencePrice(session)
   // Abate to the market-implied point; the residual is what it still needs to buy.

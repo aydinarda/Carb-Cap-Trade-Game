@@ -78,6 +78,8 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       invFrac: 0.18,
       auctionAggr: 1.3,
       quoteSize: 15,
+      bandFrac: 0.05,
+      recentTrades: 5,
     },
     speculator: { size: 10, initialInventory: 20, momentumEps: 0.01 },
     noise: {
@@ -90,12 +92,16 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     },
     // minTradeSize is TONNES and does not scale with money; priceStep is money.
     compliance: { minTradeSize: 0.5, priceStep: 0.5 },
-    // All off: the shipped game keeps the behaviour it has until a sweep says otherwise.
     fixes: {
       noiseAbatement: false,
       complianceReservation: false,
-      marketMakerIncrementalBid: false,
-      marketMakerShareByCount: false,
+      // ON by default. Without these the makers re-buy their whole target inventory at every
+      // auction and each one sizes it off the entire pool, so four of them took 72% of the
+      // cap every year and sat on it — 154k credits by year 20, seven times one year's
+      // issuance, while emitters bid the price to the ceiling for want of a seller.
+      marketMakerIncrementalBid: true,
+      marketMakerShareByCount: true,
+      ceilingIncludesCarry: false,
     },
   },
 }

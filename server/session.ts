@@ -624,8 +624,21 @@ export class Session {
       status: 'open',
       seq: this.orderSeq,
     }
-    const { trades } = matchOrder(record.orders, order, () => nanoid(8))
+    const { trades } = matchOrder(record.orders, order, () => nanoid(8), this.blockedPair)
     record.trades.push(...trades)
+  }
+
+  /**
+   * Two market makers may not trade with each other.
+   *
+   * Makers quote a narrow band around the same reference price, so with more than one of
+   * them they cross constantly — and those prints are not liquidity, they are inventory
+   * shuffling between makers at prices that then become the reference every maker quotes
+   * from. The class sees volume and a moving price while none of it served an emitter.
+   */
+  private readonly blockedPair = (a: string, b: string): boolean => {
+    const isMaker = (id: string) => this.getPlayer(id)?.botType === 'marketMaker'
+    return isMaker(a) && isMaker(b)
   }
 
   cancelOrder(playerId: string, orderId: string) {

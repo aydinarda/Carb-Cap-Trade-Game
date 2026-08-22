@@ -19,7 +19,27 @@ export function referencePrice(session: Session): number {
   return session.openingReference()
 }
 
-/** Apply a bot's personality bias to a price and clamp it into (0.1, penaltyRate]. */
+/**
+ * The highest price an agent is willing to quote.
+ *
+ * Shipped behaviour is `penaltyRate` — the "never pay more than the fine" rule every
+ * archetype has always followed. That rule does not actually hold in this game: paying the
+ * fine does NOT discharge the obligation (see `settleYear`), the uncovered tonne is carried
+ * forward as make-good debt and settled later, so defaulting costs the fine PLUS that later
+ * settlement. The engine imposes no cap precisely because of this; the cap lives only in
+ * agent code, which is why a genuinely uncoverable shortage pins just under the fine instead
+ * of pricing through it.
+ *
+ * `bots.fixes.ceilingIncludesCarry` prices the carry: `penaltyRate + referencePrice`, a
+ * one-period approximation of what settling the same tonne later costs.
+ */
+export function priceCeiling(session: Session): number {
+  const P = session.state.config.market.penaltyRate
+  if (!session.state.config.bots.fixes.ceilingIncludesCarry) return P
+  return round1(P + referencePrice(session))
+}
+
+/** Apply a bot's personality bias to a price and clamp it into (0.1, ceiling]. */
 export function disperse(price: number, bias: number, penaltyRate: number, minPrice = 0.1): number {
   return round1(clamp(price * (1 + bias), minPrice, penaltyRate))
 }
@@ -36,6 +56,21 @@ export function marketMid(mv: MarketView, ref: number): number {
 /** Perceived fair value for a market view (VWAP-anchored), falling back to `ref`. */
 export function anchorValue(mv: MarketView, ref: number): number {
   return mv.vwap ?? mv.lastPrice ?? ref
+}
+
+/**
+ * The price the market maker quotes around: the mean of the last `n` executed trades.
+ *
+ * A short moving average of actual prints, not `vwap` (which weights the whole year) and not
+ * `lastPrice` (which is one possibly-outlier trade). Before anything has traded this year it
+ * falls back to the previous year's discovered price, so the first tick of a trade window
+ * still has a sensible centre.
+ */
+export function recentPrice(session: Session, record: YearRecord, n: number): number {
+  const { trades } = record
+  if (trades.length === 0) return referencePrice(session)
+  const tail = trades.slice(-Math.max(1, n))
+  return round1(tail.reduce((sum, t) => sum + t.price, 0) / tail.length)
 }
 
 /** Credits a bot can still offer without shorting (held minus its open asks). */

@@ -1,4 +1,11 @@
-import { disperse, referencePrice, tryPlace, trySell, trySubmitBid } from './helpers'
+import {
+  disperse,
+  priceCeiling,
+  referencePrice,
+  tryPlace,
+  trySell,
+  trySubmitBid,
+} from './helpers'
 import type { BotCtx } from './types'
 
 /**
@@ -10,7 +17,7 @@ export function trade(ctx: BotCtx): boolean {
   const { session, bot, rt } = ctx
   const record = session.currentYearRecord()
   if (!record) return false
-  const P = session.state.config.market.penaltyRate
+  const P = priceCeiling(session)
   const cfg = session.state.config.bots.speculator
   const mv = ctx.market
   const last = mv.lastPrice ?? mv.vwap
@@ -32,7 +39,7 @@ export function trade(ctx: BotCtx): boolean {
 
 export function auction(ctx: BotCtx): boolean {
   const { session, bot } = ctx
-  const P = session.state.config.market.penaltyRate
+  const P = priceCeiling(session)
   const cfg = session.state.config.bots.speculator
   // Anchor to the discovered price (not a static 0.5·P) so the clearing tracks the
   // market year to year; disperse by personality so speculators don't tie.

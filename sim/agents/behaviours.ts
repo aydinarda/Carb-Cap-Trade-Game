@@ -7,6 +7,7 @@ import {
   type Rng,
 } from '../../shared/engine'
 import { GameError, type Session } from '../../server/session'
+import { priceCeiling } from '../../server/bots/helpers'
 import type { Player } from '../../shared/types'
 
 /**
@@ -111,7 +112,7 @@ export function actTrade(
   if (!panicking && rng.next() > t.participation) return false
 
   const cfg = session.state.config
-  const P = cfg.market.penaltyRate
+  const P = priceCeiling(session)
   const spec = cfg.abatement.sectors[player.industry]
   const mv = buildMarketView(record.orders, record.trades)
   const reference = mv.lastPrice ?? mv.vwap ?? session.openingReference()
@@ -164,7 +165,7 @@ export function actAuction(session: Session, agent: AgentState, rng: Rng): boole
   const t = BEHAVIOUR_TRAITS[agent.behaviour]
 
   const cfg = session.state.config
-  const P = cfg.market.penaltyRate
+  const P = priceCeiling(session)
   const spec = cfg.abatement.sectors[player.industry]
   const reference = session.openingReference()
   // Keenness scales the optimum, but nothing gets past the plant's physical ceiling.

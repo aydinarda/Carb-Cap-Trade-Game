@@ -82,6 +82,12 @@ function clamp01(x: number): number {
  * `penaltyRate` caps what covering a shortfall can cost: nobody playing perfectly
  * pays more than the fine to buy an allowance, so the residual is settled at
  * min(price, penaltyRate). Surplus is always sold at the market price.
+ *
+ * OPEN QUESTION, under review — do not "fix" this in passing. That cap assumes paying the
+ * fine ends the matter, but `settleYear` carries the uncovered tonne forward as a make-good
+ * debt, so defaulting really costs the fine PLUS settling the tonne later. The consequence
+ * is quantified in `sim/sweeps/price-calibration.ipynb` (§6.5); the shipped behaviour is
+ * deliberately unchanged until that has been read.
  */
 export function optimalYearCost(
   expected: number,

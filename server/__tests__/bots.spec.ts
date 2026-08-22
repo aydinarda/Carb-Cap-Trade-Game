@@ -164,10 +164,11 @@ describe('grandfathering bots', () => {
 })
 
 /**
- * Corrections to bot behaviour, each off by default. These assert the GATED behaviour with
- * the flag explicitly on, so the fixes stay covered while the shipped game keeps the
- * behaviour it has. Every one of them was found by a price-calibration sweep — see
- * sim/sweeps/price-calibration.ts.
+ * Corrections to bot behaviour, each behind a `bots.fixes` flag. The two market-maker ones
+ * now ship ON (they are what stopped the makers hoarding the entire auction pool); the rest
+ * are still off. Every arm below sets the flag it is testing EXPLICITLY on both sides, so
+ * these keep meaning what they say if a default moves again. All were found by a
+ * price-calibration sweep — see sim/sweeps/price-calibration.ts.
  */
 describe('bots.fixes', () => {
   it('noiseAbatement: the noise bot records the cut it already priced into its order', () => {
@@ -219,11 +220,10 @@ describe('bots.fixes', () => {
 
   it('marketMakerIncrementalBid: inventory stops compounding year over year', () => {
     const play = (fix: boolean) => {
-      const s = new Session(
-        'auctioning',
-        5,
-        fix ? { bots: { fixes: { marketMakerIncrementalBid: true } } } : {},
-      )
+      // Both arms are explicit: these two fixes ship ON, so `{}` would no longer be "off".
+      const s = new Session('auctioning', 5, {
+        bots: { fixes: { marketMakerIncrementalBid: fix, marketMakerShareByCount: false } },
+      })
       const mm = s.addBot('marketMaker')
       s.addPlayer('A', 'Power & Utilities')
       s.addPlayer('B', 'Heavy Materials')
@@ -250,11 +250,9 @@ describe('bots.fixes', () => {
 
   it('marketMakerShareByCount: N makers split the target instead of each taking all of it', () => {
     const grantFor = (share: boolean) => {
-      const s = new Session(
-        'auctioning',
-        5,
-        share ? { bots: { fixes: { marketMakerShareByCount: true } } } : {},
-      )
+      const s = new Session('auctioning', 5, {
+        bots: { fixes: { marketMakerShareByCount: share, marketMakerIncrementalBid: false } },
+      })
       const mms = [s.addBot('marketMaker'), s.addBot('marketMaker'), s.addBot('marketMaker')]
       s.addPlayer('A', 'Power & Utilities')
       s.startYear()
@@ -263,6 +261,78 @@ describe('bots.fixes', () => {
       return rec.auctionBid[mms[0].id]?.qty ?? 0
     }
     expect(grantFor(true)).toBeCloseTo(grantFor(false) / 3, 1)
+  })
+})
+
+describe('market makers do not trade with each other', () => {
+  it('leaves a crossing maker-to-maker pair unfilled, and fills the same order for anyone else', () => {
+    const s = new Session('benchmarking', 1)
+    const a = s.addBot('marketMaker')
+    const b = s.addBot('marketMaker')
+    s.addPlayer('Human', 'Power & Utilities')
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+
+    // Maker A rests an ask that maker B's bid would cross outright.
+    s.placeOrder(a.id, 'sell', 5, 40)
+    s.placeOrder(b.id, 'buy', 5, 60)
+    const rec = s.currentYearRecord()!
+    expect(rec.trades).toHaveLength(0)
+    // Both orders survive, open, untouched — the pair is vetoed, not consumed.
+    expect(rec.orders.filter((o) => o.status === 'open')).toHaveLength(2)
+
+    // The very same ask is available to an emitter.
+    s.placeOrder('P3', 'buy', 5, 60)
+    expect(rec.trades).toHaveLength(1)
+    expect(rec.trades[0].sellerId).toBe(a.id)
+    expect(rec.trades[0].price).toBe(40) // resting price, as always
+  })
+
+  it('does not block a maker from trading with a non-maker bot', () => {
+    const s = new Session('benchmarking', 1)
+    const mm = s.addBot('marketMaker')
+    const compliance = s.addBot('compliance', 'Power & Utilities')
+    s.addPlayer('Human', 'Transport')
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+
+    s.placeOrder(mm.id, 'sell', 5, 40)
+    s.placeOrder(compliance.id, 'buy', 5, 60)
+    expect(s.currentYearRecord()!.trades).toHaveLength(1)
+  })
+})
+
+describe('market maker quotes stay inside the band around the recent price', () => {
+  it('buys at or below the recent price and sells at or above it', () => {
+    const s = new Session('benchmarking', 1)
+    const mm = s.addBot('marketMaker')
+    s.addPlayer('A', 'Power & Utilities')
+    s.addPlayer('B', 'Heavy Materials')
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+
+    // Print a few trades so the maker has a recent price to quote around.
+    for (const px of [50, 52, 48, 51, 49]) {
+      s.placeOrder('P2', 'sell', 2, px)
+      s.placeOrder('P3', 'buy', 2, px)
+    }
+    const rec = s.currentYearRecord()!
+    const ref = rec.trades.slice(-5).reduce((t, x) => t + x.price, 0) / 5
+    const band = s.state.config.bots.marketMaker.bandFrac
+
+    marketMaker.trade(ctxFor(s, mm.id))
+    const own = rec.orders.filter((o) => o.playerId === mm.id && o.status === 'open')
+    const bid = own.find((o) => o.side === 'buy')!
+    const ask = own.find((o) => o.side === 'sell')
+    expect(bid.price).toBeGreaterThanOrEqual(ref * (1 - band) - 0.05)
+    expect(bid.price).toBeLessThanOrEqual(ref + 0.05)
+    if (ask) {
+      expect(ask.price).toBeGreaterThanOrEqual(ref - 0.05)
+      expect(ask.price).toBeLessThanOrEqual(ref * (1 + band) + 0.05)
+    }
   })
 })
 

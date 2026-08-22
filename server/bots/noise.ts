@@ -7,6 +7,7 @@ import { GameError } from '../session'
 import {
   anchorValue,
   clamp,
+  priceCeiling,
   referencePrice,
   sellCapacity,
   syncQuote,
@@ -26,7 +27,7 @@ export function trade(ctx: BotCtx): boolean {
   if (!record) return false
   const cfg = session.state.config.bots.noise
   if (rng.next() < cfg.skipRate) return false
-  const P = session.state.config.market.penaltyRate
+  const P = priceCeiling(session)
   const minPrice = session.state.config.bots.minPrice
   const coeff = session.state.config.abatement.sectors[bot.industry]
   const mv = ctx.market
@@ -66,7 +67,7 @@ export function trade(ctx: BotCtx): boolean {
 
 export function auction(ctx: BotCtx): boolean {
   const { session, bot, rng } = ctx
-  const P = session.state.config.market.penaltyRate
+  const P = priceCeiling(session)
   const cfg = session.state.config.bots.noise
   const minPrice = session.state.config.bots.minPrice
   // Anchored to the discovered price (an allowance's resale value), with noise.
