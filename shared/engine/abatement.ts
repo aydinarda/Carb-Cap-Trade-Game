@@ -49,10 +49,10 @@ export function abatementCost(
 /**
  * Cost-minimising abatement fraction: where marginal cost meets the price.
  *
- * `maxFraction` is the physical ceiling on how much of a year's emissions a company can
- * cut (`config.abatement.maxFraction`). Above it the curve is irrelevant — no price buys a
- * cut that cannot be made — so demand becomes perfectly inelastic there. Callers that omit
- * it get the unbounded optimum, which is only correct for questions about the curve itself.
+ * `maxFraction` is a ceiling on the answer — usually `config.abatement.lifetimeCap`, or the
+ * headroom left under it. Above it the curve is irrelevant — no price buys a cut that cannot
+ * be made — so demand becomes perfectly inelastic there. Callers that omit it get the
+ * unbounded optimum, which is only correct for questions about the curve itself.
  */
 export function optimalAbatement(
   input: AbatementInput,
@@ -67,10 +67,137 @@ function clamp01(x: number): number {
 }
 
 /**
- * The minimum achievable expected cost for a company playing perfectly: abate to
- * r*, then settle the residual against the credits it holds — buy the shortfall or
- * sell the surplus. Used as the per-company benchmark so the leaderboard measures
- * skill (distance from optimum), not luck or which sector the player drew.
+ * What it costs to raise installed capacity from `from` to `to`, as a fraction of the
+ * company's **un-abated** emissions.
+ *
+ * Two parts, and the split is the whole point of the model:
+ *  - a **fixed retrofit fee**, charged in full on every step, however small;
+ *  - the **variable** cost of the new slice only — the MAC integral from `from` to `to`.
+ *
+ * Because the integral is additive (∫₀^0.1 + ∫₀.₁^0.5 = ∫₀^0.5), the variable halves sum to
+ * the same total whatever path a company takes. The *only* difference between installing 50%
+ * in one move and installing 10% then 40% is one extra fee. That identity is the user's
+ * specification and `abatement.spec.ts` pins it to the cent.
+ *
+ * `unabated` is emissions measured against the no-abatement counterfactual, NOT this year's
+ * post-cut expectation — see `unabatedFrom`. Using the latter would make each successive
+ * slice cheaper than the curve says it is.
+ *
+ * Returns 0 for a non-increase: there is no such thing as un-installing, and no refund.
+ */
+export function installCost(
+  unabated: number,
+  from: number,
+  to: number,
+  input: AbatementInput,
+  fixedCost: number,
+): number {
+  if (!(to > from)) return 0
+  const spec = toSpec(input)
+  const variable = unabated * (specIntegral(to, spec) - specIntegral(from, spec))
+  return round1(Math.max(0, fixedCost) + variable)
+}
+
+/**
+ * The one-year cut to hand `realizeYear` so that a *persistent* capacity level does not
+ * compound into oblivion.
+ *
+ * `realizeYear` draws around `expected × (1 − r)`, and `expected` is last year's realized.
+ * Feeding it the standing level every year therefore applies the cut again and again: hold
+ * 50% and emissions run 0.5ⁿ — 3% of baseline by year five, with the market dead well before
+ * that. Feeding it the *increment* instead makes the composition telescope, so realized
+ * emissions equal the un-abated random walk times (1 − now). Installed capacity then holds
+ * its level, which is what a retrofit actually does.
+ *
+ * `prev >= 1` means everything was already cut and there is nothing left to take.
+ */
+export function incrementalFraction(now: number, prev: number): number {
+  if (prev >= 1) return 0
+  return clamp01(1 - (1 - clamp01(now)) / (1 - clamp01(prev)))
+}
+
+/**
+ * Reconstructs the un-abated level from an expectation that already has `embedded` baked
+ * into it. The inverse of the `× (1 − r)` in `realizeYear`, and the denominator every
+ * install decision is sized against.
+ *
+ * `embedded >= 1` is degenerate (a company cut to literally zero, reachable only with
+ * `lifetimeCap: 1`); returning 0 keeps a divide-by-zero out of every score downstream.
+ */
+export function unabatedFrom(expected: number, embedded: number): number {
+  const e = clamp01(embedded)
+  return e >= 1 ? 0 : expected / (1 - e)
+}
+
+export interface InstallPlan {
+  /** The level to install to. Equals `committed` when the plan is to do nothing. */
+  target: number
+  /** What that step would cost, fee included. */
+  cost: number
+  /** Undiscounted savings over the horizon, for diagnostics. */
+  gain: number
+  install: boolean
+}
+
+/**
+ * Whether an **agent** should install more capacity, and how much.
+ *
+ * Lives here rather than in each bot so that the compliance bot, the noise bot, the
+ * simulated students and the load harness cannot drift apart on the one decision in the
+ * game that is genuinely intertemporal.
+ *
+ * **Size myopically, gate on payback.** The target is the ordinary `r*(price)` — where the
+ * marginal tonne costs what a tonne costs — and the fee is then tested against `horizon`
+ * years of savings at today's price. The obvious alternative (size at `r*(horizon × price)`,
+ * valuing the capacity over its life) collapses the game: at a 3-year horizon and €60 it
+ * clamps every sector to the lifetime cap, so everyone maxes out in year one and both the
+ * fee and the stepping question stop mattering. Sizing myopically keeps sectors
+ * heterogeneous and produces genuine top-ups as the price climbs — a second step, a second
+ * fee, which is the lesson the fee exists to teach.
+ *
+ * `minStep` blocks nibbling: without it an agent pays a full fee for a 1% slice as soon as
+ * the price ticks up. The horizon is undiscounted on purpose — this is a classroom agent,
+ * and a discount rate is one more unexplained number on the host panel.
+ */
+export function planInstall(args: {
+  spec: AbatementInput
+  /** Price the agent believes in — already biased/adjusted by the caller. */
+  price: number
+  /** Un-abated emissions, i.e. the base the fractions are fractions of. */
+  unabated: number
+  /** Capacity already paid for. */
+  committed: number
+  lifetimeCap: number
+  fixedCost: number
+  horizon: number
+  minStep?: number
+}): InstallPlan {
+  const { spec, price, unabated, committed, lifetimeCap, fixedCost, horizon } = args
+  const minStep = args.minStep ?? 0.05
+  const ceiling = Math.max(committed, clamp01(lifetimeCap))
+  const target = Math.min(ceiling, Math.max(committed, optimalAbatement(spec, price)))
+  const step = target - committed
+  const cost = installCost(unabated, committed, target, spec, fixedCost)
+  const gain = horizon * price * unabated * step
+  return { target, cost, gain, install: step >= minStep && gain > cost }
+}
+
+/**
+ * The minimum achievable cost for a company playing this year perfectly: take this year's
+ * emissions as given, and settle them against the credits it holds — buy the shortfall or
+ * sell the surplus. Used as the per-company benchmark so the leaderboard measures skill
+ * (distance from optimum), not luck or which sector the player drew.
+ *
+ * **Abatement is not a decision this benchmark makes.** Capacity is installed a year ahead,
+ * so by the time the year is scored, `planned` is fixed and the money is spent: both are
+ * sunk. `abatementSpend` is therefore passed straight through to both sides of
+ * `score − optimalScore`, where it cancels.
+ *
+ * The stated consequence, which is a real cost of the lag and not an oversight: **this
+ * leaderboard now measures trading skill only.** A student who never installs and one who
+ * installs perfectly are indistinguishable on this axis. Scoring the investment decision
+ * would mean scoring it against a price path nobody knew at the time — a benchmark the
+ * class could not have hit, which is worse.
  *
  * `credits` is everything the company starts the year with, INCLUDING the carry: a
  * banked surplus is real credits it can sell, and a make-good debt is real credits
@@ -90,22 +217,16 @@ function clamp01(x: number): number {
  * deliberately unchanged until that has been read.
  */
 export function optimalYearCost(
-  expected: number,
+  planned: number,
   credits: number,
-  input: AbatementInput,
+  abatementSpend: number,
   price: number,
   penaltyRate?: number,
-  maxFraction = 1,
 ): number {
-  const spec = toSpec(input)
-  // Perfect play cannot cut more than the plant physically can, so the benchmark the
-  // leaderboard scores against must respect the same ceiling the player is held to.
-  const r = optimalAbatement(spec, price, maxFraction)
-  const abated = expected * (1 - r)
-  const cover = abated - credits // > 0 → buy the shortfall; < 0 → sell the surplus
+  const cover = planned - credits // > 0 → buy the shortfall; < 0 → sell the surplus
   const coverRate =
     cover > 0 && penaltyRate !== undefined ? Math.min(price, penaltyRate) : price
-  return round1(abatementCost(expected, r, spec) + coverRate * cover)
+  return round1(abatementSpend + coverRate * cover)
 }
 
 export { parseSpec }

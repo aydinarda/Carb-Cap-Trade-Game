@@ -46,6 +46,8 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
   )
   const [auctionCapRatio, setAuctionCapRatio] = useState(String(config.auctionCapRatio))
   const [capReduction, setCapReduction] = useState(String(config.capReductionFactor))
+  const [abateCap, setAbateCap] = useState(String(config.abatementLifetimeCap))
+  const [abateFee, setAbateFee] = useState(String(config.abatementFixedCost))
   const [busy, setBusy] = useState(false)
 
   // Compared by value, not identity: `config.benchmark` arrives over the wire, so JSON.parse
@@ -57,9 +59,18 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
     setPenalty(String(config.penaltyRate))
     setAuctionCapRatio(String(config.auctionCapRatio))
     setCapReduction(String(config.capReductionFactor))
+    setAbateCap(String(config.abatementLifetimeCap))
+    setAbateFee(String(config.abatementFixedCost))
     setBenchmark(Object.fromEntries(Object.entries(config.benchmark).map(([k, v]) => [k, String(v)])))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.penaltyRate, config.auctionCapRatio, config.capReductionFactor, benchmarkKey])
+  }, [
+    config.penaltyRate,
+    config.auctionCapRatio,
+    config.capReductionFactor,
+    config.abatementLifetimeCap,
+    config.abatementFixedCost,
+    benchmarkKey,
+  ])
 
   const save = async () => {
     setBusy(true)
@@ -67,6 +78,8 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
       penaltyRate: Number(penalty),
       auctionCapRatio: Number(auctionCapRatio),
       capReductionFactor: Number(capReduction),
+      abatementLifetimeCap: Number(abateCap),
+      abatementFixedCost: Number(abateFee),
       benchmark: Object.fromEntries(
         Object.entries(benchmark).map(([k, v]) => [k, Number(v)]),
       ),
@@ -102,6 +115,9 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
       {field('Penalty rate', penalty, setPenalty, 'cost per tCO₂ uncovered — market price ceiling')}
       {field('Auction supply ratio', auctionCapRatio, setAuctionCapRatio, '× baseline (auctioning; ≤1 = scarcer)')}
       {field('Cap reduction / year', capReduction, setCapReduction, 'auction supply AND benchmark × this each year (EU-ETS LRF; 0.97 = −3%/yr)')}
+      {field('Abatement budget', abateCap, setAbateCap, 'most a company may EVER cut, as a fraction — a lifetime budget, not per year')}
+      {/* Lowering the budget binds future installs only; nothing already built is undone. */}
+      {field('Retrofit fee', abateFee, setAbateFee, '€ per t of baseline, charged AGAIN on every install step')}
       {/* Applies immediately — the pot is sized at year open either way, so a class can play
           the same year with and without the ceiling and compare. */}
       <div className="flex items-center justify-between gap-3">

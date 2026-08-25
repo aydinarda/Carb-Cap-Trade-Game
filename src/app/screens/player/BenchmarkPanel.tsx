@@ -10,7 +10,7 @@ const r1 = (n: number) => Math.round(n * 10) / 10
  * at the two ways to close it: cut emissions, or buy on the secondary market.
  */
 export function BenchmarkPanel({ snap }: { snap: PlayerSnapshot }) {
-  const expected = snap.you.expectedEmission ?? 0
+  const expected = snap.you.plannedEmission
   const allocation = snap.you.freeAllocation ?? 0
   const benchmark = snap.sectorBenchmark ?? allocation
   const average = snap.sectorAverage

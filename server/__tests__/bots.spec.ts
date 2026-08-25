@@ -171,25 +171,59 @@ describe('grandfathering bots', () => {
  * price-calibration sweep — see sim/sweeps/price-calibration.ts.
  */
 describe('bots.fixes', () => {
-  it('noiseAbatement: the noise bot records the cut it already priced into its order', () => {
-    const off = new Session('benchmarking', 5)
-    const offBot = off.addBot('noise', 'Power & Utilities')
-    off.addPlayer('Human', 'Transport')
-    off.startYear()
-    off.closeCapStage()
-    off.openTrade()
-    for (let i = 0; i < 4; i++) noise.trade(ctxFor(off, offBot.id))
-    // The defect: it sizes its order as `expected × (1 − r*) − held` but never abates.
-    expect(off.currentYearRecord()!.abatement[offBot.id] ?? 0).toBe(0)
+  it('noiseAbatement: whether the noise bot ever invests in abatement capacity', () => {
+    // No longer a bug fix — sizing reads `plannedEmission`, which cannot disagree with the
+    // engine, so the old "prices a cut it never makes" defect is structurally impossible.
+    // What is left is the archetype question: is a careless trader also a firm that never
+    // retrofits? Both answers are coherent, so the flag stays and this pins both arms.
+    const run = (invests: boolean) => {
+      const s = new Session('benchmarking', 5, {
+        bots: { fixes: { noiseAbatement: invests } },
+      })
+      const bot = s.addBot('noise', 'Power & Utilities')
+      s.addPlayer('Human', 'Transport')
+      s.startYear()
+      s.closeCapStage()
+      s.openTrade()
+      for (let i = 0; i < 4; i++) noise.trade(ctxFor(s, bot.id))
+      return s.getPlayer(bot.id)!
+    }
 
-    const on = new Session('benchmarking', 5, { bots: { fixes: { noiseAbatement: true } } })
-    const onBot = on.addBot('noise', 'Power & Utilities')
-    on.addPlayer('Human', 'Transport')
-    on.startYear()
-    on.closeCapStage()
-    on.openTrade()
-    for (let i = 0; i < 4; i++) noise.trade(ctxFor(on, onBot.id))
-    expect(on.currentYearRecord()!.abatement[onBot.id]).toBeGreaterThan(0)
+    expect(run(false).abatementCommitted).toBe(0)
+    expect(run(true).abatementCommitted).toBeGreaterThan(0)
+    // Either way it stays in force NEXT year, not this one — the install is capital.
+    expect(run(true).abatementInForce).toBe(0)
+  })
+
+  it('a bot ticking all window installs once, not once per tick', () => {
+    // The gate that makes the model survivable in a bot-driven market: compliance calls
+    // setAbatement on EVERY tick, and every install step charges the retrofit fee again.
+    // Thirty ticks must therefore cost exactly what one tick costs.
+    const run = (ticks: number) => {
+      const s = new Session('benchmarking', 5)
+      const bot = s.addBot('compliance', 'Power & Utilities')
+      s.addPlayer('Human', 'Transport')
+      s.startYear()
+      s.closeCapStage()
+      s.openTrade()
+      const ctx = ctxFor(s, bot.id)
+      for (let i = 0; i < ticks; i++) {
+        compliance.trade({ ...ctx, market: buildMarketView(
+          s.currentYearRecord()!.orders,
+          s.currentYearRecord()!.trades,
+        ) })
+      }
+      return {
+        spend: s.currentYearRecord()!.abatementSpend[bot.id] ?? 0,
+        committed: s.getPlayer(bot.id)!.abatementCommitted,
+      }
+    }
+
+    const once = run(1)
+    const many = run(30)
+    expect(once.committed).toBeGreaterThan(0) // the bot does invest, or this proves nothing
+    expect(many.spend).toBe(once.spend)
+    expect(many.committed).toBe(once.committed)
   })
 
   it('complianceReservation: holding nothing means a full cut, not the penalty', () => {

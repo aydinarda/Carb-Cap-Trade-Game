@@ -14,14 +14,19 @@ export { type CapMechanism } from './capMechanism'
 export { realizeYear, expectedEmission } from './emissions'
 export {
   abatementCost,
+  incrementalFraction,
+  installCost,
   marginalCost,
   optimalAbatement,
   optimalYearCost,
+  planInstall,
   toSpec,
   parseSpec,
+  unabatedFrom,
   type AbatementCoeff,
   type AbatementInput,
   type AbatementSpec,
+  type InstallPlan,
 } from './abatement'
 export {
   ABATEMENT_MODELS,

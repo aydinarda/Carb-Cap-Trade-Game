@@ -79,11 +79,7 @@ export function YearSummaryScreen({ snap }: { snap: PlayerSnapshot }) {
           value={snap.you.realized ?? 0}
           unit="tCO₂"
           tone="accent"
-          hint={
-            snap.you.expectedEmission !== null
-              ? `expected ${snap.you.expectedEmission}`
-              : undefined
-          }
+          hint={`expected ${snap.you.plannedEmission}`}
         />
       </div>
 

@@ -12,7 +12,7 @@ const r1 = (n: number) => Math.round(n * 10) / 10
 /** Auctioning cap stage: submit a sealed bid (quantity + max price). */
 export function AuctionBidPanel({ snap }: { snap: PlayerSnapshot }) {
   const { submitBid } = useGame()
-  const expected = snap.you.expectedEmission ?? 0
+  const expected = snap.you.plannedEmission
   const committed = snap.you.auctionBid
   const cleared = snap.auctionPrice !== null
 
@@ -22,7 +22,7 @@ export function AuctionBidPanel({ snap }: { snap: PlayerSnapshot }) {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    setQty(snap.you.auctionBid?.qty ?? Math.round(snap.you.expectedEmission ?? 0))
+    setQty(snap.you.auctionBid?.qty ?? Math.round(snap.you.plannedEmission))
     setPrice(snap.you.auctionBid?.price ?? r1(snap.prevMarketPrice ?? 10))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap.currentYear])

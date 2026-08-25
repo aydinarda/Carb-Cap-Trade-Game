@@ -17,14 +17,34 @@ function grandfathering(seed = 1, override?: DeepPartial<GameConfig>) {
 }
 
 /**
- * A session where a company may cut everything. The shipped cap is
- * `abatement.maxFraction = 0.2` (a plant cannot switch itself off), but the banking tests
+ * A session where a company may cut everything, and the retrofit is free. The shipped cap
+ * is `abatement.lifetimeCap` (a plant cannot switch itself off), but the banking tests
  * below are about what happens at the EXTREMES of the carry — a full surplus and a full
  * shortfall — and driving one player's realized emissions to ~0 is the cleanest way to get
- * there. Unlimited here on purpose; the cap itself is tested separately.
+ * there. The fee is zeroed so the carry arithmetic is not muddied by an investment charge.
  */
 function unlimitedAbatement(seed = 1) {
-  return grandfathering(seed, { abatement: { maxFraction: 1 } })
+  return grandfathering(seed, {
+    abatement: { lifetimeCap: 1, fixedCostPerTonneBaseline: 0 },
+  })
+}
+
+/**
+ * Install capacity in the first year and play through to the second, where it is in force.
+ *
+ * Every test that wants a company's *realized* emissions cut has to be two years long now:
+ * capacity installed during a year does nothing to that year. A one-year driver silently
+ * tests nothing, which is exactly the failure mode this helper exists to prevent.
+ */
+function installAndAdvance(s: Session, levels: Record<string, number>) {
+  s.startYear()
+  s.closeCapStage()
+  s.openTrade()
+  for (const [id, level] of Object.entries(levels)) s.setAbatement(id, level)
+  s.closeTrade()
+  s.advanceYear()
+  s.closeCapStage()
+  s.openTrade()
 }
 
 function auctioning(seed = 1) {
@@ -37,11 +57,8 @@ function auctioning(seed = 1) {
 describe('EU-ETS banking & make-good debt carry', () => {
   it('carries the year-end net position: surplus banked, shortfall as debt', () => {
     const s = unlimitedAbatement()
-    s.startYear()
-    s.closeCapStage()
-    s.openTrade()
-    s.setAbatement('P1', 1) // full abatement → realized ~0 → banks all its free credits
-    s.setAbatement('P2', 0) // no abatement → realized > free (80%) → short → debt
+    // Two years: P1's full cut is bought in year 1 and only bites in year 2.
+    installAndAdvance(s, { P1: 1 }) // P2 never installs → short → debt
     s.closeTrade()
     const rec = s.currentYearRecord()!
 
@@ -63,18 +80,15 @@ describe('EU-ETS banking & make-good debt carry', () => {
 
   it('carries the banked balance into next year as carriedIn and into creditsHeld', () => {
     const s = unlimitedAbatement()
-    s.startYear()
-    s.closeCapStage()
-    s.openTrade()
-    s.setAbatement('P1', 1)
+    installAndAdvance(s, { P1: 1 })
     s.closeTrade()
     const banked = s.getPlayer('P1')!.bankedCredits
     expect(banked).toBeGreaterThan(0)
     s.advanceYear()
-    const rec2 = s.currentYearRecord()!
-    expect(rec2.carriedIn.P1).toBe(banked)
+    const rec3 = s.currentYearRecord()!
+    expect(rec3.carriedIn.P1).toBe(banked)
     // creditsHeld includes the carried-in balance (free + granted + carriedIn + traded).
-    expect(s.creditsHeld('P1')).toBe(round1((rec2.freeAllocation.P1 ?? 0) + banked))
+    expect(s.creditsHeld('P1')).toBe(round1((rec3.freeAllocation.P1 ?? 0) + banked))
   })
 })
 
@@ -84,7 +98,7 @@ describe('endGame — monetize leftover carry at the final price', () => {
     s.startYear()
     s.closeCapStage()
     s.openTrade()
-    s.setAbatement('P1', 1)
+    s.setAbatement('P1', s.abatementLifetimeCap)
     s.closeTrade()
     // No trades occurred and grandfathering has no auction price → final price = penaltyRate.
     const finalPrice = s.state.config.market.penaltyRate
@@ -143,24 +157,26 @@ describe('closeTrade cost-ledger wiring (auctioning)', () => {
   })
 })
 
-describe('maximum abatement (a plant cannot switch itself off)', () => {
-  it('clamps a request above the ceiling instead of honouring it', () => {
+describe('lifetime abatement budget', () => {
+  const CAP = DEFAULT_GAME_CONFIG.abatement.lifetimeCap
+
+  it('clamps a request above the budget instead of honouring it', () => {
     const s = grandfathering()
     s.startYear()
     s.closeCapStage()
     s.openTrade()
     s.setAbatement('P1', 1)
-    expect(s.currentYearRecord()!.abatement.P1).toBe(0.2)
-    expect(s.maxAbatement).toBe(0.2)
+    expect(s.getPlayer('P1')!.abatementCommitted).toBe(CAP)
+    expect(s.abatementLifetimeCap).toBe(CAP)
   })
 
-  it('leaves a request inside the ceiling untouched', () => {
+  it('leaves a request inside the budget untouched', () => {
     const s = grandfathering()
     s.startYear()
     s.closeCapStage()
     s.openTrade()
     s.setAbatement('P1', 0.15)
-    expect(s.currentYearRecord()!.abatement.P1).toBe(0.15)
+    expect(s.getPlayer('P1')!.abatementCommitted).toBe(0.15)
   })
 
   it('binds under every cap mechanism, not just one', () => {
@@ -171,37 +187,232 @@ describe('maximum abatement (a plant cannot switch itself off)', () => {
       s.closeCapStage()
       s.openTrade()
       s.setAbatement('P1', 0.9)
-      expect(s.currentYearRecord()!.abatement.P1, mode).toBe(0.2)
+      expect(s.getPlayer('P1')!.abatementCommitted, mode).toBe(CAP)
     }
   })
 
-  it('is configurable, and a company can never cut below zero emissions', () => {
-    const s = grandfathering(1, { abatement: { maxFraction: 0.45 } })
+  it('is a LIFETIME budget: repeated installs cannot exceed it in total', () => {
+    // The property the rename exists to protect. Under the old per-year ceiling, three
+    // years at 0.45 each would have been legal.
+    const s = grandfathering(1, { abatement: { lifetimeCap: 0.45 } })
     s.startYear()
     s.closeCapStage()
     s.openTrade()
-    s.setAbatement('P1', 1)
-    expect(s.currentYearRecord()!.abatement.P1).toBe(0.45)
+    s.setAbatement('P1', 0.3)
     s.closeTrade()
-    // Realized emissions therefore keep a floor: the cut can never reach 100%.
-    const rec = s.currentYearRecord()!
-    expect(rec.realized.P1).toBeGreaterThan(0)
+    s.advanceYear()
+    s.closeCapStage()
+    s.openTrade()
+    s.setAbatement('P1', 1) // asks for everything; gets only the remaining headroom
+    expect(s.getPlayer('P1')!.abatementCommitted).toBe(0.45)
+    s.closeTrade()
+    // A company can therefore never cut below a floor: emissions stay strictly positive.
+    expect(s.currentYearRecord()!.realized.P1).toBeGreaterThan(0)
   })
 
-  it('caps the optimum the leaderboard scores against, not just the player', () => {
-    // Perfect play must be held to the same ceiling, or every company looks worse than it is.
-    const capped = grandfathering(3)
-    const uncapped = grandfathering(3, { abatement: { maxFraction: 1 } })
-    for (const s of [capped, uncapped]) {
+  it('is configurable, and lowering it mid-game binds future installs only', () => {
+    const s = grandfathering(1, { abatement: { lifetimeCap: 0.45 } })
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    s.setAbatement('P1', 0.45)
+    s.closeTrade()
+    // The host tightens the budget below what P1 has already built and paid for.
+    s.updateSettings({ abatementLifetimeCap: 0.2 })
+    s.advanceYear()
+    // Nothing is un-installed and nothing is refunded — the kit is in the ground.
+    expect(s.getPlayer('P1')!.abatementCommitted).toBe(0.45)
+    expect(s.getPlayer('P1')!.abatementInForce).toBe(0.45)
+    // But no further install is possible: the request is below what is committed.
+    s.closeCapStage()
+    s.openTrade()
+    expect(() => s.setAbatement('P1', 0.3)).toThrow(GameError)
+  })
+})
+
+describe('abatement as permanent installed capacity', () => {
+  const FREE = { abatement: { fixedCostPerTonneBaseline: 0 } }
+
+  it('takes effect from the NEXT year, never the year it is bought', () => {
+    // The lag, proved by identity: a session that installs in year 11 must realize exactly
+    // what a same-seed session that installed nothing does. Same seed, same draws.
+    const invests = grandfathering(7)
+    const idle = grandfathering(7)
+    for (const s of [invests, idle]) {
       s.startYear()
+      s.closeCapStage()
+      s.openTrade()
+    }
+    invests.setAbatement('P1', 0.4)
+    for (const s of [invests, idle]) s.closeTrade()
+    expect(invests.currentYearRecord()!.realized.P1).toBe(
+      idle.currentYearRecord()!.realized.P1,
+    )
+    // …and diverges the moment the next year opens.
+    for (const s of [invests, idle]) {
+      s.advanceYear()
       s.closeCapStage()
       s.openTrade()
       s.closeTrade()
     }
-    // The uncapped optimum may cut more, so it can reach a cost the capped one cannot.
-    expect(capped.getPlayer('P1')!.optimalScore).not.toBe(
-      uncapped.getPlayer('P1')!.optimalScore,
-    )
+    const cut = invests.currentYearRecord()!.realized.P1
+    const uncut = idle.currentYearRecord()!.realized.P1
+    expect(cut).toBeLessThan(uncut)
+    // 3 dp, not more: realizeYear rounds each draw to 0.1 t, so the ratio of two rounded
+    // emissions carries a tick of slack that has nothing to do with the model.
+    expect(cut / uncut).toBeCloseTo(0.6, 3)
+  })
+
+  it('holds its level instead of compounding, however long it stands', () => {
+    // The failure this design exists to avoid: 20% re-applied each year is 0.8ⁿ, which is
+    // 33% of baseline by year 15 and a dead market long before that.
+    const s = grandfathering(5, { emissions: { volatility: 0 }, ...FREE })
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    const before = s.plannedEmission('P1')
+    s.setAbatement('P1', 0.2)
+    s.closeTrade()
+    for (let y = 0; y < 4; y++) {
+      s.advanceYear()
+      s.closeCapStage()
+      s.openTrade()
+      s.closeTrade()
+    }
+    // Four years later, still 80% — within the per-year 0.1 t rounding, and nowhere near
+    // the 0.8⁵ = 33% a compounding implementation would have produced.
+    const held = s.currentYearRecord()!.realized.P1
+    expect(Math.abs(held - before * 0.8)).toBeLessThan(0.5)
+    expect(held).toBeGreaterThan(before * 0.7)
+  })
+
+  it('is charged once, in the year it is bought, and never again', () => {
+    const s = grandfathering(2)
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    s.setAbatement('P1', 0.3)
+    const spend = s.currentYearRecord()!.abatementSpend.P1
+    expect(spend).toBeGreaterThan(0)
+    s.closeTrade()
+    expect(s.currentYearRecord()!.settlement!.P1.abatementCost).toBe(spend)
+    // Year 2: the capacity is working and costs nothing more.
+    s.advanceYear()
+    s.closeCapStage()
+    s.openTrade()
+    s.closeTrade()
+    expect(s.currentYearRecord()!.abatementSpend.P1).toBeUndefined()
+    expect(s.currentYearRecord()!.settlement!.P1.abatementCost).toBe(0)
+  })
+
+  it('is idempotent — a bot re-asserting its level every tick pays once', () => {
+    // The highest-risk regression in this change: compliance.trade calls setAbatement on
+    // EVERY tick, so without the equality short-circuit one bot pays a dozen fees a year.
+    const s = grandfathering(2)
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    s.setAbatement('P1', 0.3)
+    const once = s.currentYearRecord()!.abatementSpend.P1
+    for (let i = 0; i < 20; i++) s.setAbatement('P1', 0.3)
+    expect(s.currentYearRecord()!.abatementSpend.P1).toBe(once)
+  })
+
+  it('refuses to go down — a retrofit cannot be un-installed', () => {
+    const s = grandfathering(2)
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    s.setAbatement('P1', 0.3)
+    // Clamping instead of rejecting would look like a successful un-install, charge
+    // nothing, and leave the client showing a level the company had already paid for.
+    expect(() => s.setAbatement('P1', 0.1)).toThrow(/permanent/i)
+    expect(s.getPlayer('P1')!.abatementCommitted).toBe(0.3)
+  })
+
+  it('charges exactly one extra fee for stepping, within a year and across years', () => {
+    // The user's arithmetic, end to end through the engine: 10% then 40% costs one more
+    // retrofit fee than 50% in one move. Zero volatility so the two runs share a base.
+    const cfg: DeepPartial<GameConfig> = {
+      emissions: { volatility: 0 },
+      abatement: { lifetimeCap: 0.5 },
+    }
+    const spendOf = (s: Session) =>
+      Object.values(s.state.years).reduce((sum, y) => sum + (y.abatementSpend.P1 ?? 0), 0)
+
+    const oneMove = grandfathering(4, cfg)
+    oneMove.startYear()
+    oneMove.closeCapStage()
+    oneMove.openTrade()
+    oneMove.setAbatement('P1', 0.5)
+    const fee = oneMove.abatementFixedCost('P1')
+    expect(fee).toBeGreaterThan(0)
+
+    const steppedSameYear = grandfathering(4, cfg)
+    steppedSameYear.startYear()
+    steppedSameYear.closeCapStage()
+    steppedSameYear.openTrade()
+    steppedSameYear.setAbatement('P1', 0.1)
+    steppedSameYear.setAbatement('P1', 0.5)
+    expect(spendOf(steppedSameYear) - spendOf(oneMove)).toBeCloseTo(fee, 1)
+
+    // And across years — the same identity must hold when the step spans an openYear,
+    // which is where the un-abated base could silently shift.
+    const steppedAcrossYears = grandfathering(4, cfg)
+    steppedAcrossYears.startYear()
+    steppedAcrossYears.closeCapStage()
+    steppedAcrossYears.openTrade()
+    steppedAcrossYears.setAbatement('P1', 0.1)
+    steppedAcrossYears.closeTrade()
+    steppedAcrossYears.advanceYear()
+    steppedAcrossYears.closeCapStage()
+    steppedAcrossYears.openTrade()
+    steppedAcrossYears.setAbatement('P1', 0.5)
+    expect(spendOf(steppedAcrossYears) - spendOf(oneMove)).toBeCloseTo(fee, 1)
+  })
+
+  it('scales the retrofit fee with company size, not as a flat charge', () => {
+    // A flat fee is ~7× Transport's annual emission but ~2× Power's, which would make the
+    // whole mechanism a tax on being small.
+    const s = grandfathering(6)
+    const big = s.getPlayer('P1')!.emissions[DEFAULT_GAME_CONFIG.emissions.baselineYear]
+    const small = s.getPlayer('P2')!.emissions[DEFAULT_GAME_CONFIG.emissions.baselineYear]
+    expect(big).toBeGreaterThan(small)
+    expect(s.abatementFixedCost('P1') / s.abatementFixedCost('P2')).toBeCloseTo(big / small, 6)
+  })
+
+  it('does not move this year\'s planned emissions, only next year\'s', () => {
+    const s = grandfathering(8)
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    const planned = s.plannedEmission('P1')
+    s.setAbatement('P1', 0.4)
+    // The number every "how many credits do I need?" calculation reads is unchanged —
+    // this is what the trade screen must display, and why it cannot track the slider.
+    expect(s.plannedEmission('P1')).toBe(planned)
+    s.closeTrade()
+    s.advanceYear()
+    expect(s.plannedEmission('P1')).toBeLessThan(planned)
+  })
+
+  it('scores the leaderboard on trading alone — investing is neither rewarded nor punished', () => {
+    // The stated cost of the lag: this year's emissions and this year's spend are both
+    // sunk by the time the year is scored, so the benchmark carries the spend on both
+    // sides and it cancels. An investor's skill gap must be unaffected.
+    const invests = grandfathering(9)
+    const idle = grandfathering(9)
+    for (const s of [invests, idle]) {
+      s.startYear()
+      s.closeCapStage()
+      s.openTrade()
+    }
+    invests.setAbatement('P1', 0.4)
+    for (const s of [invests, idle]) s.closeTrade()
+    const gap = (s: Session) => round1(s.getPlayer('P1')!.score - s.getPlayer('P1')!.optimalScore)
+    expect(gap(invests)).toBe(gap(idle))
+    // The investment is still real money out the door — it is the GAP that is unchanged.
+    expect(invests.getPlayer('P1')!.score).toBeGreaterThan(idle.getPlayer('P1')!.score)
   })
 })
 

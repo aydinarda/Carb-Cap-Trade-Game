@@ -2,7 +2,6 @@ import { customAlphabet, nanoid } from 'nanoid'
 import { resolveConfig, type DeepPartial, type GameConfig } from '../shared/config'
 import { INDUSTRY_NAMES, RESERVE_ID, type Industry } from '../shared/constants'
 import {
-  abatementCost,
   buildMarketView,
   cancelOrder,
   CAP_MECHANISMS,
@@ -11,6 +10,8 @@ import {
   createRng,
   expectedEmission,
   generateHistoryForIndustry,
+  incrementalFraction,
+  installCost,
   isPureTrader,
   matchOrder,
   meanOfLast,
@@ -24,6 +25,7 @@ import {
   settleYear,
   tradedCash,
   tradedNet,
+  unabatedFrom,
   type Rng,
 } from '../shared/engine'
 import type {
@@ -215,6 +217,9 @@ export class Session {
       score: 0,
       optimalScore: 0,
       bankedCredits: 0,
+      abatementInForce: 0,
+      abatementCommitted: 0,
+      abatementEmbedded: 0,
       ...profile,
     }
     this.state.players.push(player)
@@ -241,6 +246,9 @@ export class Session {
       score: 0,
       optimalScore: 0,
       bankedCredits: 0,
+      abatementInForce: 0,
+      abatementCommitted: 0,
+      abatementEmbedded: 0,
       isBot: true,
       botType,
       ...profile,
@@ -270,8 +278,26 @@ export class Session {
     benchmark?: Partial<Record<Industry, number>>
     abatement?: Partial<Record<Industry, { a: number; b: number }>>
     reserveEnabled?: boolean
+    abatementLifetimeCap?: number
+    abatementFixedCost?: number
   }) {
     this.requirePhase('lobby', 'yearSummary')
+    if (settings.abatementLifetimeCap !== undefined) {
+      const cap = settings.abatementLifetimeCap
+      if (!Number.isFinite(cap) || cap < 0 || cap > 1) {
+        throw new GameError('BAD_SETTING', 'abatementLifetimeCap must be between 0 and 1.')
+      }
+      // Binds FUTURE installs only. Lowering it below what somebody has already built does
+      // not un-install their capacity or refund them — the money is spent and the kit is
+      // in the ground, which is the whole point of calling it permanent.
+      this.state.config.abatement.lifetimeCap = Math.round(cap * 100) / 100
+    }
+    if (settings.abatementFixedCost !== undefined) {
+      if (!Number.isFinite(settings.abatementFixedCost) || settings.abatementFixedCost < 0) {
+        throw new GameError('BAD_SETTING', 'abatementFixedCost must be a non-negative number.')
+      }
+      this.state.config.abatement.fixedCostPerTonneBaseline = settings.abatementFixedCost
+    }
     if (settings.penaltyRate !== undefined) {
       if (!Number.isFinite(settings.penaltyRate) || settings.penaltyRate < 0) {
         throw new GameError('BAD_SETTING', 'penaltyRate must be a non-negative number.')
@@ -379,6 +405,14 @@ export class Session {
       )
     }
     this.state.currentYear = year
+    // The one-year lag, in two lines. Capacity paid for during the year just gone comes
+    // online now; what was in force is now what the last realized emission already has
+    // baked into it. `openYear` is the ONLY place `abatementInForce` moves, so nothing a
+    // player does during a year can shorten the wait.
+    for (const player of this.state.players) {
+      player.abatementEmbedded = player.abatementInForce
+      player.abatementInForce = player.abatementCommitted
+    }
     const freeAllocation = mechanism.allocate(
       this.state.players,
       year,
@@ -407,7 +441,14 @@ export class Session {
       realized: {},
       orders: [],
       trades: [],
-      abatement: {},
+      // Not empty, and not reset: capacity is permanent, so the year opens with whatever
+      // has come online. `abatementInstalled`/`abatementSpend` record only what is newly
+      // bought during this year.
+      abatement: Object.fromEntries(
+        this.state.players.map((p) => [p.id, p.abatementInForce]),
+      ),
+      abatementInstalled: {},
+      abatementSpend: {},
       auctionBid: {},
       auctionPrice: null,
       primaryPrice: null,
@@ -419,8 +460,10 @@ export class Session {
         this.state.config.allocation.reserve,
         reserveBase(
           this.state.config.allocation.reserve,
+          // `plannedEmission`, not `expectedEmission`: capacity that came online this
+          // morning has already cut the need the reserve is sizing itself against.
           round1(
-            this.state.players.reduce((s, p) => s + expectedEmission(p, year), 0),
+            this.state.players.reduce((s, p) => s + this.plannedFor(p, year), 0),
           ),
           round1(Object.values(freeAllocation).reduce((a, b) => a + b, 0) + pool),
         ),
@@ -483,11 +526,20 @@ export class Session {
     const record = this.currentYearRecord()!
     // Realization happens now, at year end: each company's actual emission is
     // drawn from its own distribution around the expected mean it planned against.
+    // `realizeYear` draws around `expected × (1 − r)` where `expected` is last year's
+    // realized, so it must be handed the INCREMENT, never the standing level — otherwise a
+    // company holding 50% capacity would be cut 50% again every year and emit 3% of its
+    // baseline by year five. See `incrementalFraction`.
     record.realized = realizeYear(
       this.state.players,
       this.rng,
       record.year,
-      record.abatement,
+      Object.fromEntries(
+        this.state.players.map((p) => [
+          p.id,
+          incrementalFraction(p.abatementInForce, p.abatementEmbedded),
+        ]),
+      ),
       this.state.config.emissions.volatility,
     )
     for (const player of this.state.players) {
@@ -514,9 +566,11 @@ export class Session {
       const capCost = round1((record.regulatorGranted[player.id] ?? 0) * capPrice)
       purchaseCost[player.id] = round1(capCost + buyCash)
       sellIncome[player.id] = sellCash
-      const expected = expectedEmission(player, record.year)
-      const coeff = this.state.config.abatement.sectors[player.industry]
-      abateCost[player.id] = abatementCost(expected, record.abatement[player.id] ?? 0, coeff)
+      // What the company was charged for capacity bought DURING this year — computed at
+      // install (a per-step fee cannot be reconstructed from the levels afterwards) and
+      // banked in the record until here, the only place `player.score` moves.
+      const abateSpend = round1(record.abatementSpend[player.id] ?? 0)
+      abateCost[player.id] = abateSpend
       // Everything the company starts the year holding — the carry included, so the
       // benchmark faces the same debt or surplus the player actually faces. Matches
       // what `creditsHeld` counts, which is what the real cost is measured against.
@@ -525,8 +579,11 @@ export class Session {
           (record.regulatorGranted[player.id] ?? 0) +
           (record.carriedIn[player.id] ?? 0),
       )
+      // This year's emissions are already fixed — capacity was bought a year ago — so the
+      // benchmark scores the cover decision alone, and the sunk spend passes through both
+      // sides identically. See `optimalYearCost`: the leaderboard measures trading skill.
       optimal[player.id] = optimalYearCost(
-        expected, credits, coeff, refPrice, penaltyRate, this.maxAbatement,
+        this.plannedFor(player, record.year), credits, abateSpend, refPrice, penaltyRate,
       )
     }
     const { settlement } = settleYear(record.realized, held, purchaseCost, sellIncome, abateCost, {
@@ -726,29 +783,105 @@ export class Session {
   }
 
   /**
-   * Trade stage: choose to abate a fraction of expected emissions. Lowers the realized
-   * mean at year end, at a per-sector convex cost. Cumulative set.
+   * Trade stage: buy permanent abatement capacity, raising installed capacity to
+   * `fraction` of the company's un-abated emissions.
    *
-   * Capped at `config.abatement.maxFraction` — a plant cannot switch itself off. Clamped
-   * rather than rejected, matching how an over-1 fraction has always been handled, and the
-   * client's slider is bounded by the same number so it never has to be hit from the UI.
+   * Three things a caller must understand:
+   *
+   *  - **It costs money now and cuts nothing now.** The charge lands this year; the
+   *    capacity comes online at the next `openYear`. Investing in the final year is simply
+   *    wasted, which is why the client carries an unconditional warning.
+   *  - **It only ever goes up.** A request below what is already committed is rejected
+   *    rather than clamped: clamping would look like a successful un-install, charge
+   *    nothing, and leave the client showing a level the company had already paid for.
+   *  - **Every step pays the fee again.** Going 0 → 20% → 50% costs one more retrofit fee
+   *    than going straight to 50%.
+   *
+   * Idempotent when the level is unchanged, and that is not a nicety: the compliance bot
+   * calls this on every tick, so without the short-circuit a single bot would pay a dozen
+   * fees a year.
    */
   setAbatement(playerId: string, fraction: number) {
     this.requirePhase('trade')
     if (!Number.isFinite(fraction) || fraction < 0) {
       throw new GameError('BAD_ABATE', 'Abatement fraction must be a non-negative number.')
     }
+    const player = this.getPlayer(playerId)
+    if (!player) throw new GameError('NO_PLAYER', 'Player not found.')
     const record = this.currentYearRecord()!
     // Two decimals, not one. `round1` here meant the stored fraction snapped to 10% steps,
     // which was survivable when the range was 0-100% but leaves only three usable choices
     // once the ceiling is 20% — and it silently contradicted the client's 1% slider.
-    const capped = Math.min(this.maxAbatement, fraction)
-    record.abatement[playerId] = Math.round(capped * 100) / 100
+    const target = Math.round(Math.min(this.abatementLifetimeCap, fraction) * 100) / 100
+    const from = player.abatementCommitted
+    if (target === from) return
+    if (target < from) {
+      throw new GameError(
+        'ABATE_DOWN',
+        `You have already installed ${Math.round(from * 100)}% of abatement capacity. Retrofits are permanent — you can add more, but not take it back.`,
+      )
+    }
+    const cfg = this.state.config.abatement
+    const spend = installCost(
+      this.unabatedFor(player, record.year),
+      from,
+      target,
+      cfg.sectors[player.industry],
+      cfg.fixedCostPerTonneBaseline * this.baselineFor(player),
+    )
+    player.abatementCommitted = target
+    record.abatementInstalled[playerId] = target
+    record.abatementSpend[playerId] = round1((record.abatementSpend[playerId] ?? 0) + spend)
   }
 
-  /** The most of one year's emissions any company here may cut. */
-  get maxAbatement(): number {
-    return Math.max(0, Math.min(1, this.state.config.abatement.maxFraction))
+  /** The most of its un-abated emissions any company here may ever cut, across the game. */
+  get abatementLifetimeCap(): number {
+    return Math.max(0, Math.min(1, this.state.config.abatement.lifetimeCap))
+  }
+
+  /** The baseline-year emission the retrofit fee is scaled by. Fixed for the whole game. */
+  baselineFor(player: Player): number {
+    return player.emissions[this.state.config.emissions.baselineYear] ?? 0
+  }
+
+  /**
+   * The mean this year's emissions are actually drawn around — last year's realized, with
+   * whatever capacity came online this morning applied to it.
+   *
+   * Differs from `expectedEmission` in exactly one case: the year a new install switches
+   * on. That is the year every "how many credits do I need?" calculation would otherwise
+   * be wrong, in the same direction, for everyone who invested.
+   */
+  plannedEmission(playerId: string): number {
+    const player = this.getPlayer(playerId)
+    if (!player) return 0
+    return this.plannedFor(player, this.state.currentYear ?? this.state.config.emissions.firstGameYear)
+  }
+
+  plannedFor(player: Player, year: number): number {
+    const expected = expectedEmission(player, year)
+    return round1(expected * (1 - incrementalFraction(player.abatementInForce, player.abatementEmbedded)))
+  }
+
+  /**
+   * Emissions stripped of the cuts already in them — the base every fraction in this model
+   * is a fraction of, and the base an install is sized and priced against.
+   */
+  unabatedEmission(playerId: string): number {
+    const player = this.getPlayer(playerId)
+    if (!player) return 0
+    return this.unabatedFor(player, this.state.currentYear ?? this.state.config.emissions.firstGameYear)
+  }
+
+  unabatedFor(player: Player, year: number): number {
+    return round1(unabatedFrom(this.plannedFor(player, year), player.abatementInForce))
+  }
+
+  /** The retrofit fee this company pays per install step. */
+  abatementFixedCost(playerId: string): number {
+    const player = this.getPlayer(playerId)
+    if (!player) return 0
+    return round1(this.state.config.abatement.fixedCostPerTonneBaseline * this.baselineFor(player))
   }
 
   getPlayer(playerId: string): Player | undefined {

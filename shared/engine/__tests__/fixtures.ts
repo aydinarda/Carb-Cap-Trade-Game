@@ -33,6 +33,9 @@ function player(
     score: 0,
     optimalScore: 0,
     bankedCredits: 0,
+    abatementInForce: 0,
+    abatementCommitted: 0,
+    abatementEmbedded: 0,
   }
 }
 

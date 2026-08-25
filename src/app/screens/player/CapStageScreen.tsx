@@ -44,7 +44,7 @@ export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
       <AllocationCard freeAllocation={freeAllocation} mode={snap.capMode!} />
       <WarningBanner>
         These are the only credits issued to you — there is no fixed-price sale. Your expected
-        Year {snap.currentYear} emission is <strong>{snap.you.expectedEmission ?? '—'} tCO₂</strong>{' '}
+        Year {snap.currentYear} emission is <strong>{snap.you.plannedEmission} tCO₂</strong>{' '}
         (actual realized at year end). Cover any shortfall by trading on the market, or by cutting
         emissions, once the market opens.
       </WarningBanner>

@@ -21,6 +21,10 @@ export interface ClientToServerEvents {
       capReductionFactor?: number
       /** Turn the cost containment reserve on or off between years. */
       reserveEnabled?: boolean
+      /** Lifetime abatement budget per company (0..1). Binds future installs only. */
+      abatementLifetimeCap?: number
+      /** Retrofit fee per install step, × the company's baseline emission. */
+      abatementFixedCost?: number
     },
     ack: Ack,
   ) => void

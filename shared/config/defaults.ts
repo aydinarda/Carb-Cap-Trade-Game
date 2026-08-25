@@ -86,9 +86,17 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
         { model: 'linear', params: { ...DEFAULT_ABATEMENT[i] } } satisfies AbatementSpec,
       ]),
     ) as Record<Industry, AbatementSpec>,
-    // A plant cannot switch itself off: 20% is the most of one year's emissions a company
-    // can cut. Applies to every cap mechanism.
-    maxFraction: 0.2,
+    // A plant cannot switch itself off: 50% of its un-abated emissions is the most a company
+    // can ever cut, across the whole game. Applies to every cap mechanism.
+    lifetimeCap: 0.5,
+    // 4–10% of what a full lifetime install costs per tonne of baseline (14.4–38.8 by
+    // sector), so a second step costs a few percent more rather than a fortune — but it
+    // still exceeds the variable cost of a *small* step (a 10% Power cut is 1.375/t),
+    // which is exactly the nibbling it exists to discourage.
+    fixedCostPerTonneBaseline: 1.5,
+    // Agents only. Long enough that a genuine retrofit pays back, short enough that they
+    // will not buy capacity on a single year's price spike.
+    investmentHorizon: 3,
   },
   bots: {
     seed: { marketMakerFrac: 0.18, speculatorFlat: 20 },

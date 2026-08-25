@@ -33,29 +33,62 @@ function stdev(xs: number[]): number {
   return Math.sqrt(mean(xs.map((x) => (x - m) ** 2)))
 }
 
+function supplyOf(record: YearRecord): number {
+  // Reserve credits count once SOLD — otherwise this yardstick reports scarcity the
+  // reserve has already relieved, and every reserve run reads as a permanent price bias.
+  return (
+    Object.values(record.freeAllocation).reduce((a, b) => a + b, 0) +
+    record.regulatorPool +
+    record.reserveReleased
+  )
+}
+
 /**
- * The carbon price that would clear the class's aggregate shortage against its own MAC
- * curves — the price a frictionless market would find.
+ * SHORT-RUN efficient price: what clears the market *this* year, when abatement capacity
+ * cannot be changed until next year.
+ *
+ * With the one-year lag, within-year demand is **perfectly inelastic** — every company's
+ * emissions are already fixed, and no price makes them lower today. So the honest answer is
+ * a corner: 0 if the class is long, the fine if it is short. There is no interior price.
+ *
+ * That degeneracy is a finding, not a bug in this function, and it is why it is reported
+ * alongside the long-run number rather than instead of it: an inelastic market has no
+ * fundamental anchor of its own, and the price it discovers comes from expectations about
+ * next year. Comparing the two is what shows how much anchor the lag cost.
+ */
+export function efficientPriceSR(session: Session, record: YearRecord): number {
+  const P = session.state.config.market.penaltyRate
+  const demand = session.state.players.reduce((s, p) => s + session.plannedFor(p, record.year), 0)
+  return demand > supplyOf(record) ? P : 0
+}
+
+/**
+ * LONG-RUN efficient price: what would clear the class's shortage if it could install the
+ * capacity it wanted, against its own MAC curves — the price a frictionless market with
+ * foresight would find, and the price that *should* be driving this year's investment.
+ *
+ * Measured against un-abated emissions and searched over the headroom still available under
+ * the lifetime cap, since capacity already installed is not a decision any more.
  *
  * ANALYSIS ONLY. This is deliberately never surfaced in the game: the in-game signal is
  * the previous year's discovered price plus the penalty ceiling. Here it is the yardstick
  * that says whether the market found the right answer.
  */
-export function efficientPrice(session: Session, record: YearRecord): number | null {
+export function efficientPriceLR(session: Session, record: YearRecord): number | null {
   const cfg = session.state.config
   const P = cfg.market.penaltyRate
   const players = session.state.players
-  // Reserve credits count once SOLD — otherwise this yardstick reports scarcity the
-  // reserve has already relieved, and every reserve run reads as a permanent price bias.
-  const supply =
-    Object.values(record.freeAllocation).reduce((a, b) => a + b, 0) +
-    record.regulatorPool +
-    record.reserveReleased
+  const supply = supplyOf(record)
   const demandAt = (price: number) =>
     players.reduce((sum, p) => {
       const spec = cfg.abatement.sectors[p.industry]
-      const r = optimalAbatement(spec, price, cfg.abatement.maxFraction)
-      return sum + expectedEmission(p, record.year) * (1 - r)
+      const unabated = session.unabatedFor(p, record.year)
+      // Only headroom is choosable: a company at 30% cannot un-install to reach 20%.
+      const r = Math.max(
+        p.abatementInForce,
+        optimalAbatement(spec, price, cfg.abatement.lifetimeCap),
+      )
+      return sum + unabated * (1 - r)
     }, 0)
 
   if (demandAt(0) <= supply) return 0 // no scarcity at any price
@@ -71,6 +104,9 @@ export function efficientPrice(session: Session, record: YearRecord): number | n
   return round1((lo + hi) / 2)
 }
 
+/** The long-run answer, under the name every existing panel and query already uses. */
+export const efficientPrice = efficientPriceLR
+
 export interface YearMetrics {
   // price behaviour
   vwap: number | null
@@ -79,8 +115,13 @@ export interface YearMetrics {
   priceMax: number | null
   priceStdev: number
   ceilingFrac: number
+  /** Alias of `efficientPriceLR` — the long-run yardstick every existing panel plots. */
   efficientPrice: number | null
   priceVsEfficient: number | null
+  /** The within-year answer under perfectly inelastic demand: 0 or the fine, never between.
+   *  Reported so the lost within-year MAC anchor is visible rather than assumed away. */
+  efficientPriceSR: number
+  efficientPriceLR: number | null
   // depth / liquidity
   spreadMean: number | null
   depthMean: number
@@ -116,7 +157,14 @@ export interface YearMetrics {
   regulatorPool: number
   totalExpected: number
   totalRealized: number
+  /** Tonnes saved against the no-abatement counterfactual. */
   totalAbated: number
+  /** Capacity in force, and capacity paid for but not yet online — mean fraction, and how
+   *  many companies installed anything this year. The investment path, per year. */
+  abatementInForceMean: number
+  abatementCommittedMean: number
+  abatementSpend: number
+  installCount: number
   totalPenalty: number
   classCost: number
   optimalCost: number
@@ -153,16 +201,17 @@ export function yearMetrics(
     impact = round1((mean(moves) / (volume / Math.max(1, mids.length - 1))) * 10)
   }
 
-  const efficient = efficientPrice(session, record)
+  const efficient = efficientPriceLR(session, record)
   const discovered = mv.vwap ?? mv.lastPrice
 
   const settlement = record.settlement ?? {}
-  const totalExpected = session.state.players.reduce(
-    (s, p) => s + expectedEmission(p, record.year),
-    0,
-  )
-  const totalAbated = session.state.players.reduce(
-    (s, p) => s + expectedEmission(p, record.year) * (record.abatement[p.id] ?? 0),
+  const players = session.state.players
+  // What the class must actually cover — capacity already in force has taken its cut.
+  const totalExpected = players.reduce((s, p) => s + session.plannedFor(p, record.year), 0)
+  // Tonnes saved against the counterfactual. The old form multiplied the fraction by an
+  // expectation that ALREADY had the cut in it, which double-counted every standing level.
+  const totalAbated = players.reduce(
+    (s, p) => s + session.unabatedFor(p, record.year) * p.abatementInForce,
     0,
   )
   const spreads = samples.map((s) => s.spread).filter((x): x is number => x !== null)
@@ -181,6 +230,8 @@ export function yearMetrics(
     efficientPrice: efficient,
     priceVsEfficient:
       discovered !== null && efficient !== null ? round1(discovered - efficient) : null,
+    efficientPriceSR: efficientPriceSR(session, record),
+    efficientPriceLR: efficient,
     spreadMean: spreads.length ? round1(mean(spreads)) : null,
     depthMean: round1(mean(samples.map((s) => (s.depthBid + s.depthAsk) / 2))),
     oneSidedFrac: samples.length ? samples.filter((s) => s.oneSided).length / samples.length : 0,
@@ -206,6 +257,14 @@ export function yearMetrics(
     totalExpected: expectedTotal,
     totalRealized: round1(Object.values(record.realized).reduce((a, b) => a + b, 0)),
     totalAbated: round1(totalAbated),
+    abatementInForceMean: players.length
+      ? round1(players.reduce((s, p) => s + p.abatementInForce, 0) / players.length * 1000) / 1000
+      : 0,
+    abatementCommittedMean: players.length
+      ? round1(players.reduce((s, p) => s + p.abatementCommitted, 0) / players.length * 1000) / 1000
+      : 0,
+    abatementSpend: round1(Object.values(record.abatementSpend).reduce((a, b) => a + b, 0)),
+    installCount: Object.keys(record.abatementInstalled).length,
     totalPenalty: round1(Object.values(settlement).reduce((s, x) => s + x.penaltyCost, 0)),
     classCost: round1(Object.values(settlement).reduce((s, x) => s + x.yearCost, 0)),
     optimalCost: round1(session.state.players.reduce((s, p) => s + p.optimalScore, 0)),

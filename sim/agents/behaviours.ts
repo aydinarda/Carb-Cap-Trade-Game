@@ -1,13 +1,12 @@
 import {
   buildMarketView,
-  expectedEmission,
   marginalCost,
   optimalAbatement,
   round1,
   type Rng,
 } from '../../shared/engine'
 import { GameError, type Session } from '../../server/session'
-import { priceCeiling } from '../../server/bots/helpers'
+import { considerInstall, priceCeiling } from '../../server/bots/helpers'
 import type { Player } from '../../shared/types'
 
 /**
@@ -30,7 +29,15 @@ export interface BehaviourTraits {
   urgency: number
   /** Multiplier on the cover target: 1 = exactly cover, >1 = over-hedge. */
   coverTarget: number
-  /** Multiplier on the cost-minimising abatement fraction. */
+  /**
+   * How dear this archetype acts as though carbon were, when deciding whether to install
+   * capacity. 0 never invests; 1.25 behaves as if the price were 25% above the market.
+   *
+   * It multiplies the *price* fed to `planInstall` rather than the resulting fraction,
+   * because the decision is no longer a fraction — it is "is this retrofit worth its fee
+   * over the horizon?", and only a price enters that. A keener firm is one that expects
+   * carbon to get dearer, which is also the more honest story.
+   */
   abatementBias: number
   /** Multiplier on its bid/ask price relative to perceived fair value. */
   priceBias: number
@@ -81,6 +88,11 @@ export const BEHAVIOUR_TRAITS: Record<Behaviour, BehaviourTraits> = {
 export interface AgentState {
   playerId: string
   behaviour: Behaviour
+  /**
+   * Ephemeral, mirroring `BotRuntime.lastInvestYear`: one install decision a year, because
+   * each step pays the retrofit fee again and these agents tick many times a window.
+   */
+  rt?: { lastInvestYear?: number }
 }
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
@@ -117,20 +129,15 @@ export function actTrade(
   const mv = buildMarketView(record.orders, record.trades)
   const reference = mv.lastPrice ?? mv.vwap ?? session.openingReference()
 
-  // Abate toward the market-implied optimum, scaled by how keen this archetype is to cut.
-  // Keenness scales the optimum, but nothing gets past the plant's physical ceiling.
-  const rStar = clamp(
-    optimalAbatement(spec, reference) * t.abatementBias, 0, session.maxAbatement,
-  )
-  try {
-    session.setAbatement(agent.playerId, rStar)
-  } catch (e) {
-    if (!(e instanceof GameError)) throw e
-  }
+  // Whether to buy abatement capacity — a once-a-year capital decision that changes
+  // NOTHING about this year's position, and so is kept well away from the sizing below.
+  agent.rt ??= {}
+  considerInstall(session, agent.playerId, agent.rt, reference, t.abatementBias)
 
-  const expected = expectedEmission(player, record.year)
+  const rStar = optimalAbatement(spec, reference)
+  const planned = session.plannedEmission(agent.playerId)
   const held = session.creditsHeld(agent.playerId)
-  const need = expected * (1 - rStar) * t.coverTarget - held
+  const need = planned * t.coverTarget - held
 
   const fair = Math.min(P, marginalCost(rStar, spec))
   const noise = rng.normal(0, t.priceNoise)
@@ -166,14 +173,11 @@ export function actAuction(session: Session, agent: AgentState, rng: Rng): boole
 
   const cfg = session.state.config
   const P = priceCeiling(session)
-  const spec = cfg.abatement.sectors[player.industry]
   const reference = session.openingReference()
-  // Keenness scales the optimum, but nothing gets past the plant's physical ceiling.
-  const rStar = clamp(
-    optimalAbatement(spec, reference) * t.abatementBias, 0, session.maxAbatement,
-  )
-  const expected = expectedEmission(player, record.year)
-  const qty = round1(expected * (1 - rStar) * t.coverTarget - session.creditsHeld(agent.playerId))
+  // Capacity bought now would not arrive until next year, so it cannot shrink what this
+  // year's auction has to cover. The install decision belongs to the trade stage.
+  const planned = session.plannedEmission(agent.playerId)
+  const qty = round1(planned * t.coverTarget - session.creditsHeld(agent.playerId))
   if (qty <= 0) return false
 
   const price = round1(

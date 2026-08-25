@@ -17,35 +17,52 @@ const r1 = (n: number) => Math.round(n * 10) / 10
 export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   const { placeOrder, cancelOrder, abate } = useGame()
   const abatementSpec = snap.abatement
-  // A plant cannot switch itself off. The server clamps to this too — the fallback covers a
-  // client running ahead of a backend that does not send the field yet.
-  const maxAbate = snap.maxAbatement ?? 1
+  // A plant cannot switch itself off, and this is a budget for the WHOLE game, not per
+  // year. The server clamps to this too — the fallback covers a client running ahead of a
+  // backend that does not send the field yet.
+  const maxAbate = snap.abatementLifetimeCap ?? 1
   const market = snap.market
   const marketPrice = market?.lastPrice ?? market?.vwap ?? null
   const auctionPrice = snap.auctionPrice
 
-  const rawExpected = snap.you.expectedEmission ?? 0
+  // What this year actually has to be covered. Fixed for the year: capacity bought today
+  // arrives next year, so nothing the slider does can move it.
+  const planned = snap.you.plannedEmission ?? 0
+  // The base every fraction on this screen is a fraction of — emissions stripped of the
+  // cuts already installed.
+  const unabated = snap.you.unabatedExpected ?? planned
   const held = snap.you.creditsHeld ?? 0
-  const committedAbate = snap.you.abatement ?? 0
+  const inForce = snap.you.abatementInForce ?? 0
+  const installed = snap.you.abatementCommitted ?? 0
+  const fixedCost = snap.you.abatementFixedCost ?? 0
   const banked = snap.you.banked ?? 0
 
-  const [abateFrac, setAbateFrac] = useState(committedAbate)
+  const [abateFrac, setAbateFrac] = useState(installed)
   const [side, setSide] = useState<OrderSide>('buy')
   const [qty, setQty] = useState('')
   const [price, setPrice] = useState('')
   const [busy, setBusy] = useState(false)
 
+  // Keyed on the installed level, NOT on the year. Wiping the slider every year was right
+  // when the choice was annual; under a permanent one it would show 0% to a company that
+  // has already built and paid for half its capacity.
   useEffect(() => {
-    setAbateFrac(snap.you.abatement ?? 0)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snap.currentYear])
+    setAbateFrac(installed)
+  }, [installed])
 
-  const postExpected = r1(rawExpected * (1 - abateFrac))
   // Evaluated with the very functions the server settles with, so the preview cannot
   // drift from the charge — and so a scenario on a non-linear MAC curve previews correctly.
-  const abateCost = abatementCost(rawExpected, abateFrac, abatementSpec)
+  // Only the NEW slice is charged, and the retrofit fee is charged again for this step.
+  const stepping = abateFrac > installed
+  const variableCost = r1(
+    abatementCost(unabated, abateFrac, abatementSpec) -
+      abatementCost(unabated, installed, abatementSpec),
+  )
+  const abateCost = stepping ? r1(fixedCost + variableCost) : 0
   const nextTonneCost = r1(marginalCost(abateFrac, abatementSpec))
-  const gap = r1(postExpected - held) // > 0 short, < 0 surplus
+  // What this year's emissions would be once the pending capacity comes online.
+  const nextYearEmission = r1(unabated * (1 - abateFrac))
+  const gap = r1(planned - held) // > 0 short, < 0 surplus
   const short = gap > 0
 
   const submitOrder = async () => {
@@ -63,7 +80,11 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
     setBusy(true)
     const ok = await abate(abateFrac)
     setBusy(false)
-    if (ok) toast.success(`Cutting ${Math.round(abateFrac * 100)}% — cost ${abateCost}`)
+    if (ok) {
+      toast.success(
+        `Installed ${Math.round(abateFrac * 100)}% capacity for ${abateCost} — live from next round`,
+      )
+    }
   }
 
   return (
@@ -71,7 +92,15 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
       {/* Left: decisions */}
       <div className="flex flex-col gap-5">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard label="Expected (after cuts)" value={postExpected} unit="tCO₂" tone="accent" />
+          {/* Must NOT move with the slider. Under the one-year lag that would be the most
+              damaging lie on the screen: it would show a player covered when they are not. */}
+          <StatCard
+            label="This year's emissions"
+            value={planned}
+            unit="tCO₂"
+            tone="accent"
+            hint={inForce > 0 ? `${Math.round(inForce * 100)}% already cut` : 'fixed for this year'}
+          />
           <StatCard label="Credits held" value={held} unit="cr" hint="free/auction/banked ± trades" />
           <StatCard
             label={short ? 'Short' : 'Covered'}
@@ -124,10 +153,12 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
           <div className="flex items-center justify-between gap-2 mb-4">
             <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider">
               <Leaf size={12} className="text-primary" />
-              Cut emissions (abatement)
-              {/* Say why the slider stops, or it reads as a bug. */}
+              Install abatement capacity
+              {/* Say why the slider stops, or it reads as a bug — and say that the budget is
+                  for the whole game, since that is what makes spending it a decision. */}
               <span className="normal-case tracking-normal text-[10px] text-muted-foreground/70">
-                — max {Math.round(maxAbate * 100)}% a year
+                — up to {Math.round(maxAbate * 100)}% of your emissions, permanently
+                {installed > 0 && ` · ${Math.round(installed * 100)}% already installed`}
               </span>
             </div>
             <span
@@ -142,9 +173,14 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
             </span>
           </div>
           <div className="flex items-center gap-4">
+            {/* The floor is what is already installed: a retrofit cannot be taken back, and
+                the widget should say so rather than letting the server reject the move. */}
             <Slider
               value={[Math.round(abateFrac * 100)]}
-              onValueChange={([v]) => setAbateFrac(Math.min(v / 100, maxAbate))}
+              onValueChange={([v]) =>
+                setAbateFrac(Math.min(Math.max(v / 100, installed), maxAbate))
+              }
+              min={Math.round(installed * 100)}
               max={Math.round(maxAbate * 100)}
               step={1}
               className="flex-1"
@@ -154,12 +190,35 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3 mt-4">
-            <StatCard label="Cut" value={r1(rawExpected - postExpected)} unit="tCO₂" tone="good" />
-            <StatCard label="Abatement cost" value={abateCost} tone="bad" />
+            <StatCard
+              label="From next year"
+              value={nextYearEmission}
+              unit="tCO₂"
+              tone="good"
+              hint={`instead of ${planned}`}
+            />
+            <StatCard
+              label="Cost now"
+              value={abateCost}
+              tone="bad"
+              // The fee is broken out because it is the thing you pay AGAIN if you step.
+              hint={stepping ? `${fixedCost} retrofit fee + ${variableCost} for the extra ${Math.round((abateFrac - installed) * 100)}%` : 'move the slider up to install'}
+            />
           </div>
-          <div className="flex justify-end mt-3">
-            <Button onClick={() => void submitAbate()} disabled={busy} variant="outline" className="font-bold">
-              {committedAbate > 0 ? 'Update cuts' : 'Invest in cuts'}
+          <div className="flex items-center justify-between gap-3 mt-3">
+            {/* Unconditional. The game cannot know which year is the last one — the host
+                ends it whenever — so a final-year install is simply wasted, and the only
+                honest thing to do is say the delay out loud every time. */}
+            <span className="text-[11px] font-mono text-accent">
+              Takes effect from next round — this year&apos;s emissions are already set.
+            </span>
+            <Button
+              onClick={() => void submitAbate()}
+              disabled={busy || !stepping}
+              variant="outline"
+              className="font-bold shrink-0"
+            >
+              {installed > 0 ? 'Install more' : 'Install capacity'}
             </Button>
           </div>
         </div>

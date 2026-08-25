@@ -139,4 +139,24 @@ describe('validateConfig', () => {
     expect(resolveConfig({ allocation: { capReductionFactor: 1 } }).allocation.capReductionFactor)
       .toBe(1)
   })
+
+  it('bounds the abatement knobs', () => {
+    expect(() => resolveConfig({ abatement: { lifetimeCap: -0.1 } })).toThrow(/lifetimeCap/)
+    expect(() => resolveConfig({ abatement: { lifetimeCap: 1.5 } })).toThrow(/lifetimeCap/)
+    expect(() =>
+      resolveConfig({ abatement: { fixedCostPerTonneBaseline: -1 } }),
+    ).toThrow(/fixedCostPerTonneBaseline/)
+    expect(() => resolveConfig({ abatement: { investmentHorizon: 0 } })).toThrow(/investmentHorizon/)
+  })
+
+  it('accepts the degenerate ends of the abatement range', () => {
+    // 0 = abatement switched off entirely; 1 = a plant may shut itself down. Both are
+    // legitimate scenario arms, and a free fee is the control arm of the fee sweep.
+    expect(resolveConfig({ abatement: { lifetimeCap: 0 } }).abatement.lifetimeCap).toBe(0)
+    expect(resolveConfig({ abatement: { lifetimeCap: 1 } }).abatement.lifetimeCap).toBe(1)
+    expect(
+      resolveConfig({ abatement: { fixedCostPerTonneBaseline: 0 } })
+        .abatement.fixedCostPerTonneBaseline,
+    ).toBe(0)
+  })
 })

@@ -48,6 +48,8 @@ function hostConfigView(config: GameConfig): HostConfigView {
     benchmark: { ...config.allocation.benchmark },
     sectorAverage: sectorAverages(config),
     abatement: { ...config.abatement.sectors },
+    abatementLifetimeCap: config.abatement.lifetimeCap,
+    abatementFixedCost: config.abatement.fixedCostPerTonneBaseline,
     reserveEnabled: config.allocation.reserve.enabled,
     reserveSteps: config.allocation.reserve.steps.map((s) => ({ ...s })),
   }
@@ -146,8 +148,11 @@ function classAggregate(session: Session): ClassAggregate {
     totalFreeAllocation: record ? sum(record.freeAllocation) : null,
     totalRegulatorRequests: capDemand,
     submittedCount: capSubmitted,
+    // What the class must actually cover this year — capacity that came online this year
+    // has already taken its cut. `expectedEmission` would over-state it for everyone who
+    // invested last year, which is exactly the number scarcity is judged by.
     totalExpected: record
-      ? round1(players.reduce((s, p) => s + expectedEmission(p, state.currentYear), 0))
+      ? round1(players.reduce((s, p) => s + session.plannedFor(p, state.currentYear), 0))
       : null,
     totalRealized: hasRealized ? sum(record!.realized) : null,
     totalCostThisYear: settlement
@@ -183,7 +188,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     playerCount: state.players.length,
     roster: publicRoster(session),
     abatement: state.config.abatement.sectors[player.industry],
-    maxAbatement: session.maxAbatement,
+    abatementLifetimeCap: session.abatementLifetimeCap,
     auctionSupply: session.usesAuction ? (record?.regulatorPool ?? 0) : 0,
     auctionPrice: record?.auctionPrice ?? null,
     // Benchmarking: what this player's sector benchmark is worth this year, and the
@@ -216,9 +221,13 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
       myTrades: record
         ? [...record.trades.filter((t) => t.buyerId === player.id || t.sellerId === player.id)].reverse()
         : [],
-      abatement: record?.abatement[player.id] ?? null,
+      abatementInForce: record?.abatement[player.id] ?? null,
+      abatementCommitted: player.abatementCommitted,
+      unabatedExpected: session.unabatedEmission(player.id),
+      abatementFixedCost: session.abatementFixedCost(player.id),
       banked: record ? round1(record.carriedIn[player.id] ?? 0) : null,
       creditsHeld: record && revealed ? session.creditsHeld(player.id) : null,
+      plannedEmission: session.plannedEmission(player.id),
       expectedEmission: record ? expectedEmission(player, state.currentYear) : null,
       realized: settled ? (record?.realized[player.id] ?? null) : null,
       netPosition: record?.netPosition[player.id] ?? null,
@@ -332,7 +341,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
       abatement: record?.abatement[p.id] ?? null,
       banked: record ? round1(record.carriedIn[p.id] ?? 0) : null,
       creditsHeld: record ? session.creditsHeld(p.id) : null,
-      expectedEmission: round1(expectedEmission(p, state.currentYear)),
+      expectedEmission: session.plannedFor(p, state.currentYear),
       realized: record?.realized[p.id] ?? null,
       netPosition: record?.netPosition[p.id] ?? null,
       settlement: record?.settlement?.[p.id] ?? null,

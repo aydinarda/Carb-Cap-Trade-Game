@@ -16,7 +16,7 @@ function CountUp({ value }: { value: number }) {
 }
 
 export function EmissionsRevealScreen({ snap }: { snap: PlayerSnapshot }) {
-  const expected = snap.you.expectedEmission ?? 0
+  const expected = snap.you.plannedEmission
   const cover = snap.you.creditsHeld ?? 0
   const gap = Math.round((expected - cover) * 10) / 10
   const shortage = gap > 0

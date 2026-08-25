@@ -16,6 +16,13 @@ export interface BotRuntime {
    * halve the depth the maker is there to provide.
    */
   quoteId?: Partial<Record<'buy' | 'sell', string>>
+  /**
+   * The last year in which this bot made an install decision. Abatement capacity is
+   * permanent and every step pays the retrofit fee again, so a bot that reconsidered on
+   * every tick would buy a dozen slices a year and pay a dozen fees. One decision a year,
+   * belt-and-braces with `setAbatement`'s own idempotence.
+   */
+  lastInvestYear?: number
 }
 
 /** Everything an archetype's advance() needs. */

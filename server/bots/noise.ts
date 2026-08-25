@@ -1,12 +1,8 @@
-import {
-  expectedEmission,
-  marginalCost,
-  optimalAbatement,
-} from '../../shared/engine'
-import { GameError } from '../session'
+import { marginalCost, optimalAbatement } from '../../shared/engine'
 import {
   anchorValue,
   clamp,
+  considerInstall,
   priceCeiling,
   referencePrice,
   sellCapacity,
@@ -32,21 +28,19 @@ export function trade(ctx: BotCtx): boolean {
   const coeff = session.state.config.abatement.sectors[bot.industry]
   const mv = ctx.market
   const anchor = anchorValue(mv, referencePrice(session))
-  const rStar = optimalAbatement(coeff, anchor, session.maxAbatement)
-  // Without this the bot prices and sizes its order as though it had cut to r*, while its
-  // recorded abatement stays 0 — so it is short by `expected × rStar` at settlement every
-  // single year. Gated: see bots.fixes.noiseAbatement.
+  const rStar = optimalAbatement(coeff, anchor)
+  // Whether this archetype invests in abatement capacity at all. The original bug this
+  // flag guarded is gone — sizing now reads `plannedEmission`, so the bot can no longer
+  // trade as though it had cut while its recorded abatement stayed 0. What remains is a
+  // genuine behavioural question: is a careless trader also a firm that never retrofits?
+  // Gated: see bots.fixes.noiseAbatement.
   if (session.state.config.bots.fixes.noiseAbatement) {
-    try {
-      session.setAbatement(bot.id, rStar)
-    } catch (e) {
-      if (!(e instanceof GameError)) throw e
-    }
+    considerInstall(session, bot.id, ctx.rt, anchor)
   }
   const fair = Math.min(P, marginalCost(rStar, coeff))
-  const expected = expectedEmission(bot, record.year)
+  const planned = session.plannedEmission(bot.id)
   const held = session.creditsHeld(bot.id)
-  const need = expected * (1 - rStar) - held
+  const need = planned - held
 
   let side: 'buy' | 'sell' = need > 0 ? 'buy' : 'sell'
   if (rng.next() < cfg.errorRate) side = side === 'buy' ? 'sell' : 'buy' // occasional wrong side

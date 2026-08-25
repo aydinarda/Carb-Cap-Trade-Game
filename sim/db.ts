@@ -32,7 +32,14 @@ export interface PlayerRow {
   regulatorGranted: number
   held: number
   realized: number
+  /** Capacity in force this year. */
   abatement: number
+  /** Capacity paid for — above `abatement` in the year of an install. */
+  abatementCommitted: number
+  /** Money charged for capacity bought this year (fee + the new slice). */
+  abatementSpend: number
+  /** Whether this company installed anything this year — the step count, per year. */
+  installed: boolean
   tradedNet: number
   yearCost: number
   optimalCost: number
@@ -59,12 +66,15 @@ CREATE TABLE IF NOT EXISTS years (
   spread_mean        REAL, depth_mean REAL, one_sided_frac REAL,
   order_to_trade     REAL, fill_rate REAL, price_impact REAL,
   bot_volume_share   REAL, unfilled_demand REAL,
+  efficient_price_sr REAL, efficient_price_lr REAL,
   auction_price      REAL, auction_awarded REAL, auction_bid_qty REAL,
   issuance           REAL, shortage_ratio REAL,
   reserve_pot        REAL, reserve_released REAL, reserve_revenue REAL,
   volume             REAL, trade_count INTEGER,
   free_allocation    REAL, regulator_pool REAL,
   total_expected     REAL, total_realized REAL, total_abated REAL,
+  abatement_in_force REAL, abatement_committed REAL,
+  abatement_spend    REAL, install_count INTEGER,
   total_penalty      REAL, class_cost REAL, optimal_cost REAL,
   PRIMARY KEY (run_id, year),
   FOREIGN KEY (run_id) REFERENCES runs(run_id)
@@ -79,7 +89,8 @@ CREATE TABLE IF NOT EXISTS players (
   is_bot     INTEGER NOT NULL,
   bot_type   TEXT,
   free_allocation REAL, regulator_granted REAL, held REAL, realized REAL,
-  abatement REAL, traded_net REAL, year_cost REAL, optimal_cost REAL,
+  abatement REAL, abatement_committed REAL, abatement_spend REAL, installed INTEGER,
+  traded_net REAL, year_cost REAL, optimal_cost REAL,
   PRIMARY KEY (run_id, year, player_id)
 );
 
@@ -168,6 +179,7 @@ export class SimDb {
            run_id, year,
            vwap, last_price, price_min, price_max, price_stdev, ceiling_frac,
            efficient_price, price_vs_efficient,
+           efficient_price_sr, efficient_price_lr,
            spread_mean, depth_mean, one_sided_frac,
            order_to_trade, fill_rate, price_impact,
            bot_volume_share, unfilled_demand,
@@ -176,15 +188,17 @@ export class SimDb {
            volume, trade_count,
            free_allocation, regulator_pool,
            total_expected, total_realized, total_abated,
+           abatement_in_force, abatement_committed, abatement_spend, install_count,
            total_penalty, class_cost, optimal_cost
          ) VALUES (
-           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         runId, year,
         m.vwap, m.lastPrice, m.priceMin, m.priceMax, m.priceStdev, m.ceilingFrac,
         m.efficientPrice, m.priceVsEfficient,
+        m.efficientPriceSR, m.efficientPriceLR,
         m.spreadMean, m.depthMean, m.oneSidedFrac,
         m.orderToTrade, m.fillRate, m.priceImpact,
         m.botVolumeShare, m.unfilledDemand,
@@ -193,19 +207,29 @@ export class SimDb {
         m.volume, m.tradeCount,
         m.freeAllocation, m.regulatorPool,
         m.totalExpected, m.totalRealized, m.totalAbated,
+        m.abatementInForceMean, m.abatementCommittedMean, m.abatementSpend, m.installCount,
         m.totalPenalty, m.classCost, m.optimalCost,
       )
   }
 
   insertPlayers(runId: string, year: number, rows: PlayerRow[]) {
+    // Columns named explicitly, for the same reason the years insert names them: a bare
+    // positional VALUES couples argument order to the DDL, so inserting a column in the
+    // middle writes every later value into the wrong place, silently.
     const stmt = this.db.prepare(
-      `INSERT OR REPLACE INTO players VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO players (
+         run_id, year, player_id, behaviour, industry, is_bot, bot_type,
+         free_allocation, regulator_granted, held, realized,
+         abatement, abatement_committed, abatement_spend, installed,
+         traded_net, year_cost, optimal_cost
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     for (const r of rows) {
       stmt.run(
         runId, year, r.playerId, r.behaviour, r.industry, r.isBot ? 1 : 0, r.botType,
         r.freeAllocation, r.regulatorGranted, r.held, r.realized,
-        r.abatement, r.tradedNet, r.yearCost, r.optimalCost,
+        r.abatement, r.abatementCommitted, r.abatementSpend, r.installed ? 1 : 0,
+        r.tradedNet, r.yearCost, r.optimalCost,
       )
     }
   }

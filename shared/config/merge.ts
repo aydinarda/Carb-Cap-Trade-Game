@@ -84,6 +84,16 @@ export function validateConfig(config: GameConfig): GameConfig {
       throw new ConfigError(`emissions.industries.${industry} must satisfy 0 <= low <= high.`)
     }
   }
+  const cap = config.abatement.lifetimeCap
+  if (!Number.isFinite(cap) || cap < 0 || cap > 1) {
+    throw new ConfigError('abatement.lifetimeCap must be in [0, 1].')
+  }
+  positive(config.abatement.fixedCostPerTonneBaseline, 'abatement.fixedCostPerTonneBaseline')
+  const horizon = config.abatement.investmentHorizon
+  if (!Number.isFinite(horizon) || horizon <= 0) {
+    throw new ConfigError('abatement.investmentHorizon must be > 0.')
+  }
+
   const reserve = config.allocation.reserve
   if (reserve.triggerTrades < 1) {
     throw new ConfigError('allocation.reserve.triggerTrades must be >= 1.')

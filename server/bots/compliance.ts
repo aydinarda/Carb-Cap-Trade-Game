@@ -1,12 +1,11 @@
 import {
-  expectedEmission,
   marginalCost,
   optimalAbatement,
   round1,
   type AbatementSpec,
 } from '../../shared/engine'
-import { GameError } from '../session'
 import {
+  considerInstall,
   disperse,
   marketMid,
   priceCeiling,
@@ -29,6 +28,14 @@ import type { BotCtx } from './types'
  * This matters most under a free-allocation mode with a tight benchmark: the class
  * is structurally short, and without the penalty ceiling in view every bot would
  * anchor on the same stale mid and the market would be slow to price the scarcity.
+ *
+ * KNOWN WEAKENING, measured rather than patched. Since abatement capacity takes a year to
+ * come online, cutting a tonne is no longer an alternative to buying it *this* year —
+ * within a year supply and demand are both fixed, and the MAC only bites through next
+ * year's investment. So this anchor is now an approximation: the firm behaves as though it
+ * could still substitute, which keeps the price tethered to fundamentals rather than
+ * swinging between ~0 and the fine on pure scarcity. The formula is deliberately unchanged;
+ * the size of the distortion is quantified in the notebook (SR vs LR efficient price).
  */
 function reservationPrice(
   expected: number,
@@ -50,10 +57,10 @@ function reservationPrice(
 
 /**
  * Compliance firm — a real emitter that plays fundamentals and thereby anchors the
- * price. It abates to the cost-minimising point, then covers its residual at its
- * reservation price (the cheaper of cutting the tonne itself and paying the
- * penalty), lifting asks below that and hitting bids richer than its own MAC — the
- * arbitrage that pulls the market back to fundamentals.
+ * price. It covers this year's emissions at its reservation price (the cheaper of cutting
+ * the tonne itself and paying the penalty), lifting asks below that and hitting bids richer
+ * than its own MAC — the arbitrage that pulls the market back to fundamentals — and
+ * separately decides once a year whether to buy capacity for the years after this one.
  */
 export function trade(ctx: BotCtx): boolean {
   const { session, bot } = ctx
@@ -64,23 +71,22 @@ export function trade(ctx: BotCtx): boolean {
   const coeff = session.state.config.abatement.sectors[bot.industry]
   const mv = ctx.market
   const mid = marketMid(mv, referencePrice(session))
-  const rStar = optimalAbatement(coeff, mid, session.maxAbatement)
-  try {
-    session.setAbatement(bot.id, rStar)
-  } catch (e) {
-    if (!(e instanceof GameError)) throw e
-  }
+  // Capital investment, decided once a year and effective next year. It does NOT change
+  // what this year needs covering — hence `plannedEmission` below rather than a `1 − r*`
+  // discount on the expectation.
+  considerInstall(session, bot.id, ctx.rt, mid)
+  const rStar = optimalAbatement(coeff, mid)
   const fair = Math.min(P, marginalCost(rStar, coeff))
   const fairB = disperse(fair, ctx.rt.bias ?? 0, P) // personality-shifted fair value
-  const expected = expectedEmission(bot, record.year)
+  const planned = session.plannedEmission(bot.id)
   const held = session.creditsHeld(bot.id)
-  const need = round1(expected * (1 - rStar) - held)
+  const need = round1(planned - held)
 
   if (need > cfg.minTradeSize) {
     // Short after abating: bid at what the shortfall is actually worth to us, which
     // rises toward the penalty the further we are from covering it.
     const reservation = reservationPrice(
-      expected, held, coeff, P,
+      planned, held, coeff, P,
       session.state.config.bots.fixes.complianceReservation,
     )
     const reservationB = disperse(reservation, ctx.rt.bias ?? 0, P)
@@ -111,13 +117,14 @@ export function auction(ctx: BotCtx): boolean {
   const record = session.currentYearRecord()
   if (!record) return false
   const P = priceCeiling(session)
-  const coeff = session.state.config.abatement.sectors[bot.industry]
   const ref = referencePrice(session)
-  // Abate to the market-implied point; the residual is what it still needs to buy.
-  const rStar = optimalAbatement(coeff, ref, session.maxAbatement)
-  const expected = expectedEmission(bot, record.year)
+  // Whatever it invests in now arrives next year, so it buys against this year's planned
+  // emissions in full. Capacity bought at the cap stage would still leave THIS year's
+  // residual untouched, so the decision is left to the trade stage where the price is
+  // actually discovered.
+  const planned = session.plannedEmission(bot.id)
   const held = session.creditsHeld(bot.id)
-  const residual = round1(expected * (1 - rStar) - held)
+  const residual = round1(planned - held)
   if (residual <= 0) return false
   // An allowance is a tradeable asset worth ~the market price — bid at the reference,
   // not the private MAC, so the clearing price tracks the discovered price.

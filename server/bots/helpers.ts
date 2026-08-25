@@ -1,4 +1,10 @@
-import { meanOfLast, openSellRemaining, round1, tradedCash } from '../../shared/engine'
+import {
+  meanOfLast,
+  openSellRemaining,
+  planInstall,
+  round1,
+  tradedCash,
+} from '../../shared/engine'
 import type { MarketView, Order, OrderSide, YearRecord } from '../../shared/types'
 import type { BotRuntime } from './types'
 import { GameError, type Session } from '../session'
@@ -37,6 +43,50 @@ export function priceCeiling(session: Session): number {
   const P = session.state.config.market.penaltyRate
   if (!session.state.config.bots.fixes.ceilingIncludesCarry) return P
   return round1(P + referencePrice(session))
+}
+
+/**
+ * Decide once a year whether to buy more abatement capacity, and buy it if so.
+ *
+ * Every archetype that emits goes through here so that they cannot drift apart on the one
+ * decision in this game that spans years. The sizing and payback rule live in
+ * `planInstall`; what this adds is the once-a-year gate, because a bot ticks a dozen times
+ * a trade window and each install step pays the retrofit fee again.
+ *
+ * `bias` shifts the price the bot believes in, the same personality dispersion its quotes
+ * carry. Returns whether anything was installed — informational; callers proceed either
+ * way, since a firm that declines to invest still has to cover its emissions.
+ */
+export function considerInstall(
+  session: Session,
+  botId: string,
+  rt: BotRuntime,
+  price: number,
+  bias = 1,
+): boolean {
+  const record = session.currentYearRecord()
+  const player = session.getPlayer(botId)
+  if (!record || !player) return false
+  if (rt.lastInvestYear === record.year) return false
+  rt.lastInvestYear = record.year
+  const cfg = session.state.config.abatement
+  const plan = planInstall({
+    spec: cfg.sectors[player.industry],
+    price: Math.max(0, price * bias),
+    unabated: session.unabatedFor(player, record.year),
+    committed: player.abatementCommitted,
+    lifetimeCap: session.abatementLifetimeCap,
+    fixedCost: session.abatementFixedCost(botId),
+    horizon: cfg.investmentHorizon,
+  })
+  if (!plan.install) return false
+  try {
+    session.setAbatement(botId, plan.target)
+    return true
+  } catch (e) {
+    if (!(e instanceof GameError)) throw e
+    return false
+  }
 }
 
 /** Apply a bot's personality bias to a price and clamp it into (0.1, ceiling]. */

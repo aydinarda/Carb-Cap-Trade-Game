@@ -39,12 +39,20 @@ function playYear(s: Session, first: boolean) {
   }
   s.closeCapStage()
   s.openTrade()
-  // 0.2 is the shipped ceiling (abatement.maxFraction) — asking for more here would be
-  // silently clamped, which would make this test pin a number nobody chose.
-  s.setAbatement('P1', 0.2)
-  s.setAbatement('P3', 0.1)
-  s.placeOrder('P1', 'sell', 40, 60)
-  s.placeOrder('P3', 'buy', 40, 60) // crosses → one trade at the resting price
+  // Abatement is a LIFETIME budget, so the two years must ask for different levels or the
+  // second year is a silent no-op that pins nothing. Year 12 tops both companies up: a
+  // genuine second step, and therefore a second retrofit fee — which is exactly the
+  // arithmetic most likely to break unnoticed. Levels stay under `abatement.lifetimeCap`
+  // so nothing here is silently clamped to a number nobody chose.
+  s.setAbatement('P1', first ? 0.2 : 0.35)
+  s.setAbatement('P3', first ? 0.1 : 0.3)
+  // 8, not 40. Under the lag nobody's year-11 cut applies in year 11, so the class ends
+  // that year far shorter than it used to; by year 12 a benchmarking company's make-good
+  // debt has eaten nearly all of its allocation and it can only offer single digits. A
+  // fixed size that every mode can actually fill keeps this a characterization test rather
+  // than a no-shorting test.
+  s.placeOrder('P1', 'sell', 8, 60)
+  s.placeOrder('P3', 'buy', 8, 60) // crosses → one trade at the resting price
   s.closeTrade()
 }
 
@@ -59,6 +67,13 @@ function capture(s: Session) {
     realized: rec.realized,
     settlement: rec.settlement,
     netPosition: rec.netPosition,
+    // The three abatement numbers, so the lag itself is characterized: `abatement` is what
+    // is cutting THIS year, `committed` what has been paid for, `spend` what it cost.
+    abatement: rec.abatement,
+    abatementCommitted: Object.fromEntries(
+      s.state.players.map((p) => [p.id, p.abatementCommitted]),
+    ),
+    abatementSpend: rec.abatementSpend,
     banked: Object.fromEntries(s.state.players.map((p) => [p.id, p.bankedCredits])),
     score: Object.fromEntries(s.state.players.map((p) => [p.id, p.score])),
     optimalScore: Object.fromEntries(s.state.players.map((p) => [p.id, p.optimalScore])),
@@ -71,11 +86,25 @@ describe('golden — grandfathering', () => {
     playYear(s, true)
     expect(capture(s)).toMatchInlineSnapshot(`
       {
+        "abatement": {
+          "P1": 0,
+          "P2": 0,
+          "P3": 0,
+        },
+        "abatementCommitted": {
+          "P1": 0.2,
+          "P2": 0,
+          "P3": 0.1,
+        },
+        "abatementSpend": {
+          "P1": 5627,
+          "P3": 6114.4,
+        },
         "auctionPrice": null,
         "banked": {
-          "P1": -34.7,
+          "P1": -229.1,
           "P2": -14,
-          "P3": -8,
+          "P3": -131.1,
         },
         "freeAllocation": {
           "P1": 911,
@@ -83,36 +112,36 @@ describe('golden — grandfathering', () => {
           "P3": 771.8,
         },
         "netPosition": {
-          "P1": 34.7,
+          "P1": 229.1,
           "P2": 14,
-          "P3": 8,
+          "P3": 131.1,
         },
         "optimalScore": {
-          "P1": 3298.1,
-          "P2": 1518.5,
-          "P3": 11085.6,
+          "P1": 18491,
+          "P2": 2610,
+          "P3": 18504.4,
         },
         "primaryPrice": 50,
         "realized": {
-          "P1": 905.7,
+          "P1": 1132.1,
           "P2": 188.8,
-          "P3": 819.8,
+          "P3": 910.9,
         },
         "regulatorGranted": {},
         "regulatorPool": 0,
         "score": {
-          "P1": 5008.9,
+          "P1": 28057,
           "P2": 1400,
-          "P3": 7846.9,
+          "P3": 19704.4,
         },
         "settlement": {
           "P1": {
-            "abatementCost": 3938.9,
-            "penaltyCost": 3470,
+            "abatementCost": 5627,
+            "penaltyCost": 22910,
             "purchaseCost": 0,
-            "sellIncome": 2400,
-            "shortage": 34.7,
-            "yearCost": 5008.9,
+            "sellIncome": 480,
+            "shortage": 229.1,
+            "yearCost": 28057,
           },
           "P2": {
             "abatementCost": 0,
@@ -123,12 +152,12 @@ describe('golden — grandfathering', () => {
             "yearCost": 1400,
           },
           "P3": {
-            "abatementCost": 4646.9,
-            "penaltyCost": 800,
-            "purchaseCost": 2400,
+            "abatementCost": 6114.4,
+            "penaltyCost": 13110,
+            "purchaseCost": 480,
             "sellIncome": 0,
-            "shortage": 8,
-            "yearCost": 7846.9,
+            "shortage": 131.1,
+            "yearCost": 19704.4,
           },
         },
       }
@@ -136,64 +165,78 @@ describe('golden — grandfathering', () => {
     playYear(s, false)
     expect(capture(s)).toMatchInlineSnapshot(`
       {
+        "abatement": {
+          "P1": 0.2,
+          "P2": 0,
+          "P3": 0.1,
+        },
+        "abatementCommitted": {
+          "P1": 0.35,
+          "P2": 0,
+          "P3": 0.3,
+        },
+        "abatementSpend": {
+          "P1": 6888.7,
+          "P3": 14220.1,
+        },
         "auctionPrice": null,
         "banked": {
-          "P1": 5.9,
-          "P2": -27.6,
-          "P3": -7.7,
+          "P1": -356.7,
+          "P2": -30.2,
+          "P3": -257,
         },
         "freeAllocation": {
-          "P1": 905.7,
-          "P2": 175.3,
-          "P3": 776.6,
+          "P1": 911.8,
+          "P2": 172.7,
+          "P3": 773.1,
         },
         "netPosition": {
-          "P1": -5.9,
-          "P2": 27.6,
-          "P3": 7.7,
+          "P1": 356.7,
+          "P2": 30.2,
+          "P3": 257,
         },
         "optimalScore": {
-          "P1": -2318.3,
-          "P2": 2224.5,
-          "P3": 13064.5,
+          "P1": 38759.7,
+          "P2": 4416,
+          "P3": 43392.5,
         },
         "primaryPrice": 60,
         "realized": {
-          "P1": 825.1,
+          "P1": 1031.4,
           "P2": 188.9,
-          "P3": 816.3,
+          "P3": 907,
         },
         "regulatorGranted": {},
         "regulatorPool": 0,
         "score": {
-          "P1": 5778.9,
-          "P2": 4160,
-          "P3": 14911,
+          "P1": 70135.7,
+          "P2": 4420,
+          "P3": 60104.5,
         },
         "settlement": {
           "P1": {
-            "abatementCost": 3170,
-            "penaltyCost": 0,
+            "abatementCost": 6888.7,
+            "penaltyCost": 35670,
             "purchaseCost": 0,
-            "sellIncome": 2400,
-            "shortage": 0,
-            "yearCost": 770,
+            "sellIncome": 480,
+            "shortage": 356.7,
+            "yearCost": 42078.7,
           },
           "P2": {
             "abatementCost": 0,
-            "penaltyCost": 2760,
+            "penaltyCost": 3020,
             "purchaseCost": 0,
             "sellIncome": 0,
-            "shortage": 27.6,
-            "yearCost": 2760,
+            "shortage": 30.2,
+            "yearCost": 3020,
           },
           "P3": {
-            "abatementCost": 3894.1,
-            "penaltyCost": 770,
-            "purchaseCost": 2400,
+            "abatementCost": 14220.1,
+            "penaltyCost": 25700,
+            "purchaseCost": 480,
             "sellIncome": 0,
-            "shortage": 7.7,
-            "yearCost": 7064.1,
+            "shortage": 257,
+            "yearCost": 40400.1,
           },
         },
       }
@@ -202,12 +245,12 @@ describe('golden — grandfathering', () => {
       [
         {
           "cap": 1857.6,
-          "totalRealized": 1914.3,
+          "totalRealized": 2231.8,
           "year": 11,
         },
         {
           "cap": 1857.6,
-          "totalRealized": 1830.3,
+          "totalRealized": 2127.3,
           "year": 12,
         },
       ]
@@ -221,11 +264,25 @@ describe('golden — benchmarking', () => {
     playYear(s, true)
     expect(capture(s)).toMatchInlineSnapshot(`
       {
+        "abatement": {
+          "P1": 0,
+          "P2": 0,
+          "P3": 0,
+        },
+        "abatementCommitted": {
+          "P1": 0.2,
+          "P2": 0,
+          "P3": 0.1,
+        },
+        "abatementSpend": {
+          "P1": 5627,
+          "P3": 6114.4,
+        },
         "auctionPrice": null,
         "banked": {
-          "P1": -345.7,
+          "P1": -540.1,
           "P2": -8.8,
-          "P3": -299.8,
+          "P3": -422.9,
         },
         "freeAllocation": {
           "P1": 600,
@@ -233,36 +290,36 @@ describe('golden — benchmarking', () => {
           "P3": 480,
         },
         "netPosition": {
-          "P1": 345.7,
+          "P1": 540.1,
           "P2": 8.8,
-          "P3": 299.8,
+          "P3": 422.9,
         },
         "optimalScore": {
-          "P1": 21958.1,
-          "P2": 1206.5,
-          "P3": 28593.6,
+          "P1": 37151,
+          "P2": 2298,
+          "P3": 36012.4,
         },
         "primaryPrice": 50,
         "realized": {
-          "P1": 905.7,
+          "P1": 1132.1,
           "P2": 188.8,
-          "P3": 819.8,
+          "P3": 910.9,
         },
         "regulatorGranted": {},
         "regulatorPool": 0,
         "score": {
-          "P1": 36108.9,
+          "P1": 59157,
           "P2": 880,
-          "P3": 37026.9,
+          "P3": 48884.4,
         },
         "settlement": {
           "P1": {
-            "abatementCost": 3938.9,
-            "penaltyCost": 34570,
+            "abatementCost": 5627,
+            "penaltyCost": 54010,
             "purchaseCost": 0,
-            "sellIncome": 2400,
-            "shortage": 345.7,
-            "yearCost": 36108.9,
+            "sellIncome": 480,
+            "shortage": 540.1,
+            "yearCost": 59157,
           },
           "P2": {
             "abatementCost": 0,
@@ -273,12 +330,12 @@ describe('golden — benchmarking', () => {
             "yearCost": 880,
           },
           "P3": {
-            "abatementCost": 4646.9,
-            "penaltyCost": 29980,
-            "purchaseCost": 2400,
+            "abatementCost": 6114.4,
+            "penaltyCost": 42290,
+            "purchaseCost": 480,
             "sellIncome": 0,
-            "shortage": 299.8,
-            "yearCost": 37026.9,
+            "shortage": 422.9,
+            "yearCost": 48884.4,
           },
         },
       }
@@ -286,11 +343,25 @@ describe('golden — benchmarking', () => {
     playYear(s, false)
     expect(capture(s)).toMatchInlineSnapshot(`
       {
+        "abatement": {
+          "P1": 0.2,
+          "P2": 0,
+          "P3": 0.1,
+        },
+        "abatementCommitted": {
+          "P1": 0.35,
+          "P2": 0,
+          "P3": 0.3,
+        },
+        "abatementSpend": {
+          "P1": 6888.7,
+          "P3": 14220.1,
+        },
         "auctionPrice": null,
         "banked": {
-          "P1": -628.8,
+          "P1": -997.5,
           "P2": -23.1,
-          "P3": -610.5,
+          "P3": -856.3,
         },
         "freeAllocation": {
           "P1": 582,
@@ -298,36 +369,36 @@ describe('golden — benchmarking', () => {
           "P3": 465.6,
         },
         "netPosition": {
-          "P1": 628.8,
+          "P1": 997.5,
           "P2": 23.1,
-          "P3": 610.5,
+          "P3": 856.3,
         },
         "optimalScore": {
-          "P1": 54423.7,
-          "P2": 1642.5,
-          "P3": 66740.5,
+          "P1": 95867.7,
+          "P2": 3678,
+          "P3": 96858.5,
         },
         "primaryPrice": 60,
         "realized": {
-          "P1": 825.1,
+          "P1": 1031.4,
           "P2": 188.9,
-          "P3": 816.3,
+          "P3": 907,
         },
         "regulatorGranted": {},
         "regulatorPool": 0,
         "score": {
-          "P1": 99758.9,
+          "P1": 165315.7,
           "P2": 3190,
-          "P3": 104371,
+          "P3": 149214.5,
         },
         "settlement": {
           "P1": {
-            "abatementCost": 3170,
-            "penaltyCost": 62880,
+            "abatementCost": 6888.7,
+            "penaltyCost": 99750,
             "purchaseCost": 0,
-            "sellIncome": 2400,
-            "shortage": 628.8,
-            "yearCost": 63650,
+            "sellIncome": 480,
+            "shortage": 997.5,
+            "yearCost": 106158.7,
           },
           "P2": {
             "abatementCost": 0,
@@ -338,12 +409,12 @@ describe('golden — benchmarking', () => {
             "yearCost": 2310,
           },
           "P3": {
-            "abatementCost": 3894.1,
-            "penaltyCost": 61050,
-            "purchaseCost": 2400,
+            "abatementCost": 14220.1,
+            "penaltyCost": 85630,
+            "purchaseCost": 480,
             "sellIncome": 0,
-            "shortage": 610.5,
-            "yearCost": 67344.1,
+            "shortage": 856.3,
+            "yearCost": 100330.1,
           },
         },
       }
@@ -352,12 +423,12 @@ describe('golden — benchmarking', () => {
       [
         {
           "cap": 1260,
-          "totalRealized": 1914.3,
+          "totalRealized": 2231.8,
           "year": 11,
         },
         {
           "cap": 1222.2,
-          "totalRealized": 1830.3,
+          "totalRealized": 2127.3,
           "year": 12,
         },
       ]
@@ -371,11 +442,25 @@ describe('golden — auctioning', () => {
     playYear(s, true)
     expect(capture(s)).toMatchInlineSnapshot(`
       {
+        "abatement": {
+          "P1": 0,
+          "P2": 0,
+          "P3": 0,
+        },
+        "abatementCommitted": {
+          "P1": 0.2,
+          "P2": 0,
+          "P3": 0.1,
+        },
+        "abatementSpend": {
+          "P1": 5627,
+          "P3": 6114.4,
+        },
         "auctionPrice": 45,
         "banked": {
-          "P1": -45.7,
+          "P1": -240.1,
           "P2": 111.2,
-          "P3": -79.8,
+          "P3": -202.9,
         },
         "freeAllocation": {
           "P1": 0,
@@ -383,20 +468,20 @@ describe('golden — auctioning', () => {
           "P3": 0,
         },
         "netPosition": {
-          "P1": 45.7,
+          "P1": 240.1,
           "P2": -111.2,
-          "P3": 79.8,
+          "P3": 202.9,
         },
         "optimalScore": {
-          "P1": 3958.1,
-          "P2": -5993.5,
-          "P3": 15393.6,
+          "P1": 19151,
+          "P2": -4902,
+          "P3": 22812.4,
         },
         "primaryPrice": 45,
         "realized": {
-          "P1": 905.7,
+          "P1": 1132.1,
           "P2": 188.8,
-          "P3": 819.8,
+          "P3": 910.9,
         },
         "regulatorGranted": {
           "P1": 900,
@@ -405,18 +490,18 @@ describe('golden — auctioning', () => {
         },
         "regulatorPool": 2322,
         "score": {
-          "P1": 46608.9,
+          "P1": 69657,
           "P2": 13500,
-          "P3": 46526.9,
+          "P3": 58384.4,
         },
         "settlement": {
           "P1": {
-            "abatementCost": 3938.9,
-            "penaltyCost": 4570,
+            "abatementCost": 5627,
+            "penaltyCost": 24010,
             "purchaseCost": 40500,
-            "sellIncome": 2400,
-            "shortage": 45.7,
-            "yearCost": 46608.9,
+            "sellIncome": 480,
+            "shortage": 240.1,
+            "yearCost": 69657,
           },
           "P2": {
             "abatementCost": 0,
@@ -427,12 +512,12 @@ describe('golden — auctioning', () => {
             "yearCost": 13500,
           },
           "P3": {
-            "abatementCost": 4646.9,
-            "penaltyCost": 7980,
-            "purchaseCost": 33900,
+            "abatementCost": 6114.4,
+            "penaltyCost": 20290,
+            "purchaseCost": 31980,
             "sellIncome": 0,
-            "shortage": 79.8,
-            "yearCost": 46526.9,
+            "shortage": 202.9,
+            "yearCost": 58384.4,
           },
         },
       }
@@ -440,11 +525,25 @@ describe('golden — auctioning', () => {
     playYear(s, false)
     expect(capture(s)).toMatchInlineSnapshot(`
       {
+        "abatement": {
+          "P1": 0.2,
+          "P2": 0,
+          "P3": 0.1,
+        },
+        "abatementCommitted": {
+          "P1": 0.35,
+          "P2": 0,
+          "P3": 0.3,
+        },
+        "abatementSpend": {
+          "P1": 6888.7,
+          "P3": 14220.1,
+        },
         "auctionPrice": 45,
         "banked": {
-          "P1": -10.8,
+          "P1": -379.5,
           "P2": 222.3,
-          "P3": -156.1,
+          "P3": -401.9,
         },
         "freeAllocation": {
           "P1": 0,
@@ -452,20 +551,20 @@ describe('golden — auctioning', () => {
           "P3": 0,
         },
         "netPosition": {
-          "P1": 10.8,
+          "P1": 379.5,
           "P2": -222.3,
-          "P3": 156.1,
+          "P3": 401.9,
         },
         "optimalScore": {
-          "P1": -656.3,
-          "P2": -20281.5,
-          "P3": 26276.5,
+          "P1": 40787.7,
+          "P2": -18246,
+          "P3": 56394.5,
         },
         "primaryPrice": 45,
         "realized": {
-          "P1": 825.1,
+          "P1": 1031.4,
           "P2": 188.9,
-          "P3": 816.3,
+          "P3": 907,
         },
         "regulatorGranted": {
           "P1": 900,
@@ -474,18 +573,18 @@ describe('golden — auctioning', () => {
         },
         "regulatorPool": 2252.3,
         "score": {
-          "P1": 88958.9,
+          "P1": 154515.7,
           "P2": 27000,
-          "P3": 99931,
+          "P3": 144774.5,
         },
         "settlement": {
           "P1": {
-            "abatementCost": 3170,
-            "penaltyCost": 1080,
+            "abatementCost": 6888.7,
+            "penaltyCost": 37950,
             "purchaseCost": 40500,
-            "sellIncome": 2400,
-            "shortage": 10.8,
-            "yearCost": 42350,
+            "sellIncome": 480,
+            "shortage": 379.5,
+            "yearCost": 84858.7,
           },
           "P2": {
             "abatementCost": 0,
@@ -496,12 +595,12 @@ describe('golden — auctioning', () => {
             "yearCost": 13500,
           },
           "P3": {
-            "abatementCost": 3894.1,
-            "penaltyCost": 15610,
-            "purchaseCost": 33900,
+            "abatementCost": 14220.1,
+            "penaltyCost": 40190,
+            "purchaseCost": 31980,
             "sellIncome": 0,
-            "shortage": 156.1,
-            "yearCost": 53404.1,
+            "shortage": 401.9,
+            "yearCost": 86390.1,
           },
         },
       }
@@ -510,12 +609,12 @@ describe('golden — auctioning', () => {
       [
         {
           "cap": 2322,
-          "totalRealized": 1914.3,
+          "totalRealized": 2231.8,
           "year": 11,
         },
         {
           "cap": 2252.3,
-          "totalRealized": 1830.3,
+          "totalRealized": 2127.3,
           "year": 12,
         },
       ]

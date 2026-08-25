@@ -92,7 +92,7 @@ export interface ReserveStep {
  * market as the price climbs, in steps. Modelled on RGGI's CCR.
  *
  * It exists because a shortage larger than the class can physically abate
- * (`abatement.maxFraction`) is otherwise uncoverable — the price simply pins to the fine and
+ * (`abatement.lifetimeCap`) is otherwise uncoverable — the price simply pins to the fine and
  * there is nothing to buy at any price. It is a *secondary* mechanism: sized to relieve a
  * squeeze, not to set the price.
  */
@@ -141,18 +141,38 @@ export interface AbatementConfig {
   /** Per-sector marginal abatement cost curve. */
   sectors: Record<Industry, AbatementSpec>
   /**
-   * The most of its own emissions a company can cut in one year, as a fraction.
+   * The most of its own **un-abated** emissions a company may ever cut, as a fraction, over
+   * the whole game. Not per year — abatement is installed capacity, and this is the budget.
    *
    * A real installation cannot go to zero: it can retrofit, switch fuel or cut output at
    * the margin, but the plant still has to run. Without this the optimum at a high enough
    * price is a 100% cut, which is both physically impossible and pedagogically wrong — it
    * makes the carbon price look like it can solve compliance on its own.
    *
-   * This binds everywhere: the slider a student sees, what `Session.setAbatement` will
-   * accept, the r* every bot and simulated student targets, the per-company optimum the
-   * leaderboard scores against, and the efficient price the simulator reports.
+   * This binds the slider a student sees and what `Session.setAbatement` will accept.
+   * Lowering it mid-game binds future installs only: nothing is un-installed or refunded.
+   *
+   * (Was `maxFraction`, a per-year ceiling. Renamed rather than repurposed so that any
+   * scenario file written against the old meaning fails loudly instead of lying.)
    */
-  maxFraction: number
+  lifetimeCap: number
+  /**
+   * Retrofit fee charged **on every install step**, multiplied by the company's
+   * baseline-year emission. Paying it again for each step is what makes going in small
+   * bites dearer than going once: 10% then 40% costs `2·fee + ∫₀^0.5`, where 50% in one
+   * move costs `fee + ∫₀^0.5`.
+   *
+   * Scaled by the baseline rather than by current emissions on purpose. A flat fee would
+   * be ~7× Transport's annual emission but ~2× Power's; and a fee tracking *current*
+   * emissions would shrink after the first step, which would break that identity.
+   */
+  fixedCostPerTonneBaseline: number
+  /**
+   * How many years of savings an **agent** requires to cover an install before it will pay
+   * the fee. Purely a bot/simulated-student parameter — the engine neither reads it nor
+   * enforces any payback on a human, who is free to invest at any price.
+   */
+  investmentHorizon: number
 }
 
 export interface MarketMakerConfig {
@@ -229,10 +249,16 @@ export interface BotsConfig {
    */
   fixes: {
     /**
-     * The noise bot sizes its order as `expected × (1 − r*) − held` but never calls
-     * setAbatement, so it trades as if it had cut while its recorded abatement stays 0. It
-     * is then short at settlement by `expected × r*`, pays the penalty, and the shortfall
-     * compounds through bankedCredits → carriedIn → creditsHeld.
+     * Whether the noise bot ever invests in abatement capacity.
+     *
+     * It used to guard a plain bug: the bot sized its order as `expected × (1 − r*) − held`
+     * but never called setAbatement, so it traded as if it had cut while its recorded
+     * abatement stayed 0, and was short by `expected × r*` at every settlement. That is
+     * gone — sizing reads `plannedEmission`, which cannot disagree with the engine.
+     *
+     * What is left is a behavioural question worth being able to answer both ways: is a
+     * careless trader also a firm that never retrofits? Off means it trades badly AND never
+     * decarbonises, which is a coherent archetype, not a defect.
      */
     noiseAbatement: boolean
     /**

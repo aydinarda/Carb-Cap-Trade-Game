@@ -35,6 +35,22 @@ export interface Player extends PlayerProfile {
    * next year's holdings; monetized at the final market price when the game ends.
    */
   bankedCredits: number
+  /**
+   * Installed abatement capacity, as a fraction of the company's **un-abated** emissions.
+   * Three numbers because the capacity is permanent and takes a year to come online:
+   *
+   *  - `abatementCommitted` — everything paid for. Monotonically rising, capped by
+   *    `config.abatement.lifetimeCap`. Effective from NEXT year.
+   *  - `abatementInForce`   — what is cutting THIS year's emissions. Only `openYear` moves
+   *    it, which is precisely what makes the one-year lag impossible to bypass.
+   *  - `abatementEmbedded`  — the level already baked into the last realized emission, and
+   *    so the divisor that recovers the un-abated level from it.
+   *
+   * Invariant: 0 ≤ embedded ≤ inForce ≤ committed ≤ lifetimeCap.
+   */
+  abatementInForce: number
+  abatementCommitted: number
+  abatementEmbedded: number
   /** Backend bot (no socket). Undefined for human players. */
   isBot?: boolean
   /** Which archetype this bot plays (only set when isBot). */
@@ -102,8 +118,16 @@ export interface YearRecord {
   /** Continuous order-book market: resting/filled orders and executed trades. */
   orders: Order[]
   trades: Trade[]
-  /** Fraction of expected emissions each company chose to abate (0..1). */
+  /**
+   * Installed capacity **in force this year** (0..1) — the cut actually applied to this
+   * year's realized emissions. Populated from `Player.abatementInForce` at year open, and
+   * no longer wiped: capacity is permanent, so it carries across years.
+   */
   abatement: Record<string, number>
+  /** Capacity newly committed during this year. Comes online next year. */
+  abatementInstalled: Record<string, number>
+  /** Money charged for those installs — fee(s) plus the variable cost of the new slice. */
+  abatementSpend: Record<string, number>
   /** Auctioning mode: each company's sealed bid at the cap stage. */
   auctionBid: Record<string, { qty: number; price: number }>
   /** Auctioning mode: uniform clearing price after the auction closes. */
@@ -155,6 +179,10 @@ export interface HostConfigView {
   sectorAverage: Record<Industry, number>
   /** Read-only display of the active MAC curve per sector. */
   abatement: Record<Industry, AbatementSpec>
+  /** Most of its un-abated emissions a company may cut across the WHOLE game. */
+  abatementLifetimeCap: number
+  /** Retrofit fee per install step, × the company's baseline emission. */
+  abatementFixedCost: number
   /** Cost containment reserve: whether it is armed, and the ladder it would release on. */
   reserveEnabled: boolean
   reserveSteps: { triggerPrice: number; cumulativeFraction: number }[]
@@ -202,13 +230,29 @@ export interface YouView {
    * `myOrders` copy was pure duplicated payload.
    */
   myTrades: Trade[]
-  /** Fraction of expected emissions this company chose to abate (0..1). */
-  abatement: number | null
+  /** Installed capacity cutting THIS year's emissions (0..1). */
+  abatementInForce: number | null
+  /** Everything paid for. Above `abatementInForce` until next year opens. */
+  abatementCommitted: number
+  /** Un-abated emissions — the base every fraction on this screen is a fraction of. */
+  unabatedExpected: number
+  /**
+   * The retrofit fee this company pays per install step, in euros. Sent as a number rather
+   * than as the rule that produces it (`fee × baseline`) so the client cannot compute a
+   * different figure from the one it will actually be charged.
+   */
+  abatementFixedCost: number
   /** EU-ETS carry into this year: banked allowances (+) or make-good debt (−). */
   banked: number | null
   /** free + regulatorGranted + banked + net traded, this year. */
   creditsHeld: number | null
-  /** Mean emission players plan against; known from the cap stage on. */
+  /**
+   * The mean this year's emissions are drawn around — capacity already in force applied.
+   * This is what the company must actually cover, and it does NOT move when the slider
+   * moves: a retrofit bought today changes next year's number, never this one.
+   */
+  plannedEmission: number
+  /** Last year's realized, before this year's capacity. Kept for the history chart. */
   expectedEmission: number | null
   /** Actual emission — revealed only at year end (settlement). */
   realized: number | null
@@ -243,9 +287,10 @@ export interface PlayerSnapshot {
   /** This player's sector MAC curve, for the live abatement-cost preview. The client
    *  evaluates it with the same shared functions the server settles with. */
   abatement: AbatementSpec
-  /** Most of one year's emissions this company may cut — the slider's ceiling. The server
-   *  clamps to the same number, so this is a UI affordance, not the enforcement. */
-  maxAbatement: number
+  /** Most of its un-abated emissions this company may EVER cut — the slider's ceiling, and
+   *  a lifetime budget rather than a per-year limit. The server clamps to the same number,
+   *  so this is a UI affordance, not the enforcement. */
+  abatementLifetimeCap: number
   /** Auctioning mode: total supply on offer this year (= the cap). */
   auctionSupply: number
   /** Auctioning mode: uniform clearing price, once the auction has closed. */
