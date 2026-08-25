@@ -20,7 +20,9 @@ describe('DEFAULT_GAME_CONFIG reproduces the shipped constants', () => {
     expect(c.bots.compliance.priceStep).toBe(0.5)
     expect(c.allocation.freeCreditRatio).toBe(0.8)
     expect(c.allocation.auctionCapRatio).toBe(1)
-    expect(c.allocation.capReductionFactor).toBe(0.97)
+    // Deliberately no longer 0.97: permanent abatement makes class demand fall much faster
+    // than it did under the per-year model, so the supply squeeze had to keep up.
+    expect(c.allocation.capReductionFactor).toBe(0.95)
     expect(c.allocation.applyLRFToGrandfathering).toBe(false) // preserves today's asymmetry
     expect(c.emissions.volatility).toBe(0.08)
     expect(c.emissions.historyWindow).toBe(10)

@@ -50,7 +50,10 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     benchmark: { ...DEFAULT_BENCHMARK },
     benchmarkStringency: BENCHMARK_STRINGENCY,
     auctionCapRatio: 1,
-    capReductionFactor: 0.97,
+    // −5%/yr. Raised from 0.97 once abatement became permanent: a company that installs
+    // capacity now KEEPS the cut, so class demand falls far faster than it used to and a
+    // 3% supply squeeze no longer keeps the market short. See the notebook §11.
+    capReductionFactor: 0.95,
     applyLRFToGrandfathering: false,
     reserve: {
       enabled: true,
