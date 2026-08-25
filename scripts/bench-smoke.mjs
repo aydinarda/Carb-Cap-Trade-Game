@@ -76,10 +76,13 @@ ok(hs.classAggregate.yearHistory.length === 1, `year 11 recorded, cap = ${hs.cla
 
 // ===== YEAR 12: tightening =====
 const y11Alloc = ph.you.freeAllocation
+// Read the factor off the session rather than hardcoding it: this assertion silently
+// went stale once the default moved from 0.97 to 0.95.
+const lrf = hs.config.capReductionFactor
 await call(host, 'host:advanceYear')
 await wait(120)
-ok(ph.you.freeAllocation === Math.round(y11Alloc * 0.97 * 10) / 10,
-   `benchmark TIGHTENED 3%: ${y11Alloc} → ${ph.you.freeAllocation}`)
+ok(ph.you.freeAllocation === Math.round(y11Alloc * lrf * 10) / 10,
+   `benchmark TIGHTENED by ${Math.round((1 - lrf) * 100)}%: ${y11Alloc} → ${ph.you.freeAllocation}`)
 ok(ph.prevMarketPrice !== null && ph.prevMarketPrice > 0,
    `price signal carried into year 12: prevMarketPrice = ${ph.prevMarketPrice}`)
 const mm12 = hs.players.find((p) => p.botType === 'marketMaker')

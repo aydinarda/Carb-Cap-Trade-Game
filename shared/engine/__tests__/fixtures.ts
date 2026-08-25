@@ -63,6 +63,6 @@ export const XLSX_PLAYERS: {
 
 export const DEFAULT_CONFIG = resolveConfig({
   // A flat cap keeps these fixtures on the notebook's arithmetic: the shipped default
-  // is 0.97, which would tighten allocations from year 12 on.
+  // is 0.95, which would tighten allocations from year 12 on.
   allocation: { capReductionFactor: 1 },
 })

@@ -53,7 +53,7 @@ describe('cap mechanism registry', () => {
     for (const mode of ['benchmarking', 'grandfathering'] as const) {
       expect(CAP_MECHANISMS[mode].poolFor(players, 11, DEFAULT_CONFIG, 28332.7)).toBe(0)
     }
-    // ratio 1.0 × baseline × 0.97^0
+    // ratio 1.0 × baseline × LRF^0
     expect(CAP_MECHANISMS.auctioning.poolFor(players, 11, DEFAULT_CONFIG, 28332.7)).toBe(28332.7)
   })
 })
@@ -117,6 +117,51 @@ describe('benchmarking', () => {
     // reference price — nothing else ever lands in regulatorGranted under either.
     expect(CAP_MECHANISMS.benchmarking.primaryPrice(record, DEFAULT_CONFIG, 12.4)).toBe(12.4)
     expect(CAP_MECHANISMS.grandfathering.primaryPrice(record, DEFAULT_CONFIG, 12.4)).toBe(12.4)
+  })
+})
+
+/**
+ * Does abating this year cut next year's free allocation? Under benchmarking it must not —
+ * that is the whole point of an ex-ante benchmark, and a ratchet would tell students the
+ * profitable move is to keep emitting. Under grandfathering it must, because the allocation
+ * is a share of a moving window of your own realized emissions.
+ *
+ * Both cases go through the same setup a real year end produces: `Session.realizeYear` writes
+ * the post-abatement emission into `player.emissions[year]`, and that year then enters the
+ * grandfathering window.
+ */
+describe('abatement feedback into the next year’s allocation', () => {
+  /** What year end leaves behind: Year 11 realized at `fraction` of the baseline year. */
+  function realizedYear11(p: Player, fraction: number): Player {
+    return { ...p, emissions: { ...p.emissions, 11: (p.emissions[10] ?? 0) * fraction } }
+  }
+
+  const flat = players.map((p) => realizedYear11(p, 1)) // nobody abates
+  const p1Abates = [realizedYear11(players[0], 0.5), ...flat.slice(1)] // P1 halves its emissions
+
+  it('benchmarking: halving your emissions leaves next year’s free credits untouched', () => {
+    const before = CAP_MECHANISMS.benchmarking.allocate(flat, 12, 0, DEFAULT_CONFIG)
+    const after = CAP_MECHANISMS.benchmarking.allocate(p1Abates, 12, 0, DEFAULT_CONFIG)
+    expect(after[players[0].id]).toBe(before[players[0].id])
+    // …and it does not quietly move anyone else's either, since nothing is shared out.
+    expect(after).toEqual(before)
+  })
+
+  it('benchmarking: the whole class abating still leaves every allocation untouched', () => {
+    const allAbate = players.map((p) => realizedYear11(p, 0.5))
+    expect(CAP_MECHANISMS.benchmarking.allocate(allAbate, 12, 0, DEFAULT_CONFIG)).toEqual(
+      CAP_MECHANISMS.benchmarking.allocate(flat, 12, 0, DEFAULT_CONFIG),
+    )
+  })
+
+  it('grandfathering: the same cut does shrink next year’s share — the ratchet benchmarking removes', () => {
+    // The class limit is fixed off the baseline year, so only the shares move.
+    const limit = CAP_MECHANISMS.grandfathering.computeFreeCreditLimit(flat, DEFAULT_CONFIG)
+    const before = CAP_MECHANISMS.grandfathering.allocate(flat, 12, limit, DEFAULT_CONFIG)
+    const after = CAP_MECHANISMS.grandfathering.allocate(p1Abates, 12, limit, DEFAULT_CONFIG)
+    expect(after[players[0].id]).toBeLessThan(before[players[0].id])
+    // The forgone share is handed to the companies that did not cut.
+    expect(after[players[1].id]).toBeGreaterThan(before[players[1].id])
   })
 })
 

@@ -114,7 +114,7 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
     <div className="flex flex-col gap-3">
       {field('Penalty rate', penalty, setPenalty, 'cost per tCO₂ uncovered — market price ceiling')}
       {field('Auction supply ratio', auctionCapRatio, setAuctionCapRatio, '× baseline (auctioning; ≤1 = scarcer)')}
-      {field('Cap reduction / year', capReduction, setCapReduction, 'auction supply AND benchmark × this each year (EU-ETS LRF; 0.97 = −3%/yr)')}
+      {field('Cap reduction / year', capReduction, setCapReduction, 'auction supply AND benchmark × this each year (EU-ETS LRF; 0.95 = −5%/yr)')}
       {field('Abatement budget', abateCap, setAbateCap, 'most a company may EVER cut, as a fraction — a lifetime budget, not per year')}
       {/* Lowering the budget binds future installs only; nothing already built is undone. */}
       {field('Retrofit fee', abateFee, setAbateFee, '€ per t of baseline, charged AGAIN on every install step')}
