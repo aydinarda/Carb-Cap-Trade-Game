@@ -613,15 +613,26 @@ export class Session {
   }
 
   endGame() {
-    // Settle leftover EU-ETS carry at the final market price: banked allowances are
-    // cashed out (income → lower cost), a remaining make-good debt must be bought
-    // back (cost → higher cost). After this the carry is closed.
+    // The carry closes ASYMMETRICALLY, and deliberately so.
+    //
+    // A leftover SURPLUS is stranded: unsold allowances are simply worth nothing when the
+    // scheme ends. They used to be cashed out at the final market price, which made
+    // hoarding riskless — you could corner the market, never sell, and still be paid out
+    // in full at the end. Worse, `finalReferencePrice` falls back to the PENALTY when no
+    // year ever traded, so a dead market monetized inventory at the highest price in the
+    // game. Stranding it is what makes an unsold position a real position: if you want the
+    // value, you have to find a buyer while the market is open.
+    //
+    // A leftover DEBT still settles. An obligation does not expire just because the game
+    // stopped: the company was fined each year it was short AND still owes the tonnes.
+    // Letting the debt evaporate here would make defaulting in the final years free, which
+    // is the opposite of the lesson — and would hand the win to whoever defaulted last.
     const finalPrice = this.finalReferencePrice()
     for (const player of this.state.players) {
-      if (player.bankedCredits !== 0) {
+      if (player.bankedCredits < 0) {
         player.score = round1(player.score - player.bankedCredits * finalPrice)
-        player.bankedCredits = 0
       }
+      // Kept, not zeroed: the final screen should show what was left stranded or owed.
     }
     this.state.phase = 'ended'
     this.endedAt = Date.now()

@@ -92,23 +92,54 @@ describe('EU-ETS banking & make-good debt carry', () => {
   })
 })
 
-describe('endGame — monetize leftover carry at the final price', () => {
-  it('banks/debts are cashed at the final price and reset; phase ends', () => {
-    const s = grandfathering()
+describe('endGame — surplus is stranded, debt still settles', () => {
+  /** Drives one year and returns the session plus everyone's pre-endGame position. */
+  const playOneYear = (seed: number, config?: DeepPartial<GameConfig>) => {
+    const s = grandfathering(seed, config)
     s.startYear()
     s.closeCapStage()
     s.openTrade()
-    s.setAbatement('P1', s.abatementLifetimeCap)
     s.closeTrade()
-    // No trades occurred and grandfathering has no auction price → final price = penaltyRate.
-    const finalPrice = s.state.config.market.penaltyRate
-    const before = new Map(s.state.players.map((p) => [p.id, { score: p.score, banked: p.bankedCredits }]))
+    const before = new Map(
+      s.state.players.map((p) => [p.id, { score: p.score, banked: p.bankedCredits }]),
+    )
+    return { s, before }
+  }
+
+  it('leaves an unsold surplus worth nothing', () => {
+    // Free allocation well above emissions, so everyone ends long and nobody sold.
+    const { s, before } = playOneYear(1, { allocation: { freeCreditRatio: 3 } })
+    const longPlayers = s.state.players.filter((p) => before.get(p.id)!.banked > 0)
+    expect(longPlayers.length).toBeGreaterThan(0)
+    s.endGame()
+    for (const p of longPlayers) {
+      // Cashing it out at the final price used to make hoarding riskless — and with no
+      // trades the fallback price is the PENALTY, the dearest price in the game.
+      expect(p.score, p.id).toBe(before.get(p.id)!.score)
+    }
+  })
+
+  it('still charges a leftover make-good debt', () => {
+    const { s, before } = playOneYear(1)
+    const debtors = s.state.players.filter((p) => before.get(p.id)!.banked < 0)
+    expect(debtors.length).toBeGreaterThan(0)
+    const finalPrice = s.state.config.market.penaltyRate // no trades, no auction
+    s.endGame()
+    for (const p of debtors) {
+      const b = before.get(p.id)!
+      // An obligation does not expire because the game stopped: defaulting in the final
+      // year must not be cheaper than defaulting in any other.
+      expect(p.score, p.id).toBe(round1(b.score - b.banked * finalPrice))
+    }
+  })
+
+  it('keeps the closing position on the books, and ends the game', () => {
+    const { s, before } = playOneYear(1, { allocation: { freeCreditRatio: 3 } })
     s.endGame()
     expect(s.state.phase).toBe('ended')
+    // Not zeroed — the final screen has to be able to show what was stranded or owed.
     for (const p of s.state.players) {
-      const b = before.get(p.id)!
-      expect(p.score).toBe(round1(b.score - b.banked * finalPrice))
-      expect(p.bankedCredits).toBe(0)
+      if (before.get(p.id)!.banked > 0) expect(p.bankedCredits).toBe(before.get(p.id)!.banked)
     }
   })
 })
