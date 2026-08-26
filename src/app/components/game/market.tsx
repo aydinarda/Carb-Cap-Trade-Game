@@ -27,6 +27,69 @@ export function MarketTicker({ market }: { market: MarketView }) {
   )
 }
 
+/**
+ * The same numbers as `MarketTicker`, compressed to one line and made clickable, for the
+ * order ticket's header.
+ *
+ * It exists because the reference price and the field you type a price into were at
+ * opposite ends of a long screen: you had to scroll away from the ticket to see what the
+ * market was doing, then scroll back. Every price here fills the ticket's price field, so
+ * the number does not have to be retyped or remembered at all.
+ *
+ * `prevPrice` is the fallback for `Last`. At the start of a round nothing has traded yet,
+ * so last / bid / ask / vwap are all blank and the only anchor in the game is what last
+ * round settled at — the strip relabels itself rather than showing a row of dashes.
+ *
+ * Volume is deliberately NOT clickable: it is the one figure here that is not a price, and
+ * loading it into a price field would be nonsense.
+ */
+export function PriceStrip({
+  market,
+  auctionPrice,
+  prevPrice,
+  onPick,
+}: {
+  market: MarketView
+  auctionPrice?: number | null
+  prevPrice?: number | null
+  onPick: (price: number) => void
+}) {
+  const usePrev = market.lastPrice === null && prevPrice != null
+  const cells: { label: string; value: number | null; accent?: boolean }[] = [
+    ...(auctionPrice != null ? [{ label: 'Auction', value: auctionPrice, accent: true }] : []),
+    { label: usePrev ? 'Prev round' : 'Last', value: usePrev ? prevPrice! : market.lastPrice },
+    { label: 'Bid', value: market.bestBid },
+    { label: 'Ask', value: market.bestAsk },
+    { label: 'VWAP', value: market.vwap },
+  ]
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-mono">
+      {cells.map((c) => (
+        <button
+          key={c.label}
+          type="button"
+          disabled={c.value === null}
+          onClick={() => c.value !== null && onPick(c.value)}
+          title={c.value !== null ? 'Use this price' : undefined}
+          className={cn(
+            'rounded px-1.5 py-0.5 border transition-colors',
+            c.value === null
+              ? 'border-transparent text-muted-foreground/40'
+              : c.accent
+                ? 'border-accent/40 text-accent hover:bg-accent/10'
+                : 'border-border text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
+          )}
+        >
+          {c.label} <span className="font-bold">{c.value ?? '—'}</span>
+        </button>
+      ))}
+      <span className="px-1 text-muted-foreground/60">
+        Vol <span className="font-bold">{market.volume.toLocaleString()}</span>
+      </span>
+    </div>
+  )
+}
+
 function OrderRow({
   order,
   mine,

@@ -8,7 +8,7 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Slider } from '../../components/ui/slider'
 import { FlowHint, StatCard } from '../../components/game/cards'
-import { MarketTicker, OrderBook, TradesFeed } from '../../components/game/market'
+import { OrderBook, PriceStrip, TradesFeed } from '../../components/game/market'
 import { cn, TRADE_FLOW } from '../../components/game/theme'
 import { useGame } from '../../net/GameContext'
 
@@ -236,9 +236,21 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
             by side, then one full-width action. The fields used to sit in a `flex-wrap` row,
             which let quantity and price land on different lines at narrow widths. */}
         <div className="rounded-xl border border-accent/30 bg-card/80 p-5">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
-            <Send size={12} className="text-accent" />
-            Limit order
+          {/* The market's numbers live here, beside the field you type a price into —
+              they used to be in the right-hand column, a scroll away from the ticket. */}
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mb-3">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider">
+              <Send size={12} className="text-accent" />
+              Limit order
+            </div>
+            {market && (
+              <PriceStrip
+                market={market}
+                auctionPrice={auctionPrice}
+                prevPrice={snap.prevMarketPrice}
+                onPick={(p) => setPrice(String(p))}
+              />
+            )}
           </div>
           <form
             className="flex flex-col gap-3"
@@ -377,7 +389,9 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
           </div>
         )}
 
-        {market && <MarketTicker market={market} />}
+        {/* The MarketTicker that used to sit here has moved into the order ticket's header
+            as PriceStrip. Repeating the same five numbers in both places would be noise,
+            and the copy beside the price field is the one that gets used. */}
 
         {market && (
           <div className="rounded-xl border border-border bg-card/70 p-4">
