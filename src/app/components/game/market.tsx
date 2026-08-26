@@ -32,11 +32,13 @@ function OrderRow({
   mine,
   anonymous,
   onCancel,
+  onPickPrice,
 }: {
   order: Order
   mine: boolean
   anonymous: boolean
   onCancel?: (id: string) => void
+  onPickPrice?: (price: number) => void
 }) {
   // Anonymised for players (only your own orders are labelled); host sees ids. The cost
   // containment reserve is never anonymised — the whole point of resting its ladder in the
@@ -54,10 +56,26 @@ function OrderRow({
       <span className={cn('font-bold w-9', mine ? 'text-primary' : 'text-muted-foreground')}>
         {label}
       </span>
-      <span className="text-foreground">
-        {order.remaining.toLocaleString()} <span className="text-muted-foreground">cr @</span>{' '}
-        <span className={order.side === 'buy' ? 'text-primary' : 'text-accent'}>{order.price}</span>
-      </span>
+      {/* The price is a button wherever the screen has an order form to fill — clicking a
+          resting order to load its price is standard in a real book, and it saves a student
+          retyping a number that is already on screen. Elsewhere (the host view) it stays
+          plain text, so nothing implies an interaction that does not exist. */}
+      {onPickPrice ? (
+        <button
+          type="button"
+          onClick={() => onPickPrice(order.price)}
+          title="Use this price in your order"
+          className="text-foreground rounded px-1 -mx-1 hover:bg-foreground/10 transition-colors"
+        >
+          {order.remaining.toLocaleString()} <span className="text-muted-foreground">cr @</span>{' '}
+          <span className={order.side === 'buy' ? 'text-primary' : 'text-accent'}>{order.price}</span>
+        </button>
+      ) : (
+        <span className="text-foreground">
+          {order.remaining.toLocaleString()} <span className="text-muted-foreground">cr @</span>{' '}
+          <span className={order.side === 'buy' ? 'text-primary' : 'text-accent'}>{order.price}</span>
+        </span>
+      )}
       {mine && onCancel ? (
         <button
           onClick={() => onCancel(order.id)}
@@ -78,12 +96,16 @@ export function OrderBook({
   youId,
   anonymous = true,
   onCancel,
+  onPickPrice,
 }: {
   market: MarketView
   youId?: string
   /** Hide other players' ids (default true; host passes false). */
   anonymous?: boolean
   onCancel?: (id: string) => void
+  /** Clicking a resting order loads its price into the caller's order form. Omit on any
+   *  screen with no form — the rows then render as plain, non-interactive text. */
+  onPickPrice?: (price: number) => void
 }) {
   const column = (title: string, orders: Order[], empty: string) => (
     <div className="flex-1 min-w-0">
@@ -103,6 +125,7 @@ export function OrderBook({
                 mine={o.playerId === youId}
                 anonymous={anonymous}
                 onCancel={onCancel}
+                onPickPrice={onPickPrice}
               />
             ))
         )}

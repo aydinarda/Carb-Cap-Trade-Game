@@ -65,6 +65,20 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   const gap = r1(planned - held) // > 0 short, < 0 surplus
   const short = gap > 0
 
+  // The ticket's derived values. `orderValue` doubles as the submit guard: null means the
+  // form is not yet a valid order, so the button label and its disabled state cannot
+  // disagree about whether there is something to place.
+  const qtyNum = Number(qty)
+  const priceNum = Number(price)
+  const orderValue =
+    qty && price && qtyNum > 0 && priceNum > 0 ? r1(qtyNum * priceNum) : null
+  // What is still offerable after the asks already resting. The engine enforces this; the
+  // ticket only reports it, so a rejected order is never a surprise.
+  const openAsks = (market?.asks ?? [])
+    .filter((o) => o.playerId === snap.you.id)
+    .reduce((s, o) => s + o.remaining, 0)
+  const sellRoom = r1(Math.max(0, held - openAsks))
+
   const submitOrder = async () => {
     setBusy(true)
     const ok = await placeOrder(side, Number(qty), Number(price))
@@ -218,27 +232,29 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
           </div>
         </div>
 
-        {/* Order entry */}
+        {/* Order entry — laid out as an exchange ticket: side, then quantity and price side
+            by side, then one full-width action. The fields used to sit in a `flex-wrap` row,
+            which let quantity and price land on different lines at narrow widths. */}
         <div className="rounded-xl border border-accent/30 bg-card/80 p-5">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-4">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
             <Send size={12} className="text-accent" />
-            Place a limit order — you set the price
+            Limit order
           </div>
           <form
-            className="flex flex-wrap items-end gap-3"
+            className="flex flex-col gap-3"
             onSubmit={(e) => {
               e.preventDefault()
               void submitOrder()
             }}
           >
-            <div className="flex rounded-lg border border-border overflow-hidden">
+            <div className="grid grid-cols-2 rounded-lg border border-border overflow-hidden">
               {(['buy', 'sell'] as const).map((s) => (
                 <button
                   key={s}
                   type="button"
                   onClick={() => setSide(s)}
                   className={cn(
-                    'px-5 py-2 text-sm font-bold transition-colors',
+                    'py-2 text-sm font-bold transition-colors',
                     side === s
                       ? s === 'buy'
                         ? 'bg-primary text-primary-foreground'
@@ -250,43 +266,82 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
                 </button>
               ))}
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-mono uppercase text-muted-foreground">Quantity</label>
-              <Input
-                type="number"
-                min={0.1}
-                step="0.1"
-                value={qty}
-                onChange={(e) => setQty(e.target.value)}
-                className="w-28 font-mono"
-                placeholder="20"
-              />
+            {/* A grid, not a wrapping flex row: these two must never split across lines. */}
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                {
+                  label: 'Quantity',
+                  unit: 'cr',
+                  value: qty,
+                  set: setQty,
+                  placeholder: '20',
+                },
+                {
+                  label: 'Price',
+                  unit: '€',
+                  value: price,
+                  set: setPrice,
+                  placeholder: (auctionPrice ?? marketPrice)?.toString() ?? '10',
+                },
+              ].map((f) => (
+                <div key={f.label} className="flex flex-col gap-1 min-w-0">
+                  <label className="text-[10px] font-mono uppercase text-muted-foreground">
+                    {f.label}
+                  </label>
+                  <div className="relative">
+                    {/* Native spinners are suppressed: they sit exactly where the unit
+                        suffix goes and overlap it on focus, and nudging a price 0.1 at a
+                        time with arrows is not how anyone fills a ticket anyway. */}
+                    <Input
+                      type="number"
+                      min={0.1}
+                      step="0.1"
+                      value={f.value}
+                      onChange={(e) => f.set(e.target.value)}
+                      className="w-full font-mono pr-8 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                      placeholder={f.placeholder}
+                    />
+                    {/* Inside the field, so the unit travels with the number rather than
+                        competing with the label for space. */}
+                    <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-mono text-muted-foreground/70">
+                      {f.unit}
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-mono uppercase text-muted-foreground">Price</label>
-              <Input
-                type="number"
-                min={0.1}
-                step="0.1"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                className="w-28 font-mono"
-                placeholder={(auctionPrice ?? marketPrice)?.toString() ?? '10'}
-              />
+            {/* What the order is actually worth. Every exchange ticket shows it, and here it
+                is also the point: the student sees the cash consequence before committing. */}
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="text-muted-foreground">
+                {orderValue !== null ? (
+                  <>
+                    {qty} × {price} ={' '}
+                    <span className="text-foreground font-bold">
+                      {orderValue.toLocaleString()}
+                    </span>
+                  </>
+                ) : (
+                  'enter a quantity and a price'
+                )}
+              </span>
+              {side === 'sell' && (
+                <span className="text-muted-foreground/70">no shorting — max {sellRoom} cr</span>
+              )}
             </div>
             <Button
               type="submit"
-              disabled={busy || !qty || !price || Number(qty) <= 0 || Number(price) <= 0}
-              className="font-bold"
+              disabled={orderValue === null || busy}
+              className={cn(
+                'w-full font-bold',
+                side === 'sell' && 'bg-accent text-accent-foreground hover:bg-accent/90',
+              )}
             >
-              Place order
+              {orderValue === null
+                ? 'Place order'
+                : `${side === 'buy' ? 'Buy' : 'Sell'} ${qty} cr @ ${price}`}
             </Button>
           </form>
-          {side === 'sell' && (
-            <p className="text-[11px] text-muted-foreground font-mono mt-2">
-              You can offer up to what you hold minus your open asks — no shorting.
-            </p>
-          )}
         </div>
       </div>
 
@@ -330,7 +385,12 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
               <BookOpen size={12} className="text-primary" />
               Order book — yours highlighted
             </div>
-            <OrderBook market={market} youId={snap.you.id} onCancel={(id) => void cancelOrder(id)} />
+            <OrderBook
+              market={market}
+              youId={snap.you.id}
+              onCancel={(id) => void cancelOrder(id)}
+              onPickPrice={(p) => setPrice(String(p))}
+            />
           </div>
         )}
 
