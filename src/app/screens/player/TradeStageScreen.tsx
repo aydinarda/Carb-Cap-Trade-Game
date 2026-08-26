@@ -7,9 +7,9 @@ import type { OrderSide, PlayerSnapshot } from '@shared/types'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Slider } from '../../components/ui/slider'
-import { StatCard, WarningBanner } from '../../components/game/cards'
+import { FlowHint, StatCard } from '../../components/game/cards'
 import { MarketTicker, OrderBook, TradesFeed } from '../../components/game/market'
-import { cn } from '../../components/game/theme'
+import { cn, TRADE_FLOW } from '../../components/game/theme'
 import { useGame } from '../../net/GameContext'
 
 const r1 = (n: number) => Math.round(n * 10) / 10
@@ -141,12 +141,7 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
           </div>
         )}
 
-        <WarningBanner>
-          No fixed price — you trade with other companies. Place limit <strong>bids</strong> (buy)
-          and <strong>asks</strong> (sell); orders match by best price, no shorting. Uncovered tCO₂
-          pays the <strong>penalty</strong> — and still carries forward as a make-good debt. Surplus
-          credits are <strong>banked</strong> for next year (cashed out at game end).
-        </WarningBanner>
+        <FlowHint steps={TRADE_FLOW[snap.capMode ?? 'grandfathering']} />
 
         {/* Abatement */}
         <div className="rounded-xl border border-primary/30 bg-primary/5 p-5">

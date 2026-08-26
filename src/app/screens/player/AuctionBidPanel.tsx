@@ -4,7 +4,8 @@ import { toast } from 'sonner'
 import type { PlayerSnapshot } from '@shared/types'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
-import { StatCard, WarningBanner } from '../../components/game/cards'
+import { FlowHint, StatCard } from '../../components/game/cards'
+import { CAP_FLOW } from '../../components/game/theme'
 import { useGame } from '../../net/GameContext'
 
 const r1 = (n: number) => Math.round(n * 10) / 10
@@ -68,7 +69,12 @@ export function AuctionBidPanel({ snap }: { snap: PlayerSnapshot }) {
           <Gavel size={12} className="text-accent" />
           Auction — sealed bid, Year {snap.currentYear}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* What this company has to cover — it is what the quantity field defaults to, so
+              without it on screen the default is a number out of nowhere. */}
+          <span className="text-xs font-mono text-muted-foreground border border-border rounded-full px-2 py-0.5">
+            you need ≈ {expected.toLocaleString()} t
+          </span>
           {snap.prevMarketPrice !== null && (
             <span className="text-xs font-mono text-primary border border-primary/30 rounded-full px-2 py-0.5">
               last round ≈ {r1(snap.prevMarketPrice)}
@@ -80,17 +86,7 @@ export function AuctionBidPanel({ snap }: { snap: PlayerSnapshot }) {
         </div>
       </div>
 
-      <WarningBanner>
-        No free credits — you buy allowances at auction. Bid a quantity and the max price you
-        will pay. Highest bidders win the supply; <strong>everyone pays the single clearing
-        price</strong> (the lowest winning bid).{' '}
-        {snap.prevMarketPrice !== null && (
-          <>
-            Last round settled around <strong>{r1(snap.prevMarketPrice)}</strong> — a price signal.{' '}
-          </>
-        )}
-        Your expected emission is <strong>{expected} tCO₂</strong>.
-      </WarningBanner>
+      <FlowHint steps={CAP_FLOW.auctioning} />
 
       <div className="grid grid-cols-2 gap-4 mt-5">
         <div className="flex flex-col gap-1">

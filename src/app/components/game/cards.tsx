@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, Gavel, Leaf, Trophy } from 'lucide-react'
+import { AlertTriangle, Bot, ChevronRight, Gavel, Leaf, Trophy } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { Industry } from '@shared/constants'
 import type {
@@ -273,11 +273,43 @@ export function RosterList({ roster, youId }: { roster: PublicPlayerInfo[]; youI
   )
 }
 
+/**
+ * A short, genuine warning — one or two lines. NOT a place for rules copy: for "how this
+ * stage works", use `FlowHint`, which stays legible at a glance.
+ *
+ * The prose is wrapped in its own element on purpose. This container is a flex row, and a
+ * flex container makes a separate item out of every child — including each run of bare
+ * text between two `<strong>` tags. A paragraph passed in directly was therefore shredded
+ * into a dozen narrow columns, one word wide, which is what this used to look like.
+ */
 export function WarningBanner({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-accent flex items-center gap-2">
-      <AlertTriangle size={13} className="shrink-0" />
-      {children}
+    <div className="rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-accent flex items-start gap-2">
+      <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+      <div className="min-w-0 leading-relaxed">{children}</div>
     </div>
+  )
+}
+
+/**
+ * How the current stage works, as a sequence: `step → step → step`.
+ *
+ * Replaces the paragraph-in-a-banner pattern. Rules copy nobody reads is worse than no
+ * copy, and this stage's rules are genuinely sequential, so the arrows carry the meaning
+ * that a wall of prose was burying. Steps wrap as a group on a narrow screen and never
+ * break mid-phrase, because each step is a single flex item.
+ *
+ * Keep steps to about three to six words. If one needs a sentence, it is not a step.
+ */
+export function FlowHint({ steps }: { steps: ReactNode[] }) {
+  return (
+    <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-lg border border-border bg-muted/40 px-3 py-2">
+      {steps.map((step, i) => (
+        <li key={i} className="flex items-center gap-1.5 text-[11px] leading-snug text-muted-foreground">
+          {i > 0 && <ChevronRight size={11} className="shrink-0 opacity-40" aria-hidden />}
+          <span>{step}</span>
+        </li>
+      ))}
+    </ol>
   )
 }

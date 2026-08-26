@@ -1,6 +1,7 @@
 import { Ruler } from 'lucide-react'
 import type { PlayerSnapshot } from '@shared/types'
-import { StatCard, WarningBanner } from '../../components/game/cards'
+import { FlowHint, StatCard } from '../../components/game/cards'
+import { CAP_FLOW } from '../../components/game/theme'
 
 const r1 = (n: number) => Math.round(n * 10) / 10
 
@@ -77,30 +78,18 @@ export function BenchmarkPanel({ snap }: { snap: PlayerSnapshot }) {
         />
       </div>
 
-      <WarningBanner>
-        Every company in your sector gets the same allocation, whatever its own history —
-        the benchmark is set{' '}
-        {stringencyPct !== null ? <strong>{stringencyPct}% below the sector average</strong> : 'below the sector average'}
-        , so an average emitter is short and only an efficient one is long.{' '}
-        {short ? (
-          <>
-            You are <strong>{Math.abs(gap)} tCO₂ short</strong>. Close the gap by cutting
-            emissions or by buying on the market when it opens — anything left uncovered is
-            charged the penalty.
-          </>
-        ) : (
-          <>
-            You are <strong>{gap} tCO₂ long</strong>. You can bank the surplus or sell it on
-            the market when it opens.
-          </>
-        )}{' '}
-        {classGapPct !== null && (
-          <>
-            Class-wide, {classIssued?.toLocaleString()} cr were issued against{' '}
-            {classExpected?.toLocaleString()} t expected ({classGapPct}%).
-          </>
-        )}
-      </WarningBanner>
+      {/* The four cards above already carry every number the old paragraph repeated — the
+          benchmark, the stringency, the allocation, the expected emission and the gap. All
+          that was genuinely extra is whether the CLASS is short or just this company, which
+          is the difference between "I drew a bad hand" and "the cap binds", so it stays. */}
+      <FlowHint steps={CAP_FLOW.benchmarking} />
+      {classGapPct !== null && (
+        <p className="text-[11px] font-mono text-muted-foreground">
+          Class-wide: {classIssued?.toLocaleString()} cr issued against{' '}
+          {classExpected?.toLocaleString()} t expected ({classGapPct > 0 ? '+' : ''}
+          {classGapPct}%) — {classGapPct < 0 ? 'everyone is short, not just you' : 'the class is long overall'}.
+        </p>
+      )}
     </div>
   )
 }
