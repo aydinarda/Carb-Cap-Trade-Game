@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_GAME_CONFIG } from '../../shared/config'
 import { expectedEmission, round1, tradedNet } from '../../shared/engine'
 import type { PlayerHistoryYear } from '../../shared/types'
 import { Session } from '../session'
@@ -205,5 +206,23 @@ describe('benchmarking player snapshot', () => {
     const snap = playerSnapshot(s, 'P1')
     expect(snap.sectorBenchmark).toBe(null)
     expect(snap.sectorAverage).toBe(null)
+  })
+})
+
+describe('player snapshot carries the penalty', () => {
+  // The trade screen prices the third option out loud — cover, cut, or leave it uncovered
+  // and pay this — so the number has to reach the player, not just the host panel.
+  it('sends the shipped penalty rate', () => {
+    const s = new Session('grandfathering', 1)
+    s.addPlayer('Alice', 'Power & Utilities')
+    s.startYear()
+    expect(playerSnapshot(s, 'P1').penaltyRate).toBe(DEFAULT_GAME_CONFIG.market.penaltyRate)
+  })
+
+  it('follows a host override rather than a client-side constant', () => {
+    const s = new Session('grandfathering', 1, { market: { penaltyRate: 250 } })
+    s.addPlayer('Alice', 'Power & Utilities')
+    s.startYear()
+    expect(playerSnapshot(s, 'P1').penaltyRate).toBe(250)
   })
 })

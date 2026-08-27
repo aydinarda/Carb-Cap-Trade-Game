@@ -67,6 +67,41 @@ describe('runScenario', () => {
     }
   })
 
+  it('closes the game, so the endgame carry settlement is actually exercised', () => {
+    const result = runScenario(spec({ years: 3 }))
+    for (const [key, value] of Object.entries(result.final)) {
+      if (typeof value === 'number') {
+        expect(Number.isFinite(value), `final.${key} was ${value}`).toBe(true)
+      }
+    }
+    // Both halves are non-negative by construction — they are the two sides of the carry
+    // reported separately, never netted, because the endgame treats them asymmetrically.
+    expect(result.final.strandedCredits).toBeGreaterThanOrEqual(0)
+    expect(result.final.settledDebt).toBeGreaterThanOrEqual(0)
+    expect(result.final.finalPrice).toBeGreaterThan(0)
+  })
+
+  it('a surplus left at the end is stranded, not cashed out', () => {
+    // The engine charges for a leftover DEBT and pays nothing for a leftover SURPLUS. So
+    // whatever the class ends holding must show up as stranded value, never as income.
+    const result = runScenario(spec({ years: 3 }))
+    const { final } = result
+    expect(final.strandedValue).toBe(
+      Math.round(final.strandedCredits * final.finalPrice * 10) / 10,
+    )
+  })
+
+  it('agents value carbon at the dearest cut they are ALLOWED, not at a 100% cut', () => {
+    // With a lifetime cap of 0.5 the dearest meaningful cut is MAC(0.5) = a + 0.5b, well
+    // below MAC(1) = a + b. A lower cap must therefore lower what the market will pay —
+    // if it does not, the agents are ignoring the cap the engine enforces on them.
+    const price = (cap: number) => {
+      const r = runScenario(spec({ years: 3, config: { abatement: { lifetimeCap: cap } } }))
+      return Math.max(...r.years.map((y) => y.metrics.vwap ?? 0))
+    }
+    expect(price(0.2)).toBeLessThan(price(0.8))
+  })
+
   it('records every student with a behaviour and every bot without one', () => {
     const rows = runScenario(spec()).years[0].players
     for (const r of rows) {
@@ -172,15 +207,67 @@ describe('SimDb', () => {
       db.insertYear('r1', y.year, y.metrics)
       db.insertPlayers('r1', y.year, y.players)
     }
+    db.insertFinal('r1', result.final)
     db.insertTrades('r1', 11, result.trades.filter((t) => t.year === 11))
 
     expect(db.query(`SELECT COUNT(*) AS n FROM runs`)).toEqual([{ n: 1 }])
     expect(db.query(`SELECT COUNT(*) AS n FROM years`)).toEqual([{ n: 2 }])
     expect(db.query(`SELECT COUNT(*) AS n FROM players`)).toEqual([{ n: 24 }])
+    expect(db.query(`SELECT COUNT(*) AS n FROM finals`)).toEqual([{ n: 1 }])
     // The views the CLI prints must survive a schema change.
-    expect(() => db.query(`SELECT * FROM v_price_by_scenario`)).not.toThrow()
-    expect(() => db.query(`SELECT * FROM v_depth_by_scenario`)).not.toThrow()
-    expect(() => db.query(`SELECT * FROM v_efficiency_by_behaviour`)).not.toThrow()
+    for (const view of ['v_price_by_scenario', 'v_depth_by_scenario',
+                        'v_efficiency_by_behaviour', 'v_price_path', 'v_anchor_check',
+                        'v_endgame']) {
+      expect(() => db.query(`SELECT * FROM ${view}`), view).not.toThrow()
+    }
+  })
+
+  it('every YearMetrics field reaches a column — no metric written into the void', () => {
+    // The years insert names its columns, so a metric added to the interface without a
+    // column is not an error anywhere: it is simply dropped, silently, forever.
+    const result = runScenario(spec({ years: 1 }))
+    db.insertRun({
+      runId: 'r-cols', scenario: 'test', capMode: 'benchmarking',
+      seed: 42, years: 1, params: {}, population: {},
+    })
+    db.insertYear('r-cols', 11, result.years[0].metrics)
+    const stored = (db.query(`SELECT * FROM years WHERE run_id = 'r-cols'`) as Record<
+      string,
+      unknown
+    >[])[0]
+    // Collapses runs of capitals, so `efficientPriceSR` is `efficient_price_sr` rather
+    // than `efficient_price_s_r`.
+    const snake = (s: string) => s.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
+    const skip = new Set(['efficientPrice', 'abatementInForceMean', 'abatementCommittedMean'])
+    for (const key of Object.keys(result.years[0].metrics)) {
+      if (skip.has(key)) continue // stored under a deliberately different column name
+      expect(Object.keys(stored), `${key} has no column`).toContain(snake(key))
+    }
+  })
+
+  it('rebuilds the file when the schema version has moved on, and only then', () => {
+    const path = join(dir, 'stale.db')
+    const first = new SimDb(path)
+    expect(first.rebuilt).toBe(false)
+    first.insertRun({
+      runId: 'old', scenario: 'test', capMode: 'benchmarking',
+      seed: 1, years: 1, params: {}, population: {},
+    })
+    first.close()
+
+    // Reopening at the SAME version must keep the data — a rebuild is destructive and may
+    // not happen for any reason but a genuine schema change.
+    const same = new SimDb(path)
+    expect(same.rebuilt).toBe(false)
+    expect(same.query(`SELECT COUNT(*) AS n FROM runs`)).toEqual([{ n: 1 }])
+    // Now make it look like a file written by an older harness.
+    same.query(`UPDATE meta SET value = '1' WHERE key = 'schema_version'`)
+    same.close()
+
+    const reopened = new SimDb(path)
+    expect(reopened.rebuilt).toBe(true)
+    expect(reopened.query(`SELECT COUNT(*) AS n FROM runs`)).toEqual([{ n: 0 }])
+    reopened.close()
   })
 
   it('re-recording the same run replaces rather than duplicates', () => {

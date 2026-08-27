@@ -44,6 +44,9 @@ const withTrades = !!args.trades
 const chosen = args.scenario ? [getScenario(String(args.scenario))] : SCENARIOS
 
 const db = new SimDb(dbPath)
+if (db.rebuilt) {
+  console.log(`schema changed since ${dbPath} was written — rebuilt it, previous runs dropped`)
+}
 if (args.reset) {
   db.reset()
   console.log('cleared previous runs')
@@ -77,12 +80,14 @@ for (const scenario of chosen) {
         years: spec.years,
         params: scenario.params?.(partial) ?? {},
         population: spec.population as unknown as Record<string, unknown>,
+        config: spec.config as Record<string, unknown> | undefined,
       })
       for (const y of result.years) {
         db.insertYear(runId, y.year, y.metrics)
         db.insertPlayers(runId, y.year, y.players)
         yearCount++
       }
+      db.insertFinal(runId, result.final)
       if (withTrades) {
         for (const y of result.years) {
           db.insertTrades(

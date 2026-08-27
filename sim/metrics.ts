@@ -150,6 +150,28 @@ export interface YearMetrics {
   reservePot: number
   reserveReleased: number
   reserveRevenue: number
+  /** Share of everything issued this year that came out of the reserve. The number the
+   *  "the reserve must stay SECONDARY" requirement is checked against — every sweep
+   *  recomputed this by hand, and two of them disagreed on the denominator. */
+  reserveShare: number
+  /** VWAP as a fraction of the fine. Flat across a penalty sweep → the price comes from
+   *  fundamentals; proportional to it → the fine is the anchor. The single most diagnostic
+   *  number in the whole calibration, and it belongs next to the price it divides. */
+  priceOverPenalty: number | null
+  /** Supply / need. The organising axis, stored rather than reconstructed downstream:
+   *  `issuance / totalExpected`, so a ratio of 1 means the class was issued exactly what
+   *  it needed and there is no scarcity for any price to express. */
+  supplyRatio: number
+  /** Credits the market makers are sitting on at year end, in total. Hoarding shows up
+   *  here before it shows up in the price, and every sweep was recomputing it from the
+   *  player rows. */
+  mmInventory: number
+  /** The class's carry into next year, split. `bankedSurplus` is banked allowances,
+   *  `bankedDebt` is make-good debt (reported positive). Under the shipped endgame the
+   *  first is worth nothing when the game stops and the second is still owed, so the two
+   *  are not opposite signs of one quantity and must never be netted. */
+  bankedSurplus: number
+  bankedDebt: number
   // outcomes
   volume: number
   tradeCount: number
@@ -168,6 +190,93 @@ export interface YearMetrics {
   totalPenalty: number
   classCost: number
   optimalCost: number
+}
+
+/**
+ * What the end of the game did to the scores — the term `endGame` adds, isolated.
+ *
+ * Reported apart from the yearly settlements because it is the only asymmetric charge in
+ * the game: banked allowances are stranded (worth nothing), while make-good debt is still
+ * bought back at the final reference price. Netting the two would hide exactly the
+ * behaviour the asymmetry exists to discourage.
+ */
+export interface FinalMetrics {
+  /** Allowances left unsold when the scheme stopped, class-wide, and what they would have
+   *  been worth at the final reference price. `strandedValue` is the money the class
+   *  destroyed by hoarding — zero is the well-played outcome. */
+  strandedCredits: number
+  strandedValue: number
+  /** Make-good debt still outstanding, and what closing it cost. */
+  settledDebt: number
+  settledDebtCost: number
+  /** The final reference price the closing used: the most recent year's VWAP, falling back
+   *  to that year's auction price, and to the fine if the market never traded at all. */
+  finalPrice: number
+  /** Class totals, after the closing. `excessOverOptimal` is the whole class's distance
+   *  from playing perfectly — the headline efficiency number. */
+  classScore: number
+  classOptimalScore: number
+  excessOverOptimal: number
+  /** The same, split student vs bot: a calibration that only looks good because the bots
+   *  absorbed the cost is not calibrated. */
+  studentScore: number
+  botScore: number
+  /** How much of the class ended holding a stranded surplus / an unpaid debt. */
+  playersStranded: number
+  playersInDebt: number
+}
+
+export function finalMetrics(
+  session: Session,
+  behaviourOf: Map<string, string>,
+  scoreBeforeEnd: Map<string, number>,
+): FinalMetrics {
+  const players = session.state.players
+  // `Session.finalReferencePrice` is private, so the price is RECOVERED from what the
+  // closing actually charged: any player who ended in debt was charged
+  // `−banked × finalPrice`, which inverts exactly. Preferred over re-deriving it, because a
+  // second copy of that fallback chain is precisely how the two would drift apart.
+  //
+  // The fallback below only runs when NOBODY ended in debt — nothing was charged, so there
+  // is nothing to invert — and it is the same chain: latest traded year's VWAP, then that
+  // year's auction price, then the fine.
+  let finalPrice: number | null = null
+  for (const p of players) {
+    if (p.bankedCredits < 0) {
+      finalPrice = round1((p.score - (scoreBeforeEnd.get(p.id) ?? 0)) / -p.bankedCredits)
+      break
+    }
+  }
+  if (finalPrice === null) {
+    const completed = Object.values(session.state.years)
+      .filter((y) => Object.keys(y.realized).length > 0)
+      .sort((a, b) => b.year - a.year)
+    for (const y of completed) {
+      const vwap = buildMarketView(y.orders, y.trades).vwap
+      if (vwap !== null) { finalPrice = vwap; break }
+      if (y.auctionPrice) { finalPrice = y.auctionPrice; break }
+    }
+    finalPrice ??= session.state.config.market.penaltyRate
+  }
+  const stranded = players.reduce((s, p) => s + Math.max(0, p.bankedCredits), 0)
+  const debt = players.reduce((s, p) => s + Math.max(0, -p.bankedCredits), 0)
+  const isStudent = (id: string) => behaviourOf.has(id)
+  return {
+    strandedCredits: round1(stranded),
+    strandedValue: round1(stranded * finalPrice),
+    settledDebt: round1(debt),
+    settledDebtCost: round1(debt * finalPrice),
+    finalPrice,
+    classScore: round1(players.reduce((s, p) => s + p.score, 0)),
+    classOptimalScore: round1(players.reduce((s, p) => s + p.optimalScore, 0)),
+    excessOverOptimal: round1(players.reduce((s, p) => s + (p.score - p.optimalScore), 0)),
+    studentScore: round1(
+      players.filter((p) => isStudent(p.id)).reduce((s, p) => s + p.score, 0),
+    ),
+    botScore: round1(players.filter((p) => !isStudent(p.id)).reduce((s, p) => s + p.score, 0)),
+    playersStranded: players.filter((p) => p.bankedCredits > 0).length,
+    playersInDebt: players.filter((p) => p.bankedCredits < 0).length,
+  }
 }
 
 export function yearMetrics(
@@ -247,6 +356,16 @@ export function yearMetrics(
     reservePot: record.reservePot,
     reserveReleased: record.reserveReleased,
     reserveRevenue: record.reserveRevenue,
+    reserveShare: issuance > 0 ? round1((record.reserveReleased / issuance) * 1000) / 1000 : 0,
+    priceOverPenalty: mv.vwap !== null && P > 0 ? round1((mv.vwap / P) * 1000) / 1000 : null,
+    supplyRatio: expectedTotal > 0 ? round1((issuance / expectedTotal) * 1000) / 1000 : 0,
+    mmInventory: round1(
+      players
+        .filter((p) => p.botType === 'marketMaker')
+        .reduce((s, p) => s + session.creditsHeld(p.id), 0),
+    ),
+    bankedSurplus: round1(players.reduce((s, p) => s + Math.max(0, p.bankedCredits), 0)),
+    bankedDebt: round1(players.reduce((s, p) => s + Math.max(0, -p.bankedCredits), 0)),
     // Guarded: sim.spec.ts asserts every numeric metric is finite, and a class with no
     // expected emissions at all would otherwise divide by zero.
     shortageRatio: expectedTotal > 0 ? round1((expectedTotal - issuance) / expectedTotal) : 0,

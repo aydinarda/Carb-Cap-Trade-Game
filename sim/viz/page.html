@@ -507,9 +507,151 @@ if (data.penalty.length) {
     tableRows: data.penalty,
   }))
 }
+if (data.lrf.length) {
+  const modes = [...new Set(data.lrf.map((r) => r.capMode))]
+  sweeps.append(card({
+    title: 'Supply tightening rate → price',
+    note: 'The LRF as an annual cut: −2.2%/yr is the EU ETS Phase 4 factor, −4.3%/yr the one in force from 2024. Grandfathering is run with the LRF switched ON here, or its line would be flat.',
+    chart: lineChart({
+      series: modes.map((m, i) => ({
+        name: m, color: CAT[i % CAT.length],
+        points: data.lrf.filter((r) => r.capMode === m)
+          .map((r) => ({ x: Math.round((1 - r.lrf) * 1000) / 10, y: r.vwap })),
+      })),
+      xTitle: 'Annual supply cut (%)', yTitle: 'VWAP', width: 500, labelLines: false,
+    }),
+    legendItems: modes.map((m, i) => ({ name: m, color: CAT[i % CAT.length] })),
+    tableCols: [
+      { label: 'Regime', get: (r) => r.capMode },
+      { label: 'Factor', get: (r) => fmt.num(r.lrf) },
+      { label: 'VWAP', get: (r) => fmt.num(r.vwap) },
+      { label: 'Supply / need', get: (r) => fmt.num(r.supplyRatio) },
+      { label: 'At ceiling', get: (r) => fmt.pct(r.ceiling) },
+    ],
+    tableRows: data.lrf,
+  }))
+}
+if (data.lifetimeCap.length) {
+  const modes = [...new Set(data.lifetimeCap.map((r) => r.capMode))]
+  sweeps.append(card({
+    title: 'Lifetime abatement cap → price',
+    note: 'The most of its own emissions a company may ever cut. It sets the dearest cut anyone is allowed, MAC(cap) = a + cap·b, and so the fundamental ceiling on willingness to pay — well below the penalty.',
+    chart: lineChart({
+      series: modes.map((m, i) => ({
+        name: m, color: CAT[i % CAT.length],
+        points: data.lifetimeCap.filter((r) => r.capMode === m)
+          .map((r) => ({ x: r.lifetimeCap, y: r.vwap })),
+      })),
+      xTitle: 'Lifetime cap (fraction)', yTitle: 'VWAP', width: 500, labelLines: false,
+    }),
+    legendItems: modes.map((m, i) => ({ name: m, color: CAT[i % CAT.length] })),
+    tableCols: [
+      { label: 'Regime', get: (r) => r.capMode },
+      { label: 'Cap', get: (r) => fmt.pct(r.lifetimeCap) },
+      { label: 'VWAP', get: (r) => fmt.num(r.vwap) },
+      { label: 'Installed', get: (r) => fmt.pct(r.abatement) },
+      { label: 'At ceiling', get: (r) => fmt.pct(r.ceiling) },
+    ],
+    tableRows: data.lifetimeCap,
+  }))
+}
+if (data.retrofitFee.length) {
+  sweeps.append(card({
+    title: 'Retrofit fee → how companies invest',
+    note: 'Charged again on every install step, so it is the only thing making a company go once rather than nibble. A fee of 0 is the control arm: if installs per year do not fall as the fee rises, the fee is inert.',
+    chart: lineChart({
+      series: [
+        { name: 'Installs / yr', color: CAT[0], points: data.retrofitFee.map((r) => ({ x: r.fee, y: r.installsPerYear })) },
+      ],
+      xTitle: 'Fee per tonne of baseline', yTitle: 'Installs per year', width: 500, labelLines: false,
+    }),
+    tableCols: [
+      { label: 'Fee', get: (r) => fmt.num(r.fee) },
+      { label: 'Installs / yr', get: (r) => fmt.num(r.installsPerYear) },
+      { label: 'Installed', get: (r) => fmt.pct(r.abatement) },
+      { label: 'VWAP', get: (r) => fmt.num(r.vwap) },
+      { label: 'Spend', get: (r) => fmt.int(r.spend) },
+    ],
+    tableRows: data.retrofitFee,
+  }))
+}
+if (data.reserve.length) {
+  const rows = data.reserve.map((r) => ({
+    label: `${r.capMode.slice(0, 4)} ${r.enabled ? (r.basis === 'need' ? 'need' : '€' + r.firstTrigger) : 'off'}`,
+    value: r.vwap,
+    detail: [
+      { label: 'Max share of issuance', value: fmt.pct(r.reserveShareMax) },
+      { label: 'At ceiling', value: fmt.pct(r.ceiling) },
+      { label: 'Observations', value: fmt.int(r.n) },
+    ],
+  }))
+  sweeps.append(card({
+    title: 'Cost containment reserve',
+    note: 'The reserve is meant to relieve a squeeze, not to set the price. Read the table column, not the bars: a max share above ~15% of issuance means it has become the primary mechanism.',
+    chart: barChart({ rows, yTitle: 'VWAP', colorOf: (_r, i) => CAT[i % CAT.length] }),
+    tableCols: [
+      { label: 'Regime', get: (r) => r.capMode },
+      { label: 'Ladder', get: (r) => (r.enabled ? (r.basis === 'need' ? 'on (need)' : `on (€${r.firstTrigger})`) : 'off') },
+      { label: 'VWAP', get: (r) => fmt.num(r.vwap) },
+      { label: 'Max share', get: (r) => fmt.pct(r.reserveShareMax) },
+      { label: 'At ceiling', get: (r) => fmt.pct(r.ceiling) },
+    ],
+    tableRows: data.reserve,
+  }))
+}
+if (data.botFixes.length) {
+  const rows = data.botFixes.map((r) => ({
+    label: `${r.capMode.slice(0, 4)} ${r.arm}`,
+    value: r.vwap,
+    detail: [
+      { label: 'Maker inventory', value: fmt.int(r.mmInventory) },
+      { label: 'At ceiling', value: fmt.pct(r.ceiling) },
+      { label: 'Observations', value: fmt.int(r.n) },
+    ],
+  }))
+  sweeps.append(card({
+    title: 'Bot behaviour flags: shipped vs all on',
+    note: 'The five corrections, at their shipped values against every one enabled. ceilingIncludesCarry is the one that lets an uncoverable shortage price above the fine, so a large gap here means the fine was doing the pricing.',
+    chart: barChart({ rows, yTitle: 'VWAP', colorOf: (_r, i) => CAT[i % CAT.length] }),
+    tableCols: [
+      { label: 'Regime', get: (r) => r.capMode },
+      { label: 'Arm', get: (r) => r.arm },
+      { label: 'VWAP', get: (r) => fmt.num(r.vwap) },
+      { label: 'Maker inventory', get: (r) => fmt.int(r.mmInventory) },
+      { label: 'At ceiling', get: (r) => fmt.pct(r.ceiling) },
+    ],
+    tableRows: data.botFixes,
+  }))
+}
 if (sweeps.childElementCount) panels.append(sweeps)
 
-// 6 — how each simulated student archetype does against its own optimum.
+// 6 — what the asymmetric end-of-game settlement charged.
+if (data.endgame.length) {
+  const rows = data.endgame.map((r) => ({
+    label: r.capMode, value: r.strandedValue,
+    detail: [
+      { label: 'Stranded allowances', value: fmt.num(r.strandedCredits) },
+      { label: 'Final price', value: fmt.num(r.finalPrice) },
+      { label: 'Debt bought back', value: fmt.int(r.debtCost) },
+      { label: 'Companies left holding', value: fmt.num(r.playersStranded) },
+    ],
+  }))
+  panels.append(card({
+    title: 'What hoarding cost, at the close',
+    note: 'Allowances left unsold when the scheme ends are stranded — worth nothing — while a make-good debt is still bought back in full. This bar is money the class destroyed by holding inventory it never sold; zero is the well-played outcome.',
+    chart: barChart({ rows, yTitle: 'Stranded value', colorOf: (_r, i) => CAT[i % CAT.length] }),
+    tableCols: [
+      { label: 'Regime', get: (r) => r.capMode },
+      { label: 'Stranded cr', get: (r) => fmt.num(r.strandedCredits) },
+      { label: 'Stranded value', get: (r) => fmt.int(r.strandedValue) },
+      { label: 'Debt cost', get: (r) => fmt.int(r.debtCost) },
+      { label: 'Final price', get: (r) => fmt.num(r.finalPrice) },
+    ],
+    tableRows: data.endgame,
+  }))
+}
+
+// 7 — how each simulated student archetype does against its own optimum.
 if (data.behaviour.length) {
   const rows = data.behaviour.map((r) => ({
     label: r.behaviour, value: r.excess,

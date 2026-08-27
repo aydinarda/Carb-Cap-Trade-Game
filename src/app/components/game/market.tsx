@@ -108,16 +108,22 @@ function OrderRow({
   // book is that the class can SEE where the regulator is willing to sell.
   const isReserve = order.playerId === RESERVE_ID
   const label = isReserve ? 'REGULATOR' : mine ? 'you' : anonymous ? '•' : order.playerId
+  // The book's two sides carry the palette's two market hues: cyan is the buy side
+  // everywhere in the game, amber the sell side. Your own resting order is framed in the
+  // hue of the side it is on — framing it in a third colour would say "this is a different
+  // kind of order", when the only thing different about it is whose it is.
+  const sideColor = order.side === 'buy' ? 'text-market' : 'text-accent'
+  const sideFrame = order.side === 'buy' ? 'bg-market/10 border-market/40' : 'bg-accent/10 border-accent/40'
   return (
     <div
       className={cn(
-        'flex items-center justify-between text-xs font-mono py-1 px-2 rounded',
-        mine && 'bg-primary/10 border border-primary/30',
-        isReserve && 'bg-accent/10 border border-accent/40',
+        'flex items-center justify-between text-xs font-mono py-1 px-2 rounded border border-transparent',
+        mine && sideFrame,
+        isReserve && 'bg-accent/10 border-accent/50',
       )}
     >
-      <span className={cn('font-bold w-9', mine ? 'text-primary' : 'text-muted-foreground')}>
-        {label}
+      <span className={cn('font-bold w-9 shrink-0', mine ? sideColor : 'text-muted-foreground')}>
+        {mine ? 'YOU' : label}
       </span>
       {/* The price is a button wherever the screen has an order form to fill — clicking a
           resting order to load its price is standard in a real book, and it saves a student
@@ -131,12 +137,12 @@ function OrderRow({
           className="text-foreground rounded px-1 -mx-1 hover:bg-foreground/10 transition-colors"
         >
           {order.remaining.toLocaleString()} <span className="text-muted-foreground">cr @</span>{' '}
-          <span className={order.side === 'buy' ? 'text-primary' : 'text-accent'}>{order.price}</span>
+          <span className={sideColor}>{order.price}</span>
         </button>
       ) : (
         <span className="text-foreground">
           {order.remaining.toLocaleString()} <span className="text-muted-foreground">cr @</span>{' '}
-          <span className={order.side === 'buy' ? 'text-primary' : 'text-accent'}>{order.price}</span>
+          <span className={sideColor}>{order.price}</span>
         </span>
       )}
       {mine && onCancel ? (
@@ -158,6 +164,7 @@ export function OrderBook({
   market,
   youId,
   anonymous = true,
+  rows = 8,
   onCancel,
   onPickPrice,
 }: {
@@ -165,6 +172,13 @@ export function OrderBook({
   youId?: string
   /** Hide other players' ids (default true; host passes false). */
   anonymous?: boolean
+  /**
+   * How many levels to show a side. The book is the tallest thing on the trade screen and
+   * it sits in a row with two short cards, so an uncapped one leaves the other two columns
+   * floating in whitespace. Eight is deep enough to see where the market actually is;
+   * anything below that is not going to be hit this round anyway.
+   */
+  rows?: number
   onCancel?: (id: string) => void
   /** Clicking a resting order loads its price into the caller's order form. Omit on any
    *  screen with no form — the rows then render as plain, non-interactive text. */
@@ -180,7 +194,7 @@ export function OrderBook({
           <p className="text-xs text-muted-foreground/60 font-mono text-center py-3">{empty}</p>
         ) : (
           orders
-            .slice(0, 12)
+            .slice(0, rows)
             .map((o) => (
               <OrderRow
                 key={o.id}
@@ -195,11 +209,38 @@ export function OrderBook({
       </div>
     </div>
   )
+  // Spread and mid are the two numbers a trader reads before any individual row: how far
+  // apart the sides are, and where the market currently sits between them. Both are
+  // undefined when either side is empty — a one-sided book has no midpoint, and inventing
+  // one from the single live side would be a made-up price.
+  const { bestBid, bestAsk } = market
+  const twoSided = bestBid !== null && bestAsk !== null
+  const spread = twoSided ? Math.round((bestAsk - bestBid) * 10) / 10 : null
+  const mid = twoSided ? Math.round(((bestAsk + bestBid) / 2) * 10) / 10 : null
+
   return (
-    <div className="flex gap-4">
-      {column('Buy orders (bids)', market.bids, 'no bids yet')}
-      <div className="w-px bg-border" />
-      {column('Sell offers (asks)', market.asks, 'no offers yet')}
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-end gap-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+        <span>
+          spread <span className="text-foreground font-bold">{spread ?? '—'}</span>
+        </span>
+        <span className="h-3 w-px bg-border" aria-hidden="true" />
+        <span>
+          mid <span className="text-foreground font-bold">{mid ?? '—'}</span>
+        </span>
+      </div>
+      <div className="flex gap-4">
+        {column('Buy orders (bids)', market.bids, 'no bids yet')}
+        <div className="w-px bg-border" />
+        {column('Sell offers (asks)', market.asks, 'no offers yet')}
+      </div>
+      {(market.bids.length > rows || market.asks.length > rows) && (
+        <p className="text-[10px] font-mono text-muted-foreground/60 text-center">
+          {Math.max(market.bids.length, market.asks.length) - rows} more level
+          {Math.max(market.bids.length, market.asks.length) - rows === 1 ? '' : 's'} further from
+          the market
+        </p>
+      )}
     </div>
   )
 }

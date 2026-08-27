@@ -100,6 +100,90 @@ function buildPayload() {
        GROUP BY penaltyRate ORDER BY penaltyRate`,
     ),
 
+    // Supply tightening rate, per regime. The x axis is the annual cut the factor implies,
+    // which is the number that has an EU counterpart (−2.2%/yr Phase 4, −4.3%/yr from 2024).
+    lrf: q(
+      `SELECT r.cap_mode AS capMode,
+              CAST(json_extract(r.params, '$.lrf') AS REAL) AS lrf,
+              ROUND(AVG(y.vwap), 2) AS vwap,
+              ROUND(AVG(y.supply_ratio), 3) AS supplyRatio,
+              ROUND(AVG(y.ceiling_frac), 4) AS ceiling,
+              COUNT(*) AS n
+       FROM years y JOIN runs r USING (run_id)
+       WHERE r.scenario = 'lrf-sweep' AND y.vwap IS NOT NULL
+       GROUP BY capMode, lrf ORDER BY capMode, lrf DESC`,
+    ),
+
+    // The dearest cut anyone is allowed, and so the fundamental ceiling on what carbon is
+    // worth: MAC(cap) = a + cap·b.
+    lifetimeCap: q(
+      `SELECT r.cap_mode AS capMode,
+              CAST(json_extract(r.params, '$.lifetimeCap') AS REAL) AS lifetimeCap,
+              ROUND(AVG(y.vwap), 2) AS vwap,
+              ROUND(AVG(y.abatement_in_force), 4) AS abatement,
+              ROUND(AVG(y.ceiling_frac), 4) AS ceiling,
+              COUNT(*) AS n
+       FROM years y JOIN runs r USING (run_id)
+       WHERE r.scenario = 'lifetime-cap-sweep' AND y.vwap IS NOT NULL
+       GROUP BY capMode, lifetimeCap ORDER BY capMode, lifetimeCap`,
+    ),
+
+    // Does the per-step fee actually stop companies nibbling their way to the cap?
+    retrofitFee: q(
+      `SELECT CAST(json_extract(r.params, '$.retrofitFee') AS REAL) AS fee,
+              ROUND(AVG(y.vwap), 2) AS vwap,
+              ROUND(AVG(y.install_count), 2) AS installsPerYear,
+              ROUND(AVG(y.abatement_in_force), 4) AS abatement,
+              ROUND(AVG(y.abatement_spend), 0) AS spend,
+              COUNT(*) AS n
+       FROM years y JOIN runs r USING (run_id)
+       WHERE r.scenario = 'retrofit-fee-sweep'
+       GROUP BY fee ORDER BY fee`,
+    ),
+
+    // The reserve must stay SECONDARY: reserveShare is the share of issuance it supplied.
+    reserve: q(
+      `SELECT r.cap_mode AS capMode,
+              json_extract(r.params, '$.reserveEnabled') AS enabled,
+              json_extract(r.params, '$.reserveBasis') AS basis,
+              CAST(json_extract(r.params, '$.firstTrigger') AS REAL) AS firstTrigger,
+              ROUND(AVG(y.vwap), 2) AS vwap,
+              ROUND(MAX(y.reserve_share), 3) AS reserveShareMax,
+              ROUND(AVG(y.ceiling_frac), 4) AS ceiling,
+              COUNT(*) AS n
+       FROM years y JOIN runs r USING (run_id)
+       WHERE r.scenario = 'reserve-sweep' AND y.vwap IS NOT NULL
+       GROUP BY capMode, enabled, basis, firstTrigger
+       ORDER BY capMode, enabled, firstTrigger`,
+    ),
+
+    // Shipped flags against every behavioural correction on, same seeds.
+    botFixes: q(
+      `SELECT r.cap_mode AS capMode,
+              json_extract(r.params, '$.fixes') AS arm,
+              ROUND(AVG(y.vwap), 2) AS vwap,
+              ROUND(AVG(y.mm_inventory), 1) AS mmInventory,
+              ROUND(AVG(y.ceiling_frac), 4) AS ceiling,
+              COUNT(*) AS n
+       FROM years y JOIN runs r USING (run_id)
+       WHERE r.scenario = 'bot-fixes' AND y.vwap IS NOT NULL
+       GROUP BY capMode, arm ORDER BY capMode, arm`,
+    ),
+
+    // What the asymmetric endgame charged: hoarded allowances expire worthless, debt does not.
+    endgame: q(
+      `SELECT r.cap_mode AS capMode,
+              ROUND(AVG(f.final_price), 2) AS finalPrice,
+              ROUND(AVG(f.stranded_credits), 1) AS strandedCredits,
+              ROUND(AVG(f.stranded_value), 0) AS strandedValue,
+              ROUND(AVG(f.settled_debt_cost), 0) AS debtCost,
+              ROUND(AVG(f.players_stranded), 2) AS playersStranded,
+              COUNT(*) AS n
+       FROM finals f JOIN runs r USING (run_id)
+       WHERE r.scenario = 'baseline'
+       GROUP BY capMode ORDER BY capMode`,
+    ),
+
     // How each simulated student archetype does against its own optimum.
     behaviour: q(
       `SELECT p.behaviour AS behaviour,

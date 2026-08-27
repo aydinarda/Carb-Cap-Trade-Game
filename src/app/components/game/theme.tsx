@@ -7,24 +7,53 @@ export function cn(...classes: (string | boolean | undefined)[]) {
   return classes.filter(Boolean).join(' ')
 }
 
-// Categorical hues validated for the dark surface (#071a0e) with
-// scripts/validate_palette.js: lightness band, chroma, CVD separation, contrast.
-// Industry identity is never color-alone — badges pair the hue with an icon + label.
+/**
+ * The semantic hues, mirrored from `src/styles/theme.css` for the places that cannot use a
+ * Tailwind class — SVG `stroke`/`fill`, and anything handed to a chart library as a string.
+ *
+ * Kept as literals rather than read from the cascade because charts are rendered to SVG
+ * attributes, where `var(--primary)` does not resolve in every browser we care about. When
+ * a token in theme.css moves, move it here too — these two lists are the palette.
+ */
+export const PALETTE = {
+  background: '#021910',
+  card: '#082b1f',
+  surfaceAlt: '#0d3425',
+  border: '#175438',
+  primary: '#63f45b',
+  primaryBright: '#8cff5a',
+  market: '#20d9ff',
+  accent: '#ffb31a',
+  destructive: '#ff5263',
+  insight: '#b77cff',
+  foreground: '#e7f5e6',
+  mutedForeground: '#8eaa96',
+} as const
+
+// Categorical hues for the four sectors — identities, not measures, so they are chosen for
+// separation from each other rather than from the semantic scale above.
+//
+// They are deliberately NOT the semantic hues: a Transport badge in market cyan would read
+// as "this is the market", and the whole point of the palette is that a hue means one thing.
+// Each is darkened against the new, darker background (#021910) so a badge sits on the
+// surface rather than glowing off it. Industry identity is never colour-alone — every badge
+// pairs the hue with an icon and a label.
 export const INDUSTRY_META: Record<Industry, { icon: ReactNode; color: string }> = {
-  'Power & Utilities': { icon: <Zap size={14} />, color: '#bd7f12' },
-  'Heavy Materials': { icon: <Factory size={14} />, color: '#c2632e' },
-  'Manufacturing & Chemicals': { icon: <FlaskConical size={14} />, color: '#2b9fd8' },
-  Transport: { icon: <Truck size={14} />, color: '#3dad35' },
+  'Power & Utilities': { icon: <Zap size={14} />, color: '#d99a1f' },
+  'Heavy Materials': { icon: <Factory size={14} />, color: '#d1703a' },
+  'Manufacturing & Chemicals': { icon: <FlaskConical size={14} />, color: '#3fb0e0' },
+  Transport: { icon: <Truck size={14} />, color: '#4cc244' },
 }
 
 /** Non-categorical chart colors: measures, not identities. */
 export const CHART = {
-  series: '#5dde52', // the player's own single-series line / realized totals
-  reference: '#8fa596', // caps, allocations, baselines (dashed reference marks)
-  grid: 'rgba(223,242,216,0.08)',
-  axis: 'rgba(223,242,216,0.45)',
-  surplus: '#5dde52',
-  shortage: '#e03e3e',
+  series: PALETTE.primary, // the player's own single-series line / realized totals
+  reference: PALETTE.mutedForeground, // caps, allocations, baselines (dashed reference marks)
+  grid: 'rgba(231,245,230,0.07)',
+  axis: 'rgba(231,245,230,0.45)',
+  surplus: PALETTE.primary,
+  shortage: PALETTE.destructive,
+  market: PALETTE.market,
 }
 
 export const MODE_LABELS = {
@@ -124,16 +153,16 @@ export function EcoDots({ className }: { className?: string }) {
             left: d.left,
             background:
               d.ci === 0
-                ? 'rgba(93,222,82,0.05)'
+                ? 'rgba(99,244,91,0.05)'
                 : d.ci === 1
-                  ? 'rgba(245,166,35,0.04)'
-                  : 'rgba(56,189,248,0.04)',
+                  ? 'rgba(255,179,26,0.04)'
+                  : 'rgba(32,217,255,0.04)',
             border: `1px solid ${
               d.ci === 0
-                ? 'rgba(93,222,82,0.1)'
+                ? 'rgba(99,244,91,0.1)'
                 : d.ci === 1
-                  ? 'rgba(245,166,35,0.08)'
-                  : 'rgba(56,189,248,0.07)'
+                  ? 'rgba(255,179,26,0.08)'
+                  : 'rgba(32,217,255,0.07)'
             }`,
           }}
         />

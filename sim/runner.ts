@@ -5,8 +5,8 @@ import { RESERVE_ID } from '../shared/constants'
 import { buildMarketView, createRng, round1, tradedNet } from '../shared/engine'
 import type { BotType, CapMode, Industry } from './scenarios'
 import type { DeepPartial, GameConfig } from '../shared/config'
-import { actAuction, actTrade, allocateMix, type Behaviour } from './agents/behaviours'
-import { sampleBook, yearMetrics, type BookSample, type YearMetrics } from './metrics'
+import { actAuction, actTrade, allocateMix, type Behaviour, type YearContext } from './agents/behaviours'
+import { finalMetrics, sampleBook, yearMetrics, type BookSample, type FinalMetrics, type YearMetrics } from './metrics'
 import type { PlayerRow } from './db'
 
 export interface Population {
@@ -34,6 +34,16 @@ export interface RunSpec {
 export interface RunResult {
   spec: RunSpec
   years: { year: number; metrics: YearMetrics; players: PlayerRow[] }[]
+  /**
+   * What `endGame` did — measured, not assumed.
+   *
+   * The run used to stop after the last `closeTrade`, which meant the end-of-game carry
+   * settlement was never exercised at all. That settlement is now ASYMMETRIC (a leftover
+   * surplus is stranded and worth nothing; a leftover debt is still bought back at the final
+   * price), so it is a real term in every player's score and in the incentive to hoard. A
+   * simulator that never calls it is scoring a different game from the one that ships.
+   */
+  final: FinalMetrics
   trades: {
     year: number
     seq: number
@@ -79,16 +89,20 @@ export function runScenario(spec: RunSpec): RunResult {
     for (let i = 0; i < (count ?? 0); i++) session.addBot(botType as BotType)
   }
 
-  const result: RunResult = { spec, years: [], trades: [] }
+  const result: RunResult = { spec, years: [], trades: [], final: {} as FinalMetrics }
 
   for (let y = 0; y < spec.years; y++) {
     if (y === 0) session.startYear()
     else session.advanceYear()
     const record = session.currentYearRecord()!
+    // The agents are told how long the game is, exactly as a class is told at the start.
+    // Without it they cannot price the end: capacity bought in the last year never switches
+    // on, and a surplus carried past the last year is stranded.
+    const yearCtx: YearContext = { index: y, total: spec.years }
 
     // --- cap stage ---
     if (session.usesAuction) {
-      for (const agent of agents) actAuction(session, agent, agentRng)
+      for (const agent of agents) actAuction(session, agent, agentRng, yearCtx)
       stepBots(session, botRng, runtimeFor)
     }
     session.closeCapStage()
@@ -100,6 +114,7 @@ export function runScenario(spec: RunSpec): RunResult {
       const ctx = {
         progress: spec.ticksPerYear <= 1 ? 1 : tick / (spec.ticksPerYear - 1),
         isLastTick: tick === spec.ticksPerYear - 1,
+        year: yearCtx,
       }
       for (const agent of agents) actTrade(session, agent, agentRng, ctx)
       stepBots(session, botRng, runtimeFor)
@@ -153,6 +168,12 @@ export function runScenario(spec: RunSpec): RunResult {
       players,
     })
   }
+
+  // Scores before the carry is closed, so the endgame term can be reported on its own
+  // rather than buried inside the total.
+  const scoreBeforeEnd = new Map(session.state.players.map((p) => [p.id, p.score]))
+  session.endGame()
+  result.final = finalMetrics(session, behaviourOf, scoreBeforeEnd)
 
   return result
 }

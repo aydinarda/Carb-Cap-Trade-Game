@@ -48,6 +48,36 @@ export function PhaseBadge({ phase, year }: { phase: Phase; year: number }) {
   )
 }
 
+/**
+ * Tone is a ROLE, not a colour: the palette maps each one to a fixed hue everywhere in the
+ * game, so a caller picks what the number means and never which colour it should be.
+ *
+ *  good/primary  lime   — abatement, compliance, the player's own position
+ *  market        cyan   — anything discovered on the secondary market
+ *  accent        amber  — the sell side and the primary auction
+ *  bad           coral  — a shortage, a cost, a penalty
+ *  insight       purple — the optimum and analysis of it
+ */
+export type StatTone = 'default' | 'good' | 'bad' | 'accent' | 'market' | 'insight'
+
+const TONE_TEXT: Record<StatTone, string> = {
+  default: 'text-foreground',
+  good: 'text-primary',
+  bad: 'text-destructive',
+  accent: 'text-accent',
+  market: 'text-market',
+  insight: 'text-insight',
+}
+
+const TONE_FRAME: Record<StatTone, string> = {
+  default: 'border-border bg-card',
+  good: 'border-primary/30 bg-primary/5',
+  bad: 'border-destructive/35 bg-destructive/5',
+  accent: 'border-accent/30 bg-accent/5',
+  market: 'border-market/30 bg-market/5',
+  insight: 'border-insight/30 bg-insight/5',
+}
+
 export function StatCard({
   label,
   value,
@@ -55,33 +85,202 @@ export function StatCard({
   hint,
   icon,
   tone = 'default',
+  labelTone,
+  hintTone,
+  aside,
+  emphasis = false,
 }: {
   label: string
   value: string | number
   unit?: string
-  hint?: string
+  hint?: ReactNode
   icon?: ReactNode
-  tone?: 'default' | 'good' | 'bad' | 'accent'
+  tone?: StatTone
+  /**
+   * Colour for the LABEL. Defaults to muted, because a row of four cards whose headings all
+   * shout is a row with no emphasis at all. Set it on the one card that is an alarm — a
+   * shortage heading in coral is read before the number under it, which is the point.
+   */
+  labelTone?: StatTone
+  /** Colour for the hint line, when the hint is itself a verdict ("cheaper than market"). */
+  hintTone?: StatTone
+  /** Rendered to the right of the value — the sparkline slot. */
+  aside?: ReactNode
+  /** Tints the card's border and background with the tone, for the cards that lead a screen. */
+  emphasis?: boolean
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card/70 p-4 flex flex-col gap-1">
-      <span className="text-xs text-muted-foreground font-mono uppercase tracking-wider flex items-center gap-1.5">
+    <div
+      className={cn(
+        'rounded-xl border p-4 flex flex-col gap-1',
+        emphasis ? TONE_FRAME[tone] : 'border-border bg-card/70',
+      )}
+    >
+      <span
+        className={cn(
+          'text-xs font-mono uppercase tracking-wider flex items-center gap-1.5',
+          labelTone ? TONE_TEXT[labelTone] : 'text-muted-foreground',
+        )}
+      >
         {icon}
         {label}
       </span>
-      <span
-        className={cn(
-          'text-2xl font-bold font-mono',
-          tone === 'good' && 'text-primary',
-          tone === 'bad' && 'text-destructive',
-          tone === 'accent' && 'text-accent',
-          tone === 'default' && 'text-foreground',
-        )}
-      >
-        {typeof value === 'number' ? value.toLocaleString() : value}
-        {unit && <span className="text-sm text-muted-foreground ml-1">{unit}</span>}
+      <div className="flex items-end justify-between gap-3">
+        <span
+          className={cn(
+            'font-bold font-mono leading-none',
+            emphasis ? 'text-3xl' : 'text-2xl',
+            TONE_TEXT[tone],
+          )}
+        >
+          {typeof value === 'number' ? value.toLocaleString() : value}
+          {unit && <span className="text-sm text-muted-foreground ml-1 font-normal">{unit}</span>}
+        </span>
+        {aside && <div className="shrink-0">{aside}</div>}
+      </div>
+      {hint && (
+        <span className={cn('text-xs', hintTone ? TONE_TEXT[hintTone] : 'text-muted-foreground')}>
+          {hint}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A bare price line — no axes, no labels, no tooltip.
+ *
+ * Deliberately not a chart: it answers "which way has this been going?" beside the number
+ * that says where it is now, and anything more would compete with the number. Drawn as raw
+ * SVG rather than through the chart library because it renders at 30 pixels tall inside a
+ * stat card, where a responsive container costs more than it can possibly repay.
+ *
+ * A flat series (every point equal, or a single point) is drawn as a flat line through the
+ * middle rather than being scaled to nothing — dividing by a zero range is how a steady
+ * price ends up looking like a crash.
+ */
+export function Sparkline({
+  points,
+  color,
+  width = 84,
+  height = 30,
+}: {
+  points: number[]
+  color: string
+  width?: number
+  height?: number
+}) {
+  if (points.length < 2) return null
+  const lo = Math.min(...points)
+  const hi = Math.max(...points)
+  const range = hi - lo
+  const pad = 3
+  const x = (i: number) => (i / (points.length - 1)) * (width - pad * 2) + pad
+  const y = (v: number) =>
+    range === 0 ? height / 2 : height - pad - ((v - lo) / range) * (height - pad * 2)
+  const d = points.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
+  const last = points[points.length - 1]
+
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+      <path d={d} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={x(points.length - 1)} cy={y(last)} r={2.5} fill={color} />
+    </svg>
+  )
+}
+
+/**
+ * The compliance decision, priced.
+ *
+ * The whole lesson of a cap-and-trade game is that a company chooses between three costs, so
+ * the screen states all three in the same units at the same moment instead of leaving the
+ * student to multiply.
+ *
+ * TWO THINGS THIS IS CAREFUL ABOUT, because getting either wrong teaches the opposite of
+ * what the game is for:
+ *
+ *  1. **Abatement does not settle this year.** Capacity is paid for now and comes online at
+ *     the next year open, so it cannot close today's gap — it closes the SAME gap in every
+ *     following year. Listing it beside "buy" as an equivalent way to comply would be a
+ *     straightforward lie about the mechanism, so it is separated and labelled.
+ *  2. **The penalty is not a purchase.** An uncovered tonne is fined AND still carried as
+ *     make-good debt into next year (see `settleYear`), so the fine is not a price at which
+ *     a player may simply opt out. Presenting it as the third column of a shopping list —
+ *     which is how a naive reading of the numbers goes — is what makes students treat it as
+ *     a ceiling. The qualifier says so in the row itself.
+ */
+export function ComplianceStrip({
+  gap,
+  buyCost,
+  penaltyCost,
+  penaltyRate,
+  abateCost,
+  abateBlockedReason,
+}: {
+  /** Tonnes still to cover this year. Positive = short; this component renders nothing at 0. */
+  gap: number
+  /** Gap × the current market price, or null when nothing has traded yet. */
+  buyCost: number | null
+  /** Gap × penaltyRate. */
+  penaltyCost: number
+  penaltyRate: number
+  /** What it would cost to install enough capacity to cut `gap` tonnes — from NEXT year. */
+  abateCost: number | null
+  /** Why the abate option is unavailable, when it is (headroom under the lifetime cap). */
+  abateBlockedReason?: string
+}) {
+  if (gap <= 0) return null
+  const cheapest =
+    buyCost !== null && abateCost !== null ? (buyCost <= abateCost ? 'buy' : 'abate') : null
+  const Cheaper = ({ tone }: { tone: string }) => (
+    <span className={cn('ml-1.5 text-[10px] uppercase tracking-wider', tone)}>cheaper</span>
+  )
+
+  return (
+    <div className="rounded-xl border border-border bg-card/70 px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2.5 text-sm">
+      <span className="flex items-center gap-2 font-medium">
+        <Leaf size={15} className="text-primary shrink-0" />
+        Cover <strong className="font-mono">{gap}</strong> tCO₂ to comply.
       </span>
-      {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
+
+      <span className="h-4 w-px bg-border hidden sm:block" aria-hidden="true" />
+
+      <span className="font-mono text-market">
+        Buy in market: <strong>{buyCost === null ? '—' : `~${buyCost.toLocaleString()} cr`}</strong>
+        {cheapest === 'buy' && <Cheaper tone="text-market/70" />}
+      </span>
+
+      <span className="text-muted-foreground">or</span>
+
+      {/*
+        The cost here is the REAL charge — the retrofit fee plus the integral of the MAC
+        curve between the installed level and the one that closes the gap — not
+        `gap × next-tonne cost`. The linear version understates a small cut by the whole fee
+        (hundreds to over a thousand credits, since the fee scales with baseline emissions
+        and is charged again on every step), so a student who read it would press the button
+        and be charged several times what the screen quoted.
+
+        The "from next year" note is not decoration either: capacity comes online at the next
+        year open, so this does not settle today's shortfall. It is the cheaper answer to the
+        SAME gap in every following year, which is what makes it worth comparing at all.
+      */}
+      <span className="font-mono text-primary">
+        Abate: <strong>{abateCost === null ? '—' : `~${abateCost.toLocaleString()} cr`}</strong>
+        <span className="ml-1.5 text-[11px] text-muted-foreground">
+          {abateBlockedReason ?? 'from next year'}
+        </span>
+        {cheapest === 'abate' && !abateBlockedReason && <Cheaper tone="text-primary/70" />}
+      </span>
+
+      <span className="h-4 w-px bg-border hidden sm:block" aria-hidden="true" />
+
+      {/* Short, because the qualifier that matters — that the fine does not discharge the
+          obligation — is already on the shortage card above it, and saying it twice in one
+          viewport is how a caveat stops being read. */}
+      <span className="font-mono text-destructive">
+        Uncovered: <strong>{penaltyCost.toLocaleString()} cr</strong> penalty
+        <span className="ml-1.5 text-[11px] text-destructive/70">({penaltyRate}/t)</span>
+      </span>
     </div>
   )
 }

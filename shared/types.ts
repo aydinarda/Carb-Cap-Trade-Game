@@ -291,6 +291,18 @@ export interface PlayerSnapshot {
    *  a lifetime budget rather than a per-year limit. The server clamps to the same number,
    *  so this is a UI affordance, not the enforcement. */
   abatementLifetimeCap: number
+  /**
+   * Cost per tCO2 left uncovered at settlement.
+   *
+   * Sent to the player, not just the host, because the trade screen prices the third option
+   * out loud: cover on the market, cut emissions, or leave it uncovered and pay this. A
+   * student cannot weigh the first two without the third, and the client must not guess it —
+   * the host can change it mid-game.
+   *
+   * It is NOT a price ceiling. An uncovered tonne is fined AND still carried as make-good
+   * debt (see `settleYear`), so paying the fine does not discharge the obligation.
+   */
+  penaltyRate: number
   /** Auctioning mode: total supply on offer this year (= the cap). */
   auctionSupply: number
   /** Auctioning mode: uniform clearing price, once the auction has closed. */

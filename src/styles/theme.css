@@ -1,82 +1,79 @@
 @custom-variant dark (&:is(.dark *));
 
+/**
+ * The game palette.
+ *
+ * Every hue carries ONE meaning, everywhere. That is what lets a student read a number's
+ * role before reading the number: cyan is always the secondary market, amber is always the
+ * sell side and the primary auction, coral is always a cost or a shortage, lime is always
+ * the player's own abatement. A screen that borrows a hue for decoration breaks the
+ * mapping for every other screen, so add a token here rather than an inline colour.
+ */
 :root {
   --font-size: 16px;
-  --background: #071a0e;
-  --foreground: #dff2d8;
-  --card: #0d2818;
-  --card-foreground: #dff2d8;
-  --popover: #0d2818;
-  --popover-foreground: #dff2d8;
-  --primary: #5dde52;
-  --primary-foreground: #071a0e;
-  --secondary: #1a4a26;
-  --secondary-foreground: #dff2d8;
-  --muted: #112b18;
-  --muted-foreground: #7aad78;
-  --accent: #f5a623;
-  --accent-foreground: #071a0e;
-  --destructive: #e03e3e;
-  --destructive-foreground: #ffffff;
-  --border: rgba(93, 222, 82, 0.15);
+
+  /* --- surfaces, darkest to lightest ------------------------------------- */
+  --background: #021910; /* very dark green — the page */
+  --card: #082b1f; /* deep forest — panels */
+  --surface-alt: #0d3425; /* dark emerald — a panel INSIDE a panel, inputs, hovers */
+  --border: #175438; /* forest green */
+
+  /* --- text -------------------------------------------------------------- */
+  --foreground: #e7f5e6; /* pale mint white */
+  --muted-foreground: #8eaa96; /* muted sage — labels, units, hints */
+
+  /* --- semantic hues ------------------------------------------------------ */
+  --primary: #63f45b; /* neon lime — abatement, compliance, the player's own line */
+  --primary-bright: #8cff5a; /* acid lime — the emphatic end of the same role */
+  --market: #20d9ff; /* electric cyan — secondary market, buy side, bids */
+  --accent: #ffb31a; /* neon amber — sell side, asks, the primary auction */
+  --destructive: #ff5263; /* coral red — shortage, cost, penalty */
+  --insight: #b77cff; /* neon purple — the optimum, and analysis of it */
+
+  --primary-foreground: #021910;
+  --card-foreground: #e7f5e6;
+  --popover: #082b1f;
+  --popover-foreground: #e7f5e6;
+  --secondary: #0d3425;
+  --secondary-foreground: #e7f5e6;
+  --muted: #0d3425;
+  --accent-foreground: #021910;
+  --destructive-foreground: #021910;
+  --market-foreground: #021910;
   --input: transparent;
-  --input-background: #1a4a26;
-  --switch-background: #2a6338;
+  --input-background: #0d3425;
+  --switch-background: #175438;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --ring: #5dde52;
-  --chart-1: #5dde52;
-  --chart-2: #f5a623;
-  --chart-3: #38bdf8;
-  --chart-4: #a78bfa;
-  --chart-5: #fb7185;
+  --ring: #63f45b;
+
+  /* Charts reuse the semantic hues rather than inventing a parallel scale — a chart
+     series and the stat card beside it must not disagree about what cyan means. */
+  --chart-1: #63f45b;
+  --chart-2: #ffb31a;
+  --chart-3: #20d9ff;
+  --chart-4: #b77cff;
+  --chart-5: #ff5263;
   --radius: 0.5rem;
-  --sidebar: #0d2818;
-  --sidebar-foreground: #dff2d8;
-  --sidebar-primary: #5dde52;
-  --sidebar-primary-foreground: #071a0e;
-  --sidebar-accent: #1a4a26;
-  --sidebar-accent-foreground: #dff2d8;
-  --sidebar-border: rgba(93, 222, 82, 0.15);
-  --sidebar-ring: #5dde52;
+  --sidebar: #082b1f;
+  --sidebar-foreground: #e7f5e6;
+  --sidebar-primary: #63f45b;
+  --sidebar-primary-foreground: #021910;
+  --sidebar-accent: #0d3425;
+  --sidebar-accent-foreground: #e7f5e6;
+  --sidebar-border: #175438;
+  --sidebar-ring: #63f45b;
 }
 
-.dark {
-  --background: #071a0e;
-  --foreground: #dff2d8;
-  --card: #0d2818;
-  --card-foreground: #dff2d8;
-  --popover: #0d2818;
-  --popover-foreground: #dff2d8;
-  --primary: #5dde52;
-  --primary-foreground: #071a0e;
-  --secondary: #1a4a26;
-  --secondary-foreground: #dff2d8;
-  --muted: #112b18;
-  --muted-foreground: #7aad78;
-  --accent: #f5a623;
-  --accent-foreground: #071a0e;
-  --destructive: #e03e3e;
-  --destructive-foreground: #ffffff;
-  --border: rgba(93, 222, 82, 0.15);
-  --input: oklch(0.269 0 0);
-  --ring: #5dde52;
-  --font-weight-medium: 500;
-  --font-weight-normal: 400;
-  --chart-1: #5dde52;
-  --chart-2: #f5a623;
-  --chart-3: #38bdf8;
-  --chart-4: #a78bfa;
-  --chart-5: #fb7185;
-  --sidebar: #0d2818;
-  --sidebar-foreground: #dff2d8;
-  --sidebar-primary: #5dde52;
-  --sidebar-primary-foreground: #071a0e;
-  --sidebar-accent: #1a4a26;
-  --sidebar-accent-foreground: #dff2d8;
-  --sidebar-border: rgba(93, 222, 82, 0.15);
-  --sidebar-ring: #5dde52;
-}
+/*
+ * There is no `.dark` block, and no light mode.
+ *
+ * This game is dark-only by design — it is played on a projector in a lit room, and the
+ * palette above is built for that one surface. A `.dark` block used to sit here repeating
+ * every token verbatim; nothing ever adds the class (see App.tsx — only the toaster is told
+ * `theme="dark"`), so it was dead CSS that a palette change had to be applied to twice, and
+ * would eventually have been applied to only once.
+ */
 
 @theme inline {
   --color-background: var(--background);
@@ -87,6 +84,11 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-bright: var(--primary-bright);
+  --color-market: var(--market);
+  --color-market-foreground: var(--market-foreground);
+  --color-insight: var(--insight);
+  --color-surface-alt: var(--surface-alt);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);

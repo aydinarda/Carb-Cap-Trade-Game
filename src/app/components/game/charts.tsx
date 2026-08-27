@@ -12,15 +12,15 @@ import {
   YAxis,
 } from 'recharts'
 import type { ClassAggregate, YouView } from '@shared/types'
-import { CHART } from './theme'
+import { CHART, PALETTE } from './theme'
 
 const tooltipStyle = {
-  background: '#0d2818',
-  border: '1px solid rgba(93,222,82,0.25)',
+  background: PALETTE.card,
+  border: `1px solid ${PALETTE.border}`,
   borderRadius: 8,
   fontSize: 12,
   fontFamily: "'DM Mono', monospace",
-  color: '#dff2d8',
+  color: PALETTE.foreground,
 }
 
 const axisTick = { fill: CHART.axis, fontSize: 11, fontFamily: "'DM Mono', monospace" }
@@ -54,7 +54,11 @@ export function EmissionHistoryChart({
           labelFormatter={(y) => `Year ${y}`}
           formatter={(value: number) => [`${value} tCO₂`, 'Emissions']}
         />
-        {you.freeAllocation !== null && (
+        {/* Only when there IS a free allocation. Under auctioning it is 0, and a reference
+            line pinned to the axis is not a cap anyone was given — it is a line labelled
+            "free credits" sitting on zero, which reads as a mistake and collides with the
+            axis labels. No allocation, no line. */}
+        {you.freeAllocation !== null && you.freeAllocation > 0 && (
           <ReferenceLine
             y={you.freeAllocation}
             stroke={CHART.reference}
@@ -80,8 +84,8 @@ export function EmissionHistoryChart({
                 cx={props.cx}
                 cy={props.cy}
                 r={realized ? 5 : 3}
-                fill={realized ? '#f5a623' : CHART.series}
-                stroke="#071a0e"
+                fill={realized ? PALETTE.accent : CHART.series}
+                stroke={PALETTE.background}
                 strokeWidth={2}
               />
             )
@@ -143,7 +147,7 @@ export function ClassYearChart({
           dataKey="totalRealized"
           stroke={CHART.series}
           strokeWidth={2}
-          dot={{ r: 4, fill: CHART.series, stroke: '#071a0e', strokeWidth: 2 }}
+          dot={{ r: 4, fill: CHART.series, stroke: PALETTE.background, strokeWidth: 2 }}
         />
       </LineChart>
     </ResponsiveContainer>

@@ -7,7 +7,6 @@ import {
 } from '../../shared/engine'
 import { GameError, type Session } from '../../server/session'
 import { considerInstall, priceCeiling } from '../../server/bots/helpers'
-import type { Player } from '../../shared/types'
 
 /**
  * Simulated students.
@@ -97,10 +96,45 @@ export interface AgentState {
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
 
+/** Where in the GAME this year sits. Separate from the within-year tick context because
+ *  the two drive different decisions: the tick drives urgency, the year drives whether
+ *  holding a surplus is worth anything at all. */
+export interface YearContext {
+  /** 0-based index of this year within the run. */
+  index: number
+  /** How many years the run has in total — the agents are told, exactly as a class is. */
+  total: number
+}
+
 /** How far through the trade window we are (0..1) — drives late-round urgency. */
 export interface TickContext {
   progress: number
   isLastTick: boolean
+  year: YearContext
+}
+
+/**
+ * The cover target this archetype actually plays this year.
+ *
+ * `coverTarget > 1` is over-hedging: buy more than you need, carry the surplus. That used to
+ * be free — `endGame` cashed leftover allowances out at the final market price, so a hedger
+ * got its money back. It no longer does: **a leftover surplus is stranded and worth nothing**
+ * (see `Session.endGame`), while a leftover debt is still settled in full.
+ *
+ * So the incentive reverses at the end of the game, and an agent that ignored that would be
+ * modelling a player who had not read the rules. The taper is deliberately gradual rather
+ * than a final-year cliff: a surplus bought in year 9 of 10 is nearly as stranded as one
+ * bought in year 10, because there is only one more market to sell it into.
+ *
+ * Under-covering (`coverTarget < 1`) is left alone — the debt side did not change.
+ */
+function effectiveCoverTarget(base: number, year: YearContext): number {
+  if (base <= 1) return base
+  const remaining = year.total - year.index // 1 in the final year
+  if (remaining >= 3) return base
+  // 2 years left → half the over-hedge; final year → none of it.
+  const keep = remaining <= 1 ? 0 : 0.5
+  return 1 + (base - 1) * keep
 }
 
 /**
@@ -131,13 +165,23 @@ export function actTrade(
 
   // Whether to buy abatement capacity — a once-a-year capital decision that changes
   // NOTHING about this year's position, and so is kept well away from the sizing below.
+  // Capacity bought in the final year never switches on, so nobody buys it then.
   agent.rt ??= {}
-  considerInstall(session, agent.playerId, agent.rt, reference, t.abatementBias)
+  if (tick.year.index < tick.year.total - 1) {
+    considerInstall(session, agent.playerId, agent.rt, reference, t.abatementBias)
+  }
 
-  const rStar = optimalAbatement(spec, reference)
+  // `lifetimeCap` is NOT optional here. Without it `optimalAbatement` returns the
+  // unconstrained optimum, which at any price above `a + b` is a 100% cut — a cut the engine
+  // forbids (`Session.setAbatement` clamps to the cap). The agent then valued carbon at
+  // `MAC(1) = a + b` (85/120/125/190 by sector) instead of at the dearest cut it is actually
+  // allowed, `MAC(cap) = a + cap·b` (47.5/70/75/115 at cap 0.5). Since `fair` is capped at the
+  // fine, every sector's fair value collapsed onto the fine itself — which is why the market
+  // printed at the ceiling and looked anchored by the penalty rather than by fundamentals.
+  const rStar = optimalAbatement(spec, reference, cfg.abatement.lifetimeCap)
   const planned = session.plannedEmission(agent.playerId)
   const held = session.creditsHeld(agent.playerId)
-  const need = planned * t.coverTarget - held
+  const need = planned * effectiveCoverTarget(t.coverTarget, tick.year) - held
 
   const fair = Math.min(P, marginalCost(rStar, spec))
   const noise = rng.normal(0, t.priceNoise)
@@ -164,7 +208,12 @@ export function actTrade(
 }
 
 /** Cap-stage sealed bid, for modes that run a primary auction. */
-export function actAuction(session: Session, agent: AgentState, rng: Rng): boolean {
+export function actAuction(
+  session: Session,
+  agent: AgentState,
+  rng: Rng,
+  year: YearContext,
+): boolean {
   const record = session.currentYearRecord()
   if (!record) return false
   const player = session.getPlayer(agent.playerId)
@@ -177,7 +226,9 @@ export function actAuction(session: Session, agent: AgentState, rng: Rng): boole
   // Capacity bought now would not arrive until next year, so it cannot shrink what this
   // year's auction has to cover. The install decision belongs to the trade stage.
   const planned = session.plannedEmission(agent.playerId)
-  const qty = round1(planned * t.coverTarget - session.creditsHeld(agent.playerId))
+  const qty = round1(
+    planned * effectiveCoverTarget(t.coverTarget, year) - session.creditsHeld(agent.playerId),
+  )
   if (qty <= 0) return false
 
   const price = round1(
