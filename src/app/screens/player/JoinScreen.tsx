@@ -1,18 +1,27 @@
-import { ArrowRightLeft, Leaf } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { INDUSTRIES, INDUSTRY_NAMES, type Industry } from '@shared/constants'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
-import { cn, GameTitle, INDUSTRY_META } from '../../components/game/theme'
+import {
+  FieldLabel,
+  LandingCard,
+  LandingFeatures,
+  LandingHero,
+  LandingNav,
+  LandingShell,
+} from '../../components/game/landing'
+import { cn, INDUSTRY_META } from '../../components/game/theme'
 import { useGame } from '../../net/GameContext'
-import { CenteredShell } from './PlayerRoute'
 
-const INDUSTRY_BLURBS: Record<Industry, string> = {
-  'Power & Utilities': 'Very high emitter — big allocation, big exposure',
-  'Heavy Materials': 'High emitter — steel, cement, mining',
-  'Manufacturing & Chemicals': 'Medium emitter — factories and process industry',
-  Transport: 'Low emitter — logistics and mobility',
+/** The one-line size class, and the sectors behind it. */
+const INDUSTRY_BLURBS: Record<Industry, { size: string; detail: string }> = {
+  'Power & Utilities': { size: 'Very high emitter', detail: 'grids and generation' },
+  'Heavy Materials': { size: 'High emitter', detail: 'steel, cement, mining' },
+  'Manufacturing & Chemicals': { size: 'Medium emitter', detail: 'factories and process industry' },
+  Transport: { size: 'Low emitter', detail: 'logistics and mobility' },
 }
 
 export function JoinScreen() {
@@ -21,6 +30,8 @@ export function JoinScreen() {
   const [name, setName] = useState('')
   const [industry, setIndustry] = useState<Industry | null>(null)
   const [busy, setBusy] = useState(false)
+
+  const ready = connected && roomCode.trim().length === 4 && !!name.trim() && !!industry
 
   const join = async () => {
     if (!industry) return
@@ -35,93 +46,119 @@ export function JoinScreen() {
   }
 
   return (
-    <CenteredShell>
-      <div className="flex flex-col items-center text-center mb-6">
-        <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/30 flex items-center justify-center relative mb-5">
-          <Leaf size={30} className="text-primary" />
-          <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-accent flex items-center justify-center">
-            <ArrowRightLeft size={9} className="text-accent-foreground" />
-          </div>
-        </div>
-        <GameTitle />
-        <p
-          className="text-muted-foreground text-sm mt-3 max-w-xs"
-          style={{ fontFamily: "'DM Sans', sans-serif" }}
-        >
-          You run a company. Pick your industry, get your emission allowance, and cover
-          the gap in the market.
-        </p>
-      </div>
+    <LandingShell>
+      <LandingNav cta={{ label: 'Instructor', to: '/host' }} />
+
+      <LandingHero
+        lead="Run your company."
+        accent="Trade smart. Cut emissions."
+        subtitle="Manage your emissions, trade allowances in the market, and stay under the cap at the lowest cost you can manage."
+      />
+
+      <LandingFeatures />
 
       <form
-        className="flex flex-col gap-3"
         onSubmit={(e) => {
           e.preventDefault()
           void join()
         }}
       >
-        <Input
-          value={roomCode}
-          onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-          placeholder="Room code (e.g. 7KQ2)"
-          maxLength={4}
-          className="text-center font-mono text-lg tracking-[0.4em] uppercase h-12"
-          autoFocus
-        />
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Your name"
-          maxLength={40}
-          className="h-12"
-        />
+        <LandingCard>
+          <div className="flex flex-col gap-3">
+            <FieldLabel>Pick your industry</FieldLabel>
+            {/* Four tiles rather than a select: the choice decides how much this company
+                emits and therefore how the whole game feels, so it deserves to be the
+                largest thing on the form rather than a collapsed dropdown. */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {INDUSTRY_NAMES.map((ind) => {
+                const meta = INDUSTRY_META[ind]
+                const range = INDUSTRIES[ind]
+                const blurb = INDUSTRY_BLURBS[ind]
+                const selected = industry === ind
+                return (
+                  <button
+                    type="button"
+                    key={ind}
+                    onClick={() => setIndustry(ind)}
+                    aria-pressed={selected}
+                    className={cn(
+                      'rounded-xl border p-4 text-center transition-colors flex flex-col items-center gap-2',
+                      selected
+                        ? 'border-primary bg-primary/10'
+                        : 'border-border bg-surface-alt/40 hover:border-primary/40',
+                    )}
+                  >
+                    {/* Sector colour plus an icon plus the name — never colour alone, so the
+                        tiles stay distinguishable to a colour-blind player and on a
+                        washed-out projector. */}
+                    <span style={{ color: meta.color }} className="[&>svg]:size-7">
+                      {meta.icon}
+                    </span>
+                    {/* Fixed height for the name: "Manufacturing & Chemicals" wraps to two
+                        lines and the other three do not, which pushed that tile's size class
+                        and range out of alignment with its neighbours. */}
+                    <span className="font-bold text-sm text-foreground leading-tight min-h-[2.5rem] flex items-center">
+                      {ind}
+                    </span>
+                    <span className="text-xs text-muted-foreground leading-tight">
+                      {blurb.size}
+                    </span>
+                    <span className="text-[10px] font-mono text-muted-foreground/60 leading-tight">
+                      ~{range.low}–{range.high} tCO₂/yr
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
 
-        <div className="text-xs text-muted-foreground font-mono uppercase tracking-wider mt-1">
-          Pick your industry
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {INDUSTRY_NAMES.map((ind) => {
-            const meta = INDUSTRY_META[ind]
-            const range = INDUSTRIES[ind]
-            const selected = industry === ind
-            return (
-              <button
-                type="button"
-                key={ind}
-                onClick={() => setIndustry(ind)}
-                className={cn(
-                  'text-left rounded-xl border p-3 transition-colors',
-                  selected
-                    ? 'border-primary/60 bg-primary/10'
-                    : 'border-border bg-card/60 hover:border-primary/30',
-                )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="flex flex-col gap-2">
+              {/* Required, not optional. There is no "join any open room" on the server —
+                  a code identifies the room your instructor is running, and without one
+                  there is nothing to join. The way in without a code is to create a
+                  session, which is the link under the button. */}
+              <FieldLabel>Room code</FieldLabel>
+              <Input
+                value={roomCode}
+                onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                placeholder="e.g. 7KQ2"
+                maxLength={4}
+                className="h-12 font-mono text-lg tracking-[0.35em] uppercase"
+                autoFocus
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <FieldLabel>Your name</FieldLabel>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Enter your company name"
+                maxLength={40}
+                className="h-12"
+              />
+            </div>
+          </div>
+
+          <Button type="submit" disabled={busy || !ready} className="h-12 font-bold gap-2">
+            {busy ? 'Joining…' : 'Join game'}
+            {!busy && <ArrowRight size={18} />}
+          </Button>
+
+          <div className="text-center">
+            {!connected ? (
+              <p className="text-xs text-muted-foreground font-mono">connecting to server…</p>
+            ) : (
+              <Link
+                to="/host"
+                className="text-sm text-muted-foreground hover:text-primary transition-colors"
               >
-                <div className="flex items-center gap-2 text-sm font-bold text-foreground">
-                  <span style={{ color: meta.color }}>{meta.icon}</span>
-                  {ind}
-                </div>
-                <p className="text-[11px] text-muted-foreground mt-1">{INDUSTRY_BLURBS[ind]}</p>
-                <p className="text-[10px] font-mono text-muted-foreground/70 mt-0.5">
-                  ~{range.low}–{range.high} tCO₂/yr
-                </p>
-              </button>
-            )
-          })}
-        </div>
-
-        <Button
-          type="submit"
-          disabled={busy || !connected || roomCode.trim().length < 4 || !name.trim() || !industry}
-          className="h-12 font-bold"
-        >
-          {busy ? 'Joining…' : 'Join the game'}
-        </Button>
-        {!connected && (
-          <p className="text-xs text-muted-foreground text-center font-mono">
-            connecting to server…
-          </p>
-        )}
+                or create a new session
+              </Link>
+            )}
+          </div>
+        </LandingCard>
       </form>
-    </CenteredShell>
+    </LandingShell>
   )
 }
