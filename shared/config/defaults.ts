@@ -177,7 +177,17 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       // issuance, while emitters bid the price to the ceiling for want of a seller.
       marketMakerIncrementalBid: true,
       marketMakerShareByCount: true,
-      ceilingIncludesCarry: false,
+      // ON. The fine is NOT a ceiling and the engine never treated it as one: an uncovered
+      // tonne is fined AND still carried as make-good debt (see `settleYear`), so the true
+      // cost of defaulting is the fine PLUS buying that tonne later. Clamping every agent at
+      // `penaltyRate` imposed a ceiling the economics does not justify, and it was the only
+      // thing keeping a genuinely uncoverable shortage from pricing above the fine.
+      //
+      // Measured cost of turning it on: the price runs above 100 in the late years of a tight
+      // run (peak ~120 in the phase-anchor sweep), so a target band whose top sits at the
+      // fine can no longer be held by the clamp. That is the point — the band now has to be
+      // held by supply, not by an artificial cap.
+      ceilingIncludesCarry: true,
     },
   },
 }

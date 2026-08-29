@@ -176,6 +176,15 @@ export interface HostConfigView {
   applyLRFToGrandfathering: boolean
   /** Market-maker target inventory, as a share of everything in circulation. */
   marketMakerInvFrac: number
+  /**
+   * Whether the agents' self-imposed price ceiling includes the make-good carry.
+   *
+   * Sent so an external harness can FOLLOW the ceiling the bots actually use rather than
+   * mirroring it from a comment. The fine is not economically a ceiling — an uncovered tonne
+   * is fined AND still owed — but every bot clamps at `penaltyRate` while this is off, and a
+   * harness valuing tonnes higher would outbid all of them.
+   */
+  ceilingIncludesCarry: boolean
   /** Auctioning supply = auctionCapRatio × Σbaseline (host-tunable, ≤ 1 = scarcer). */
   auctionCapRatio: number
   /** Auction supply and benchmark shrink by this factor each year (EU-ETS LRF); 1 = flat. */

@@ -10,7 +10,7 @@ import * as compliance from '../bots/compliance'
 import * as marketMaker from '../bots/marketMaker'
 import * as noise from '../bots/noise'
 import * as speculator from '../bots/speculator'
-import { botAvgCost, disperse, referencePrice, sellCapacity } from '../bots/helpers'
+import { botAvgCost, disperse, priceCeiling, referencePrice, sellCapacity } from '../bots/helpers'
 import { Session } from '../session'
 import type { BotCtx } from '../bots/types'
 
@@ -252,9 +252,11 @@ describe('bots.fixes', () => {
         .orders.find((o) => o.playerId === bot.id && o.side === 'buy')!
     }
 
-    const P = new Session('auctioning', 5).state.config.market.penaltyRate
-    // Loose boundary: rCover === 1 falls into the `>= 1` branch and returns P outright.
-    expect(make(false).price).toBeCloseTo(P - 0.5, 5)
+    // The agents' own ceiling, not the bare fine: with `ceilingIncludesCarry` shipped ON
+    // that is `penaltyRate + reference`, because an uncovered tonne is fined AND still owed.
+    const ceiling = priceCeiling(new Session('auctioning', 5))
+    // Loose boundary: rCover === 1 falls into the `>= 1` branch and returns the ceiling.
+    expect(make(false).price).toBeCloseTo(ceiling - 0.5, 5)
     // Strict: the cost of cutting 100% is a + b = 10 + 75 for Power & Utilities.
     expect(make(true).price).toBeCloseTo(85 - 0.5, 5)
   })
@@ -418,7 +420,7 @@ describe('bot archetypes under benchmarking (no primary auction)', () => {
     expect(own.some((o) => o.side === 'sell')).toBe(true)
   })
 
-  it('the market maker never quotes above the penalty, even at the ceiling', () => {
+  it('the market maker never quotes above the agents\' ceiling', () => {
     const s = new Session('benchmarking', 1)
     const mm = s.addBot('marketMaker')
     s.addPlayer('Human', 'Power & Utilities')
@@ -428,17 +430,22 @@ describe('bot archetypes under benchmarking (no primary auction)', () => {
     s.openTrade()
 
     // Drive the discovered price right up to the ceiling, which is where a tight
-    // benchmark puts it — an unclamped ask used to escape past P from here.
+    // benchmark puts it — an unclamped ask used to escape past it from here.
+    //
+    // Asserted against `priceCeiling`, not the bare fine: the fine stopped being the bound
+    // when `ceilingIncludesCarry` shipped ON. What must still hold is that the maker respects
+    // whatever ceiling the agents share, which is the invariant this test was always about.
     const P = s.state.config.market.penaltyRate
+    const ceiling = priceCeiling(s)
     s.placeOrder('P2', 'sell', 5, P)
     s.placeOrder('P3', 'buy', 5, P)
 
     for (let i = 0; i < 4; i++) marketMaker.trade(ctxFor(s, mm.id))
     const rec = s.currentYearRecord()!
     for (const o of rec.orders.filter((x) => x.playerId === mm.id)) {
-      expect(o.price).toBeLessThanOrEqual(P)
+      expect(o.price).toBeLessThanOrEqual(ceiling)
     }
-    for (const t of rec.trades) expect(t.price).toBeLessThanOrEqual(P)
+    for (const t of rec.trades) expect(t.price).toBeLessThanOrEqual(ceiling)
   })
 
   it('a short compliance firm bids up toward the penalty ceiling', () => {

@@ -23,7 +23,7 @@
  *
  * NOTE ON PRICES. This is a *load* test, but its price path gets read as a finding, so the
  * synthetic players must behave like the ones the simulator models: abate to the sector's
- * cost-minimising point (capped by `maxAbatement`), value a tonne at `min(penaltyRate,
+ * cost-minimising point (capped by `abatementLifetimeCap`), value a tonne at `min(penaltyRate,
  * MAC(r*))` — the same ceiling every bot uses — and quote with SYMMETRIC noise around it.
  *
  * An earlier version quoted `lastPrice × U(1.0, 1.1)` to buy and `× U(0.9, 1.0)` to sell,
@@ -241,12 +241,13 @@ function optimalAbatement(price, spec, maxFraction = 1) {
 }
 
 class Player {
-  constructor(sock, id, penaltyRate, openingFraction = 0.25) {
+  constructor(sock, id, penaltyRate, openingFraction = 0.25, ceilingIncludesCarry = false) {
     this.sock = sock
     this.id = id
     this.snap = null
     this.penaltyRate = penaltyRate
     this.openingFraction = openingFraction
+    this.ceilingIncludesCarry = ceilingIncludesCarry
     sock.on('session:snapshot', (s) => {
       this.snap = s
       M.snapshots++
@@ -271,9 +272,17 @@ class Player {
     const s = this.snap
     const ref = this.refPrice()
     const spec = s?.abatement
-    const rStar = optimalAbatement(ref, spec, s?.maxAbatement ?? 1)
+    // `abatementLifetimeCap`, not `maxAbatement` — the latter is not a field on the snapshot,
+    // so this read `undefined` and fell back to 1. The player was then valuing a tonne at the
+    // cost of a 100% cut (MAC(1) = a + b, up to 190) when the engine only ever lets it cut
+    // 50% (MAC(0.5) = a + 0.5b, 47.5-115). Every valuation came out roughly double and
+    // clamped against the fine, which is most of why the ceiling looked like it was binding.
+    const rStar = optimalAbatement(ref, spec, s?.abatementLifetimeCap ?? 1)
     const mc = marginalCost(rStar, spec)
-    const ceiling = this.penaltyRate
+    // Follows the server rather than mirroring it: `ceilingIncludesCarry` decides whether the
+    // bots clamp at the fine or at fine + reference, and a hand-kept copy of that rule drifts
+    // the moment somebody flips the flag.
+    const ceiling = this.ceilingIncludesCarry ? this.penaltyRate + ref : this.penaltyRate
     if (mc === null) return Math.min(ceiling, ref)
     return Math.min(ceiling, mc)
   }
@@ -416,11 +425,13 @@ async function runSession(capMode, { withBots, joinGrace }) {
   // Read from the host snapshot rather than assumed: it is a calibration knob and has
   // already moved from 0.5 to 0.25.
   const openingFraction = hostSnap?.config?.openingReferenceFraction ?? 0.25
+  const ceilingCarry = hostSnap?.config?.ceilingIncludesCarry ?? false
   console.log(`opening anchor: ${openingFraction} → year-1 reference ${round1(penaltyRate * openingFraction)}`)
   console.log(
     `mm target inventory: ${MM_INV_START} +${MM_INV_STEP}/yr` +
       (MM_INV_STEP === 0 ? ' (flat)' : ` → ${round3(MM_INV_START + MM_INV_STEP * (YEARS_PER_MODE - 1))} by the last year`),
   )
+  console.log(`price ceiling: ${ceilingCarry ? 'penalty + reference (carry)' : 'penalty'}`)
   console.log(`penalty rate in force: ${penaltyRate}` +
     `  ·  capReduction ${hostSnap?.config?.capReductionFactor ?? '?'}` +
     `  ·  auctionCapRatio ${hostSnap?.config?.auctionCapRatio ?? '?'}`)
@@ -439,7 +450,7 @@ async function runSession(capMode, { withBots, joinGrace }) {
             industry: INDUSTRIES[n % INDUSTRIES.length],
           })
           if (!j.ok) { M.errors++; sock.close(); return null }
-          return new Player(sock, j.playerId, penaltyRate, openingFraction)
+          return new Player(sock, j.playerId, penaltyRate, openingFraction, ceilingCarry)
         } catch { M.connectFail++; return null }
       }),
     )
