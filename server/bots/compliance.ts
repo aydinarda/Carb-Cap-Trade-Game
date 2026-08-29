@@ -37,12 +37,21 @@ import type { BotCtx } from './types'
  * swinging between ~0 and the fine on pure scarcity. The formula is deliberately unchanged;
  * the size of the distortion is quantified in the notebook (SR vs LR efficient price).
  */
+/**
+ * Auction bids value the deepest ALLOWED cut rather than the fine, when the firm cannot
+ * self-cover. Temporary switch while the two are compared — see the measurement in the
+ * session notes; flip to false for the strict "the fine is the alternative" reading.
+ */
+const SOFTEN_AT_CAP = true
+
 function reservationPrice(
   expected: number,
   held: number,
   coeff: AbatementSpec,
   penaltyRate: number,
   strictBoundary = false,
+  lifetimeCap = 1,
+  softenAtCap = false,
 ): number {
   if (expected <= 0) return penaltyRate
   const rCover = 1 - held / expected
@@ -52,6 +61,18 @@ function reservationPrice(
   // so the loose boundary put the bot at the ceiling on tick 1 of every trade window.
   // Gated: see bots.fixes.complianceReservation.
   if (strictBoundary ? rCover > 1 : rCover >= 1) return penaltyRate
+  // The cut has to be one the firm is ALLOWED to make. Beyond the lifetime cap there is no
+  // self-help left, so the alternative to buying is the fine — and the willingness to pay is
+  // the ceiling, not a marginal cost the engine would refuse to let it incur.
+  if (rCover > lifetimeCap) {
+    // Beyond the cap the firm cannot self-cover, so the fine is the binding alternative and
+    // its willingness to pay is the ceiling. `softenAtCap` values the deepest cut it IS
+    // allowed instead — a sector-specific number rather than one everybody shares, which is
+    // what lets the auction clear on a curve instead of a step. See the auction bid.
+    return softenAtCap
+      ? Math.min(penaltyRate, marginalCost(lifetimeCap, coeff))
+      : penaltyRate
+  }
   return Math.min(penaltyRate, marginalCost(Math.max(0, rCover), coeff))
 }
 
@@ -102,6 +123,7 @@ export function trade(ctx: BotCtx): boolean {
     const reservation = reservationPrice(
       planned, held, coeff, P,
       session.state.config.bots.fixes.complianceReservation,
+      session.abatementLifetimeCap,
     )
     const reservationB = disperse(reservation, ctx.rt.bias ?? 0, P)
     if (mv.bestAsk !== null && mv.bestAsk < reservation) {
@@ -143,7 +165,28 @@ export function auction(ctx: BotCtx): boolean {
   // structurally incapable of ever holding a surplus.
   const residual = round1(planned * cfg.coverTarget - held)
   if (residual <= 0) return false
-  // An allowance is a tradeable asset worth ~the market price — bid at the reference,
-  // not the private MAC, so the clearing price tracks the discovered price.
-  return trySubmitBid(session, bot.id, residual, disperse(Math.min(P, ref), ctx.rt.bias ?? 0, P))
+  // Bid what the tonne is WORTH TO THIS FIRM, not what the market last paid.
+  //
+  // The old rule bid `min(P, reference)` — the previous year's price — for the whole
+  // residual, which made every bidder post the same number and demand perfectly inelastic.
+  // Measured: supply from 1.4x need down to 0.4x, bid-to-cover 0.97 to 2.93, and the clearing
+  // price moved 21.9 to 25.5 while the bid distribution did not move at all. An auction whose
+  // price cannot answer "how scarce is this?" has no link to the book it is meant to anchor.
+  //
+  // The reservation price is that answer: the cost of the cut this firm would have to make
+  // instead, or the fine when the cut is beyond its lifetime cap. It differs by sector and by
+  // how short the firm is, so bids spread out, and the uniform-price auction clears at the
+  // marginal buyer's true willingness to pay — which is the fundamental price the secondary
+  // market should then discover too.
+  const coeff = session.state.config.abatement.sectors[bot.industry]
+  const reservation = reservationPrice(
+    planned, held, coeff, P,
+    session.state.config.bots.fixes.complianceReservation,
+    session.abatementLifetimeCap,
+    SOFTEN_AT_CAP,
+  )
+  // Never above what the tonne is worth, and never so far below the market that the firm
+  // simply loses the auction and has to buy the same tonne dearer in the book.
+  const bid = Math.max(Math.min(P, ref) * 0.9, Math.min(reservation, P))
+  return trySubmitBid(session, bot.id, residual, disperse(bid, ctx.rt.bias ?? 0, P))
 }

@@ -247,13 +247,14 @@ describe('bots.fixes', () => {
     expect(many.committed).toBe(once.committed)
   })
 
-  it('complianceReservation: holding nothing means a full cut, not the penalty', () => {
-    const make = (strict: boolean) => {
-      const s = new Session(
-        'auctioning',
-        5,
-        strict ? { bots: { fixes: { complianceReservation: true } } } : {},
-      )
+  it('complianceReservation: what a firm will pay is the cut it is ALLOWED to make', () => {
+    const make = (strict: boolean, lifetimeCap: number) => {
+      // Both arms set the flag EXPLICITLY. It now ships on, so "pass nothing for the loose
+      // arm" quietly made both arms strict and the comparison vacuous.
+      const s = new Session('auctioning', 5, {
+        abatement: { lifetimeCap },
+        bots: { fixes: { complianceReservation: strict } },
+      })
       const bot = s.addBot('compliance', 'Power & Utilities')
       s.addPlayer('Human', 'Transport')
       s.startYear()
@@ -261,18 +262,31 @@ describe('bots.fixes', () => {
       s.openTrade()
       expect(s.creditsHeld(bot.id)).toBe(0)
       compliance.trade(ctxFor(s, bot.id))
-      return s
+      const order = s
         .currentYearRecord()!
         .orders.find((o) => o.playerId === bot.id && o.side === 'buy')!
+      return { price: order.price, ceiling: priceCeiling(s) }
     }
 
-    // The agents' own ceiling, not the bare fine: with `ceilingIncludesCarry` shipped ON
-    // that is `penaltyRate + reference`, because an uncovered tonne is fined AND still owed.
-    const ceiling = priceCeiling(new Session('auctioning', 5))
-    // Loose boundary: rCover === 1 falls into the `>= 1` branch and returns the ceiling.
-    expect(make(false).price).toBeCloseTo(ceiling - 0.5, 5)
-    // Strict: the cost of cutting 100% is a + b = 10 + 75 for Power & Utilities.
-    expect(make(true).price).toBeCloseTo(85 - 0.5, 5)
+    // Holding nothing, the firm needs a 100% cut to cover itself. Whether that is a real
+    // alternative depends on the LIFETIME CAP, and the reservation has to follow it:
+    //
+    //  - cap 1.0: a full cut is allowed, so the firm will pay up to what it costs —
+    //    MAC(1) = a + b = 10 + 75 for Power & Utilities.
+    const allowed = make(true, 1)
+    expect(allowed.price).toBeCloseTo(85 - 0.5, 5)
+
+    //  - cap 0.5 (what ships): a full cut is NOT allowed, so cutting cannot cover the
+    //    shortfall at any price and the fine is the binding alternative. Quoting MAC(1) here
+    //    would price a cut the engine refuses to let the firm make.
+    const capped = make(true, 0.5)
+    expect(capped.price).toBeCloseTo(capped.ceiling - 0.5, 5)
+
+    // The loose boundary returns the ceiling at rCover === 1 regardless — that is the
+    // defect the flag exists to compare against, and it is indistinguishable from the
+    // capped case above precisely because both hit the ceiling.
+    const loose = make(false, 1)
+    expect(loose.price).toBeCloseTo(loose.ceiling - 0.5, 5)
   })
 
   it('marketMakerIncrementalBid: inventory stops compounding year over year', () => {

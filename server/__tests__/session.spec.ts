@@ -687,17 +687,41 @@ describe('the cap reduction schedule', () => {
     const first = c.emissions.firstGameYear
     // Round 1 is the baseline the schedule shrinks FROM, so no reduction applies to it.
     expect(cumulativeCapFactor(c, first)).toBe(1)
-    expect(cumulativeCapFactor(c, first + 1)).toBeCloseTo(0.95, 9)
-    expect(cumulativeCapFactor(c, first + 2)).toBeCloseTo(0.95 ** 2, 9)
-    // Rounds 1-9 at 0.95, then round 10 onward at 0.965.
-    expect(cumulativeCapFactor(c, first + 10)).toBeCloseTo(0.95 ** 9 * 0.965, 9)
+    // Read the schedule rather than restating it: the factors are calibration and have
+    // already moved once. What must hold is that they COMPOUND, round by round.
+    const sched = c.allocation.capReductionSchedule
+    const factorAt = (round: number) =>
+      [...sched].filter((e) => e.fromRound <= round).pop()!.factor
+    expect(cumulativeCapFactor(c, first + 1)).toBeCloseTo(factorAt(1), 9)
+    expect(cumulativeCapFactor(c, first + 2)).toBeCloseTo(factorAt(1) * factorAt(2), 9)
+    let expected = 1
+    for (let r = 1; r <= 10; r++) expected *= factorAt(r)
+    expect(cumulativeCapFactor(c, first + 10)).toBeCloseTo(expected, 9)
   })
 
-  it('stops shrinking once the schedule reaches 1', () => {
+  it('stops shrinking, and may loosen, once the schedule passes its trough', () => {
     const c = resolveConfig()
     const first = c.emissions.firstGameYear
-    const atTwenty = cumulativeCapFactor(c, first + 20)
-    expect(cumulativeCapFactor(c, first + 25)).toBeCloseTo(atTwenty, 9)
+    // The late entries sit ABOVE 1 deliberately: by then the class has spent its abatement
+    // budget, so holding supply flat would still tighten against a market that cannot
+    // respond. The cap therefore stops falling and begins to loosen.
+    expect(cumulativeCapFactor(c, first + 25)).toBeGreaterThanOrEqual(
+      cumulativeCapFactor(c, first + 20),
+    )
+  })
+
+  it('rejects a schedule that is out of order or out of range', () => {
+    expect(() =>
+      resolveConfig({
+        allocation: { capReductionSchedule: [{ fromRound: 5, factor: 0.9 }, { fromRound: 2, factor: 0.9 }] },
+      }),
+    ).toThrow(/ascend by fromRound/)
+    expect(() =>
+      resolveConfig({ allocation: { capReductionSchedule: [{ fromRound: 1, factor: 0 }] } }),
+    ).toThrow(/must be in \(0, 1.5]/)
+    expect(() =>
+      resolveConfig({ allocation: { capReductionSchedule: [{ fromRound: 0, factor: 0.9 }] } }),
+    ).toThrow(/1 or greater/)
   })
 
   it('setting the scalar factor means a FLAT factor, clearing the schedule', () => {

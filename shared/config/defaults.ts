@@ -83,7 +83,7 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
      */
     capReductionFactor: 0.95,
     /**
-     * Tightens 5%/yr while the class is still long, then eases to nothing by round twenty.
+     * Tightens 3.5%/yr while the class is still long, then eases off and finally reverses.
      *
      * The early rounds have to build the scarcity the game is about; the late ones have to
      * stop, or a fourteen-round game ends at €200 and a twenty-round game has no market left.
@@ -91,11 +91,15 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
      * its abatement budget and the price should settle, not keep climbing.
      */
     capReductionSchedule: [
-      { fromRound: 1, factor: 0.95 },
-      { fromRound: 10, factor: 0.965 },
-      { fromRound: 13, factor: 0.98 },
-      { fromRound: 17, factor: 0.99 },
-      { fromRound: 20, factor: 1 },
+      { fromRound: 1, factor: 0.965 },
+      { fromRound: 10, factor: 0.98 },
+      { fromRound: 13, factor: 0.995 },
+      // ABOVE 1 from round 17: the cap stops falling and starts LOOSENING, ~0.5%/yr and then
+      // 1.5%/yr. Deliberate — by then the class has spent its abatement budget and cannot
+      // respond to a tighter cap, so holding supply flat still tightens against a market that
+      // can only get shorter. Validation permits factors above 1 for exactly this reason.
+      { fromRound: 17, factor: 1.005 },
+      { fromRound: 20, factor: 1.015 },
     ],
     /**
      * ON, which reverses the shipped asymmetry.
@@ -201,7 +205,12 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     compliance: { minTradeSize: 0.5, priceStep: 0.5, coverTarget: 1.1 },
     fixes: {
       noiseAbatement: false,
-      complianceReservation: false,
+      // ON. `reservationPrice` returns the ceiling outright at rCover >= 1, and under
+      // auctioning EVERY firm holds nothing at the cap stage — so with this off, every
+      // compliance bot bid the ceiling at every auction and the auction price carried no
+      // information about scarcity at all. It also short-circuits before the lifetime-cap
+      // branch, which made the whole auction rationalisation a no-op.
+      complianceReservation: true,
       // ON by default. Without these the makers re-buy their whole target inventory at every
       // auction and each one sizes it off the entire pool, so four of them took 72% of the
       // cap every year and sat on it — 154k credits by year 20, seven times one year's

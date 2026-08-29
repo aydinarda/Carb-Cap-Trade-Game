@@ -69,6 +69,32 @@ export function validateConfig(config: GameConfig): GameConfig {
   if (!Number.isFinite(lrf) || lrf <= 0 || lrf > 1) {
     throw new ConfigError('allocation.capReductionFactor must be in (0, 1].')
   }
+  // The SCHEDULE was unvalidated: a typo in a factor or a round silently produced a cap that
+  // grew, shrank at the wrong time, or applied entries out of order.
+  //
+  // Factors above 1 ARE allowed here, unlike the scalar above — a schedule's whole point is
+  // that the tightening can stop and even reverse late in a long game, once the class has
+  // spent its abatement budget and can no longer respond. 1.5 is the sanity bound.
+  const schedule = config.allocation.capReductionSchedule
+  if (schedule?.length) {
+    let previousRound = 0
+    for (const step of schedule) {
+      if (!Number.isFinite(step.fromRound) || step.fromRound < 1) {
+        throw new ConfigError('capReductionSchedule.fromRound must be 1 or greater.')
+      }
+      if (step.fromRound <= previousRound) {
+        throw new ConfigError(
+          `capReductionSchedule must ascend by fromRound; ${step.fromRound} follows ${previousRound}.`,
+        )
+      }
+      if (!Number.isFinite(step.factor) || step.factor <= 0 || step.factor > 1.5) {
+        throw new ConfigError(
+          `capReductionSchedule.factor must be in (0, 1.5]; got ${step.factor}.`,
+        )
+      }
+      previousRound = step.fromRound
+    }
+  }
   // 0 = unlimited; anything negative is a mistake.
   if (config.session.maxPlayers < 0) throw new ConfigError('session.maxPlayers must be >= 0.')
   if (config.emissions.historyYears < 2) {
