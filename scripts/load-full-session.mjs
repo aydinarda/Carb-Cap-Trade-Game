@@ -471,7 +471,24 @@ async function runSession(capMode, { withBots, joinGrace }) {
     const invFrac = round3(MM_INV_START + MM_INV_STEP * (year - 1))
     if (MM_INV_STEP !== 0 || year === 1) {
       const u = await emit(host, 'host:updateSettings', { marketMakerInvFrac: invFrac })
-      if (!u.ok) { M.errors++; console.log(`  mm invFrac ${invFrac} rejected: ${u.error}`) }
+      if (!u.ok) {
+        M.errors++
+        console.log(`  mm invFrac ${invFrac} rejected: ${u.error}`)
+      } else {
+        // Verify it LANDED. An older backend accepted unknown keys and acked ok, so the
+        // setting vanished and the run looked exactly like a knob that does not matter.
+        // Confirm against the snapshot rather than trusting the ack.
+        await sleep(250)
+        const inForce = hostSnap?.config?.marketMakerInvFrac
+        if (inForce === undefined) {
+          console.log(
+            `  ⚠ backend does not expose marketMakerInvFrac — this build predates it, ` +
+              `so the MM escalation is NOT running. Redeploy before reading this run.`,
+          )
+        } else if (Math.abs(inForce - invFrac) > 1e-6) {
+          console.log(`  ⚠ mm invFrac asked ${invFrac}, in force ${inForce}`)
+        }
+      }
     }
 
     const r = await emit(host, year === 1 ? 'host:startYear' : 'host:advanceYear', {})

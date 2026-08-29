@@ -286,6 +286,25 @@ export class Session {
     marketMakerInvFrac?: number
   }) {
     this.requirePhase('lobby', 'yearSummary')
+    // Reject anything this method does not implement.
+    //
+    // Every branch below is `if (settings.x !== undefined)`, so a key that is not one of
+    // them was simply dropped — and the call still acked `ok: true`. A caller tuning a knob
+    // the deployed build does not have yet got a success and no effect, which is
+    // indistinguishable from the knob not mattering. That cost a full calibration round.
+    const KNOWN = new Set([
+      'penaltyRate', 'openingReferenceFraction', 'freeCreditRatio', 'auctionCapRatio',
+      'capReductionFactor', 'applyLRFToGrandfathering', 'benchmark', 'abatement',
+      'reserveEnabled', 'abatementLifetimeCap', 'abatementFixedCost', 'marketMakerInvFrac',
+    ])
+    const unknown = Object.keys(settings).filter((k) => !KNOWN.has(k))
+    if (unknown.length) {
+      throw new GameError(
+        'BAD_SETTING',
+        `Unknown setting${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}. ` +
+          `This build accepts: ${[...KNOWN].join(', ')}.`,
+      )
+    }
     if (settings.abatementLifetimeCap !== undefined) {
       const cap = settings.abatementLifetimeCap
       if (!Number.isFinite(cap) || cap < 0 || cap > 1) {
@@ -530,6 +549,9 @@ export class Session {
    * through `bankedCredits` like everyone else.
    */
   private seedTraderBots(record: YearRecord, usesAuction: boolean) {
+    // Under auctioning the seed cannot be handed out here: `closeCapStage` REPLACES
+    // `regulatorGranted` with the auction result, so anything written now is discarded a
+    // moment later. `seedTradersAfterAuction` does it on the other side of the clearing.
     if (usesAuction || record.year !== this.state.config.emissions.firstGameYear) return
     if (!(record.primaryPrice && record.primaryPrice > 0)) return
     const classFree = Object.values(record.freeAllocation).reduce((a, b) => a + b, 0)
@@ -538,6 +560,29 @@ export class Session {
       const { marketMakerFrac, speculatorFlat } = this.state.config.bots.seed
       const seed = player.botType === 'marketMaker' ? marketMakerFrac * classFree : speculatorFlat
       if (seed > 0) record.regulatorGranted[player.id] = round1(seed)
+    }
+  }
+
+  /**
+   * The same opening book, for auctioning — added AFTER the auction has cleared so it
+   * survives, and ON TOP of whatever the trader won there.
+   *
+   * Sized off the auction pool because the free allocation is zero in this mode, and priced
+   * at the clearing price by the settlement that follows, so the trader buys its book rather
+   * than being given one.
+   */
+  private seedTradersAfterAuction(record: YearRecord) {
+    const { marketMakerFrac, speculatorFlat, underAuction } = this.state.config.bots.seed
+    if (!underAuction || record.year !== this.state.config.emissions.firstGameYear) return
+    for (const player of this.state.players) {
+      if (!isPureTrader(player)) continue
+      const seed =
+        player.botType === 'marketMaker' ? marketMakerFrac * record.regulatorPool : speculatorFlat
+      if (seed > 0) {
+        record.regulatorGranted[player.id] = round1(
+          (record.regulatorGranted[player.id] ?? 0) + seed,
+        )
+      }
     }
   }
 
@@ -551,6 +596,7 @@ export class Session {
       record.regulatorGranted = awarded
       record.auctionPrice = clearingPrice
       record.primaryPrice = clearingPrice
+      this.seedTradersAfterAuction(record)
     }
     // Grandfathering/benchmarking: free allocation is all that's issued (already
     // applied in openYear) — nothing else happens at the cap close.

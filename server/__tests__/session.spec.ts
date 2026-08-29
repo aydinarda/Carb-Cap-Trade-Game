@@ -678,6 +678,38 @@ describe('trader-bot seed inventory', () => {
   })
 })
 
+describe('updateSettings rejects what it cannot apply', () => {
+  // The silent-drop this replaces: a knob the build does not have was ignored and the call
+  // still acked ok, so a harness tuning it saw success and no effect.
+  it('refuses an unknown key instead of acking success', () => {
+    const s = grandfathering()
+    expect(() => s.updateSettings({ nonsenseKnob: 1 } as never)).toThrow(/Unknown setting/)
+  })
+
+  it('names the offending key and what the build does accept', () => {
+    const s = grandfathering()
+    try {
+      s.updateSettings({ marketMakerAggression: 2 } as never)
+      throw new Error('should have thrown')
+    } catch (e) {
+      expect((e as Error).message).toContain('marketMakerAggression')
+      expect((e as Error).message).toContain('marketMakerInvFrac')
+    }
+  })
+
+  it('still applies a well-formed batch', () => {
+    const s = grandfathering()
+    s.updateSettings({ marketMakerInvFrac: 0.3, penaltyRate: 120 })
+    expect(s.state.config.bots.marketMaker.invFrac).toBe(0.3)
+    expect(s.state.config.market.penaltyRate).toBe(120)
+  })
+
+  it('bounds the market-maker target', () => {
+    const s = grandfathering()
+    expect(() => s.updateSettings({ marketMakerInvFrac: 1.5 })).toThrow(/between 0 and 0.9/)
+  })
+})
+
 describe('the optimum benchmark sees the carry', () => {
   it('a debtor is not measured as though it still had the allowances it owes', () => {
     // Year 11: no abatement, no trades -> P2 ends short and carries a make-good debt.

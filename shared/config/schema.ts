@@ -208,6 +208,20 @@ export interface BotsConfig {
     marketMakerFrac: number
     /** Speculator seed, flat. */
     speculatorFlat: number
+    /**
+     * Also seed the traders under AUCTIONING, where they otherwise start with nothing and
+     * must win the whole sell side at the auction.
+     *
+     * Measured, they do not: a maker fills its target once in year one (18% of the pool) and
+     * then bids the gap, which is zero, so it never buys again — and its inventory drains
+     * from 1662 to 651 tonnes over eight years while the offer side of the book thins out.
+     * Auctioning carries about a quarter of benchmarking's sellable stock for this reason.
+     *
+     * Sized off the auction POOL rather than the free allocation, which is zero in this mode,
+     * and charged at the clearing price like every other allowance bought at the cap stage —
+     * the maker pays for its book, so its P&L stays comparable to a student's.
+     */
+    underAuction: boolean
   }
   /** Per-order quantity cap, so bots work positions gradually. */
   maxStep: number

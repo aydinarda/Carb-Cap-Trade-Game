@@ -141,7 +141,9 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     investmentHorizon: 3,
   },
   bots: {
-    seed: { marketMakerFrac: 0.18, speculatorFlat: 20 },
+    // `underAuction` ships OFF: it changes who holds the opening book under auctioning, and
+    // that is a calibration decision, not a default. Turn it on to measure it.
+    seed: { marketMakerFrac: 0.18, speculatorFlat: 20, underAuction: false },
     maxStep: 40,
     minPrice: 0.5,
     sigma: { compliance: 0.05, marketMaker: 0.08, speculator: 0.12, noise: 0.2 },
