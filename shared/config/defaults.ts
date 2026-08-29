@@ -72,6 +72,8 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     // the price it prints says nothing about scarcity. Measured bid-to-cover goes from 1.01
     // at 1.0 to 2.68 here.
     auctionCapRatio: 0.95,
+    // The regulator will not sell more than 10% under what a tonne last traded at.
+    auctionReserveFrac: 0.9,
     /**
      * −5%/yr.
      *
@@ -202,7 +204,7 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       sizeJitter: 0.5,
     },
     // minTradeSize is TONNES and does not scale with money; priceStep is money.
-    compliance: { minTradeSize: 0.5, priceStep: 0.5, coverTarget: 1.1 },
+    compliance: { minTradeSize: 0.5, priceStep: 0.5, coverTarget: 1.1, auctionBandFrac: 0.15 },
     fixes: {
       noiseAbatement: false,
       // ON. `reservationPrice` returns the ceiling outright at rCover >= 1, and under

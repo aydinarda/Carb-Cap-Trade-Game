@@ -47,8 +47,8 @@ function installAndAdvance(s: Session, levels: Record<string, number>) {
   s.openTrade()
 }
 
-function auctioning(seed = 1) {
-  const s = new Session('auctioning', seed)
+function auctioning(seed = 1, override?: DeepPartial<GameConfig>) {
+  const s = new Session('auctioning', seed, override)
   s.addPlayer('Alice', 'Power & Utilities')
   s.addPlayer('Bob', 'Transport')
   return s
@@ -171,7 +171,9 @@ describe('capReductionFactor (EU-ETS LRF)', () => {
 
 describe('closeTrade cost-ledger wiring (auctioning)', () => {
   it('purchaseCost = award × clearing price when there are no market trades', () => {
-    const s = auctioning()
+    // Reserve off: the €15 bid is picked to make the ledger arithmetic obvious, and a floor
+    // tied to the reference would simply reject it.
+    const s = auctioning(1, { allocation: { auctionReserveFrac: 0 } })
     s.startYear()
     s.submitBid('P1', 100, 15)
     s.closeCapStage()
@@ -470,7 +472,10 @@ describe('closeCapStage auction wiring', () => {
     s.submitBid('P1', 100, 15)
     s.submitBid('P2', 50, 12)
     const rec = s.currentYearRecord()!
-    const expected = clearAuction(rec.auctionBid, rec.regulatorPool)
+    // The session applies a reserve price; the direct call has to be given the same one or
+    // this compares two different auctions.
+    const reserve = round1(s.openingReference() * s.state.config.allocation.auctionReserveFrac)
+    const expected = clearAuction(rec.auctionBid, rec.regulatorPool, reserve)
     s.closeCapStage()
     expect(rec.auctionPrice).toBe(expected.clearingPrice)
     expect(rec.regulatorGranted).toEqual(expected.awarded)
@@ -522,7 +527,7 @@ describe('creditsHeld composition & previousMarketPrice', () => {
   })
 
   it('previousMarketPrice is null in year 1, then the prior year (auction price fallback)', () => {
-    const s = auctioning()
+    const s = auctioning(1, { allocation: { auctionReserveFrac: 0 } })
     s.startYear()
     s.submitBid('P1', 100, 15)
     expect(s.previousMarketPrice()).toBe(null) // no completed year yet

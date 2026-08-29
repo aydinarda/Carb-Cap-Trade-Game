@@ -605,7 +605,16 @@ export class Session {
     if (this.mechanism.usesAuction) {
       // Sealed-bid uniform-price auction: highest bidders win the fixed supply,
       // everyone pays the single clearing price.
-      const { clearingPrice, awarded } = clearAuction(record.auctionBid, record.regulatorPool)
+      // The reserve tracks the market: a fraction of the previous round's closing price, so
+      // the auction cannot print far below where the book is actually trading.
+      const reserve = round1(
+        this.openingReference() * this.state.config.allocation.auctionReserveFrac,
+      )
+      const { clearingPrice, awarded } = clearAuction(
+        record.auctionBid,
+        record.regulatorPool,
+        reserve,
+      )
       record.regulatorGranted = awarded
       record.auctionPrice = clearingPrice
       record.primaryPrice = clearingPrice

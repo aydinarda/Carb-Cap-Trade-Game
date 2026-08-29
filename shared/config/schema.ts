@@ -155,6 +155,15 @@ export interface AllocationConfig {
   benchmarkStringency: number
   /** Auction supply = this × Σbaseline. Host-editable. */
   auctionCapRatio: number
+  /**
+   * Auction reserve price, as a fraction of the reference (the previous round's closing
+   * price). The regulator sells nothing below it.
+   *
+   * 0 disables it, which is what the engine did before — and an undersubscribed auction then
+   * cleared at the lowest bid on the book, tying the whole year's anchor to whichever bot
+   * happened to be least eager.
+   */
+  auctionReserveFrac: number
   /** Supply/benchmark shrinks by this factor each year (EU-ETS LRF); 1 = flat. */
   capReductionFactor: number
   /**
@@ -332,6 +341,21 @@ export interface BotsConfig {
      * a tightening cap is when the market most needs an offer.
      */
     coverTarget: number
+    /**
+     * How far an auction bid may sit from the market price, as a fraction either side.
+     *
+     * The auction and the order book must not drift apart. Left unbounded, a firm bidding its
+     * own reservation produced a clearing price of 43 while the book traded at 120 — every
+     * winner collected a 77 euro arbitrage nobody competed for. Bidding the plain market price
+     * instead removed the arbitrage but made demand perfectly inelastic, so the clearing price
+     * stopped responding to scarcity at all.
+     *
+     * A band gives both: the price is anchored to what a tonne last traded at, and a firm that
+     * is short still bids the top of the band while a comfortable one bids the bottom. The
+     * uniform-price auction then clears inside the band, near the market, with the position
+     * still visible in where it lands.
+     */
+    auctionBandFrac: number
   }
   /**
    * Corrections to bot behaviour, each off by default so the shipped game is unchanged and

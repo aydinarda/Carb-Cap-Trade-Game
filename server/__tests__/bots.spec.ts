@@ -62,7 +62,8 @@ describe('bot helpers', () => {
   })
 
   it('referencePrice tracks THIS year\'s auction clearing once it has run', () => {
-    const s = new Session('auctioning', 1)
+    // Reserve off: this is about where the reference comes from, not about a price floor.
+    const s = new Session('auctioning', 1, { allocation: { auctionReserveFrac: 0 } })
     s.addPlayer('A', 'Power & Utilities')
     s.startYear()
     s.submitBid('P1', 100, 15)
@@ -73,7 +74,7 @@ describe('bot helpers', () => {
   })
 
   it('sellCapacity = held − open asks; botAvgCost from auction spend', () => {
-    const s = new Session('auctioning', 1)
+    const s = new Session('auctioning', 1, { allocation: { auctionReserveFrac: 0 } })
     s.addPlayer('A', 'Power & Utilities') // P1
     s.startYear()
     s.submitBid('P1', 100, 15)

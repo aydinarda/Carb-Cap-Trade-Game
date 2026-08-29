@@ -5,6 +5,7 @@ import {
   type AbatementSpec,
 } from '../../shared/engine'
 import {
+  clamp,
   considerInstall,
   disperse,
   marketMid,
@@ -185,8 +186,21 @@ export function auction(ctx: BotCtx): boolean {
     session.abatementLifetimeCap,
     SOFTEN_AT_CAP,
   )
-  // Never above what the tonne is worth, and never so far below the market that the firm
-  // simply loses the auction and has to buy the same tonne dearer in the book.
-  const bid = Math.max(Math.min(P, ref) * 0.9, Math.min(reservation, P))
+  // Anchored to the market, with the firm's own valuation deciding WHERE IN THE BAND it sits.
+  //
+  // Two failures bracket this. Bidding the plain reference made every bidder post the same
+  // number, so demand was perfectly inelastic and the clearing price could not move with
+  // scarcity: supply from 1.4x need down to 0.4x moved it 22 to 25. Bidding the bare
+  // reservation instead let the auction clear at 43 while the book traded at 120 — a 77 euro
+  // arbitrage handed to whoever happened to win.
+  //
+  // The band is the answer to both. `ref` is the previous round's closing price, so the
+  // auction can never drift away from what a tonne last actually traded at; within
+  // ±auctionBandFrac the firm's reservation decides whether it bids the top (short, needs the
+  // tonnes) or the bottom (comfortable), which is the scarcity signal.
+  const band = cfg.auctionBandFrac
+  const floor = ref * (1 - band)
+  const roof = Math.min(P, ref * (1 + band))
+  const bid = clamp(Math.max(ref, reservation), floor, Math.max(floor, roof))
   return trySubmitBid(session, bot.id, residual, disperse(bid, ctx.rt.bias ?? 0, P))
 }
