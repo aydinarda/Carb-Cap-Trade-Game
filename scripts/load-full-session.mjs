@@ -112,14 +112,21 @@ const INDUSTRIES = [
   'Manufacturing & Chemicals',
   'Transport',
 ]
-// Six bots, not twenty-five. Measured: going 0 -> 5 bots drops one-sided ticks from 5.2%
-// to 1.0% and tightens the spread 2.24 -> 1.84; going 5 -> 25 leaves one-sided at 1.0% and
-// only reaches 1.39, for 5x the CPU and 3.7x the orders. Five or six is the knee.
+/**
+ * The calibration class, copied from `sim/sweeps/calibrate.ts` so the load test and every
+ * price target are measured on the same population.
+ *
+ * It used to be six bots, on a measurement that going 0 -> 5 dropped one-sided ticks from
+ * 5.2% to 1.0% while 5 -> 25 bought almost nothing more. That measurement had 100 simulated
+ * PLAYERS trading alongside the bots. With bots carrying the book on their own — a lightly
+ * attended room — six is not enough: measured on a bots-only auctioning game, year one
+ * printed 0 trades at six bots and 15 at twenty-two.
+ */
 const BOT_PLAN = [
-  ['marketMaker', 2],
-  ['compliance', 2],
-  ['noise', 1],
-  ['speculator', 1],
+  ['compliance', 9],
+  ['marketMaker', 4],
+  ['noise', 6],
+  ['speculator', 3],
 ]
 
 // ── tiny helpers ─────────────────────────────────────────────────────────────
@@ -425,7 +432,8 @@ async function runSession(capMode, { withBots, joinGrace }) {
       const r = await emit(host, 'host:addBots', { botType, count })
       if (!r.ok) M.errors++
     }
-    console.log(`added 6 bots (2 marketMaker / 2 compliance / 1 noise / 1 speculator)`)
+    console.log(`added ${BOT_PLAN.reduce((n, [, c]) => n + c, 0)} bots (` +
+      BOT_PLAN.map(([t, c]) => `${c} ${t}`).join(' / ') + ')')
   }
 
   // ── JOIN WINDOW: hop in as a player now ──
