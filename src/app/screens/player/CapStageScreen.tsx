@@ -25,9 +25,9 @@ export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
     )
   }
 
-  // Benchmarking: a flat sector allocation set below the sector average, so most
-  // companies open short. Nothing to submit — the panel explains the gap and points
-  // at the two ways to close it.
+  // Benchmarking: a flat sector allocation, opening near the sector average and cut every
+  // year, so companies start comfortable and run short as the game goes on. Nothing to
+  // submit — the panel explains the gap and points at the two ways to close it.
   if (snap.capMode === 'benchmarking') {
     return (
       <div className="flex flex-col gap-5">

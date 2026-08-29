@@ -37,11 +37,14 @@ describe('bot helpers', () => {
     expect(disperse(10, 0.5, 20)).toBe(15) // +50% bias
   })
 
-  it('referencePrice falls back to penaltyRate/2 before the first auction clears', () => {
+  it('referencePrice falls back to the opening anchor before the first auction clears', () => {
     const s = new Session('auctioning', 1)
     s.addPlayer('A', 'Power & Utilities')
     s.startYear() // cap stage — no auction price yet
-    expect(referencePrice(s)).toBe(s.state.config.market.penaltyRate / 2)
+    // Derived, not restated: the anchor is a calibration knob and has already moved from
+    // half the fine to a quarter of it. The RULE — fall back to the anchor — is the invariant.
+    const { penaltyRate, openingReferenceFraction } = s.state.config.market
+    expect(referencePrice(s)).toBe(penaltyRate * openingReferenceFraction)
   })
 
   it('referencePrice tracks THIS year\'s auction clearing once it has run', () => {
@@ -138,7 +141,11 @@ describe('grandfathering bots', () => {
   })
 
   it('tightens with the LRF only when the scenario asks for it', () => {
-    const flat = new Session('grandfathering', 1)
+    // The control arm has to opt OUT explicitly now: the shipped default applies the
+    // reduction to grandfathering, so an unconfigured session is no longer the flat one.
+    const flat = new Session('grandfathering', 1, {
+      allocation: { applyLRFToGrandfathering: false, capReductionFactor: 0.9 },
+    })
     flat.addPlayer('Alice', 'Power & Utilities')
     flat.startYear()
     const flatYear11 = flat.currentYearRecord()!.freeAllocation.P1
@@ -452,9 +459,10 @@ describe('bot archetypes under benchmarking (no primary auction)', () => {
       .currentYearRecord()!
       .orders.find((o) => o.playerId === bot.id && o.side === 'buy' && o.status === 'open')
     expect(bid).toBeDefined()
-    // Its willingness to pay exceeds the stale mid (penaltyRate / 2) precisely because
-    // the penalty, not the market, is the binding alternative.
-    expect(bid!.price).toBeGreaterThan(s.state.config.market.penaltyRate / 2)
-    expect(bid!.price).toBeLessThanOrEqual(s.state.config.market.penaltyRate)
+    // Its willingness to pay exceeds the stale opening anchor precisely because the
+    // penalty, not the market, is the binding alternative.
+    const { penaltyRate, openingReferenceFraction } = s.state.config.market
+    expect(bid!.price).toBeGreaterThan(penaltyRate * openingReferenceFraction)
+    expect(bid!.price).toBeLessThanOrEqual(penaltyRate)
   })
 })

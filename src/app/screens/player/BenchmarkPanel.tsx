@@ -26,9 +26,11 @@ export function BenchmarkPanel({ snap }: { snap: PlayerSnapshot }) {
       ? Math.round(((classIssued - classExpected) / classExpected) * 100)
       : null
 
-  // How far below the sector average this benchmark sits — the stringency, restated
-  // from the numbers actually in force rather than from the constant.
-  const stringencyPct =
+  // How far this year's benchmark sits from the sector average, restated from the numbers
+  // actually in force rather than from a constant. The sign matters and can go either way:
+  // the benchmark now OPENS above the average and is tightened below it by the yearly cap
+  // reduction, so a hard-coded "below" would be wrong for the first year of every game.
+  const gapPct =
     average !== null && average > 0 ? Math.round((1 - benchmark / average) * 100) : null
 
   return (
@@ -57,8 +59,8 @@ export function BenchmarkPanel({ snap }: { snap: PlayerSnapshot }) {
           unit="cr"
           tone="accent"
           hint={
-            average !== null && stringencyPct !== null
-              ? `${stringencyPct}% below the ${average.toLocaleString()} t sector average`
+            average !== null && gapPct !== null
+              ? `${Math.abs(gapPct)}% ${gapPct >= 0 ? 'below' : 'above'} the ${average.toLocaleString()} t sector average`
               : 'free credits per company'
           }
         />

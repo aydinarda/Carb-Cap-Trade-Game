@@ -26,7 +26,21 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   },
   market: {
     penaltyRate: 100,
-    openingReferenceFraction: 0.5,
+    /**
+     * Year one opens at 0.25 × the fine — €25 — instead of half of it.
+     *
+     * With the agents' quote clamp in place this is the single strongest lever on where the
+     * market STARTS: measured on a loose book, 0.20 opens at €15, 0.30 at €22, 0.40 at €28,
+     * 0.50 at €35. Supply level and the LRF then decide where it ENDS. Half the fine put the
+     * class in the target band on day one, which left the cap with nothing to teach.
+     *
+     * The calibrated auctioning setting is 0.15, not 0.25 — auctioning opens dearer than the
+     * free-allocation modes at the same anchor because the primary auction prices before the
+     * market does. One default cannot be both; this one matches grandfathering and
+     * benchmarking, and the host panel's "Opening price anchor" field is where an auctioning
+     * session moves it down.
+     */
+    openingReferenceFraction: 0.25,
     finalPriceFallbackFraction: 1,
   },
   emissions: {
@@ -46,15 +60,40 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     traderHistoryLevel: 0.1,
   },
   allocation: {
-    freeCreditRatio: 0.8,
+    // Grandfathering opens at the class's full baseline rather than 80% of it. The scarcity
+    // now comes from the reduction factor below, which — unlike before — applies here too.
+    freeCreditRatio: 1.0,
     benchmark: { ...DEFAULT_BENCHMARK },
     benchmarkStringency: BENCHMARK_STRINGENCY,
-    auctionCapRatio: 1,
-    // −5%/yr. Raised from 0.97 once abatement became permanent: a company that installs
-    // capacity now KEEPS the cut, so class demand falls far faster than it used to and a
-    // 3% supply squeeze no longer keeps the market short. See the notebook §11.
-    capReductionFactor: 0.95,
-    applyLRFToGrandfathering: false,
+    // Just short of the class's need, which is what makes the auction a real auction: at a
+    // ratio of 1.0 the pool is never fully subscribed, so it clears at the marginal BID and
+    // the price it prints says nothing about scarcity. Measured bid-to-cover goes from 1.01
+    // at 1.0 to 2.68 here.
+    auctionCapRatio: 0.95,
+    /**
+     * −16%/yr. The steepest tightening in the calibrated grid, and far steeper than any real
+     * scheme: the EU ETS runs −2.2%/yr in phase 4 and −4.3%/yr from 2024.
+     *
+     * That gap is not a mistake, it is the consequence of permanent abatement. A class of 25
+     * installs capacity within a few years and KEEPS the cut, so demand here falls roughly
+     * 10%/yr on its own. Supply has to fall faster than that to stay short at all — matched
+     * against Europe's pace the market simply drifts into a glut by year four.
+     *
+     * NOTE this sits on the edge of the swept range, so it is the best value TRIED, not a
+     * proven optimum. Nothing steeper has been measured.
+     */
+    capReductionFactor: 0.84,
+    /**
+     * ON, which reverses the shipped asymmetry.
+     *
+     * Grandfathering used to be exempt, so its supply never tightened and the reduction
+     * factor above did nothing at all in that mode. That was survivable when free credits
+     * started at 80% of baseline and the class was short from year one. It is not survivable
+     * now that they start at 100%: with the factor exempt, grandfathering would open with no
+     * scarcity and never acquire any. The calibrated grandfathering candidate was measured
+     * with this on, and is invalid without it.
+     */
+    applyLRFToGrandfathering: true,
     reserve: {
       enabled: true,
       basis: 'shortfall',

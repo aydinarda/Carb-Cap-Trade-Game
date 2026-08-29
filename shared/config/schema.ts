@@ -121,7 +121,9 @@ export interface AllocationConfig {
   freeCreditRatio: number
   /** Benchmarking: free credits per company, by sector. Host-editable. */
   benchmark: Record<Industry, number>
-  /** How far below the sector average the default benchmark sits (0.6 = 40% below). */
+  /** The default benchmark as a multiple of the sector average (1.119 = 12% above it,
+   *  which the yearly cap reduction then tightens). Dead config — `benchmarkFor` reads
+   *  `benchmark`, so the TABLE is what a scenario has to move. */
   benchmarkStringency: number
   /** Auction supply = this × Σbaseline. Host-editable. */
   auctionCapRatio: number

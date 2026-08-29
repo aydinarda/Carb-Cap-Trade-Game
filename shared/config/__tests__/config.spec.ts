@@ -9,21 +9,32 @@ import {
 import { DEFAULT_GAME_CONFIG, deepMerge, resolveConfig } from '../index'
 
 describe('DEFAULT_GAME_CONFIG reproduces the shipped constants', () => {
-  it('carries the values the engine used before the refactor', () => {
+  // A deliberate pin on the SHIPPED CALIBRATION, so that moving any of these is a decision
+  // somebody makes on purpose rather than a diff nobody notices. The five allocation values
+  // below come from the phase A+B sweep and are meant to be read together: supply now opens
+  // loose and is tightened hard, instead of opening tight and staying flat.
+  it('carries the calibrated shipped values', () => {
     const c = DEFAULT_GAME_CONFIG
     expect(c.market.penaltyRate).toBe(100)
-    expect(c.market.openingReferenceFraction).toBe(0.5) // was the literal penaltyRate / 2
+    // 0.25 × the fine. The strongest lever on where year one opens, and the reason the
+    // market now starts well below the target band instead of inside it.
+    expect(c.market.openingReferenceFraction).toBe(0.25)
     // Money is denominated so the penalty matches the EU ETS Article 16 fine of EUR 100/t;
     // the MAC coefficients and the money-denominated bot knobs are on the same scale.
     expect(c.abatement.sectors['Power & Utilities']).toEqual({ model: 'linear', params: { a: 10, b: 75 } })
     expect(c.bots.marketMaker.minMargin).toBe(2.5)
     expect(c.bots.compliance.priceStep).toBe(0.5)
-    expect(c.allocation.freeCreditRatio).toBe(0.8)
-    expect(c.allocation.auctionCapRatio).toBe(1)
-    // Deliberately no longer 0.97: permanent abatement makes class demand fall much faster
-    // than it did under the per-year model, so the supply squeeze had to keep up.
-    expect(c.allocation.capReductionFactor).toBe(0.95)
-    expect(c.allocation.applyLRFToGrandfathering).toBe(false) // preserves today's asymmetry
+    // Grandfathering opens at the full class baseline; scarcity comes from the factor below.
+    expect(c.allocation.freeCreditRatio).toBe(1.0)
+    // Just short of need, so the auction is actually subscribed and its clearing price
+    // carries information. At 1.0 it cleared at the marginal bid and said nothing.
+    expect(c.allocation.auctionCapRatio).toBe(0.95)
+    // −16%/yr. Far steeper than any real scheme because demand here falls ~10%/yr on its
+    // own: abatement is permanent, so the class keeps every cut it makes.
+    expect(c.allocation.capReductionFactor).toBe(0.84)
+    // ON. With free credits opening at the full baseline, an exempt grandfathering would
+    // start with no scarcity and never acquire any.
+    expect(c.allocation.applyLRFToGrandfathering).toBe(true)
     expect(c.emissions.volatility).toBe(0.08)
     expect(c.emissions.historyWindow).toBe(10)
     expect(c.emissions.baselineYear).toBe(10)

@@ -50,28 +50,28 @@ describe('cap mechanism registry', () => {
   })
 
   it('only auctioning offers a primary supply', () => {
+    const baseline = 28332.7
     for (const mode of ['benchmarking', 'grandfathering'] as const) {
-      expect(CAP_MECHANISMS[mode].poolFor(players, 11, DEFAULT_CONFIG, 28332.7)).toBe(0)
+      expect(CAP_MECHANISMS[mode].poolFor(players, 11, DEFAULT_CONFIG, baseline)).toBe(0)
     }
-    // ratio 1.0 × baseline × LRF^0
-    expect(CAP_MECHANISMS.auctioning.poolFor(players, 11, DEFAULT_CONFIG, 28332.7)).toBe(28332.7)
+    // ratio × baseline × LRF^0 — the ratio read from the config, since it is calibrated.
+    expect(CAP_MECHANISMS.auctioning.poolFor(players, 11, DEFAULT_CONFIG, baseline)).toBe(
+      Math.round(baseline * DEFAULT_CONFIG.allocation.auctionCapRatio * 10) / 10,
+    )
   })
 })
 
 describe('default benchmarks', () => {
-  it('sit 40% below each sector average', () => {
+  // The table is the sector average scaled by the shipped level and rounded to 1dp. The
+  // LEVEL is calibration and moves; the derivation is the invariant, so that is what is
+  // asserted. (It has been both below and above 1.0 — see BENCHMARK_STRINGENCY.)
+  it('are the sector average scaled by the shipped level', () => {
     for (const industry of INDUSTRY_NAMES) {
       expect(DEFAULT_BENCHMARK[industry]).toBeCloseTo(
-        SECTOR_AVERAGE_EMISSIONS[industry] * BENCHMARK_STRINGENCY,
+        Math.round(SECTOR_AVERAGE_EMISSIONS[industry] * BENCHMARK_STRINGENCY * 10) / 10,
         6,
       )
     }
-    expect(DEFAULT_BENCHMARK).toEqual({
-      'Power & Utilities': 600,
-      'Heavy Materials': 480,
-      'Manufacturing & Chemicals': 315,
-      Transport: 180,
-    })
   })
 })
 
@@ -173,7 +173,10 @@ describe('auctioning', () => {
   })
 
   it('shrinks the supply by the reduction factor each year', () => {
-    const config = resolveConfig({ allocation: { capReductionFactor: 0.9 } })
+    // Ratio pinned too, so this measures the LRF alone rather than the shipped supply level.
+    const config = resolveConfig({
+      allocation: { capReductionFactor: 0.9, auctionCapRatio: 1 },
+    })
     expect(CAP_MECHANISMS.auctioning.poolFor(players, 12, config, 1000)).toBe(900)
     expect(CAP_MECHANISMS.auctioning.poolFor(players, 13, config, 1000)).toBe(810)
   })

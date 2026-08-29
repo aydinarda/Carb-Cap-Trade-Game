@@ -207,7 +207,7 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
           {snap.capMode === 'benchmarking' && (
             <div className="text-xs text-muted-foreground mt-1 font-mono">
               → free credits = {(Math.round(benchmarkTotal * 10) / 10).toLocaleString()} from
-              per-sector benchmarks set 40% below the sector average (see settings)
+              per-sector benchmarks, tightened every year (see settings)
             </div>
           )}
         </div>

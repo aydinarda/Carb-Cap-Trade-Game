@@ -32,7 +32,7 @@ const MODE_TEACHING: Record<CapMode, { headline: string; note: string }> = {
   },
   benchmarking: {
     headline: 'The fairness argument',
-    note: 'One benchmark per sector, set below the sector average, so an average emitter is short and an efficient one is long. This is where a class starts arguing about who should have to pay.',
+    note: 'One benchmark per sector, opening near the sector average and cut every year, so an average emitter runs short as the game goes on and an efficient one stays long. This is where a class starts arguing about who should have to pay.',
   },
   auctioning: {
     headline: 'The full market',

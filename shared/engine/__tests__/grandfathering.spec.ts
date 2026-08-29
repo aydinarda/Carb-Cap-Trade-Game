@@ -22,11 +22,13 @@ describe('windowSum', () => {
 })
 
 describe('computeFreeCreditLimit', () => {
-  it('is 0.8 × Σ baseline-year emissions', () => {
+  // Derived from the config, not from the number that happens to ship: the ratio is a
+  // calibration knob and has already moved once (0.8 → 1.0). What must hold is the RULE.
+  it('is freeCreditRatio × Σ baseline-year emissions', () => {
     const players = XLSX_PLAYERS.map((f) => f.player)
     const totalBaseline = players.reduce((s, p) => s + p.emissions[10], 0)
     expect(computeFreeCreditLimit(players, DEFAULT_CONFIG)).toBeCloseTo(
-      totalBaseline * 0.8,
+      totalBaseline * DEFAULT_CONFIG.allocation.freeCreditRatio,
       6,
     )
   })

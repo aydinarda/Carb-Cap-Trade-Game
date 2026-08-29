@@ -273,8 +273,11 @@ export class Session {
 
   updateSettings(settings: {
     penaltyRate?: number
+    openingReferenceFraction?: number
+    freeCreditRatio?: number
     auctionCapRatio?: number
     capReductionFactor?: number
+    applyLRFToGrandfathering?: boolean
     benchmark?: Partial<Record<Industry, number>>
     abatement?: Partial<Record<Industry, { a: number; b: number }>>
     reserveEnabled?: boolean
@@ -303,6 +306,35 @@ export class Session {
         throw new GameError('BAD_SETTING', 'penaltyRate must be a non-negative number.')
       }
       this.state.config.market.penaltyRate = round1(settings.penaltyRate)
+    }
+    if (settings.openingReferenceFraction !== undefined) {
+      const v = settings.openingReferenceFraction
+      // Capped at 1: an opening anchor above the fine would seed every bot with a reference
+      // no rational agent would ever pay, and year one would open above its own ceiling.
+      if (!Number.isFinite(v) || v <= 0 || v > 1) {
+        throw new GameError('BAD_SETTING', 'openingReferenceFraction must be in (0, 1].')
+      }
+      this.state.config.market.openingReferenceFraction = Math.round(v * 1000) / 1000
+    }
+    if (settings.freeCreditRatio !== undefined) {
+      const v = settings.freeCreditRatio
+      if (!Number.isFinite(v) || v < 0) {
+        throw new GameError('BAD_SETTING', 'freeCreditRatio must be a non-negative number.')
+      }
+      this.state.config.allocation.freeCreditRatio = Math.round(v * 1000) / 1000
+      // The class-wide limit is derived once at startYear, so a change made between years
+      // would otherwise be stored and never applied. Recompute it here when the game is
+      // already under way; it takes effect at the next year open, exactly like the
+      // benchmark table and the reduction factor.
+      if (this.state.freeCreditLimit !== null) {
+        this.state.freeCreditLimit = this.mechanism.computeFreeCreditLimit(
+          this.state.players,
+          this.state.config,
+        )
+      }
+    }
+    if (settings.applyLRFToGrandfathering !== undefined) {
+      this.state.config.allocation.applyLRFToGrandfathering = !!settings.applyLRFToGrandfathering
     }
     if (settings.reserveEnabled !== undefined) {
       // The pot is sized at year open regardless, so this is a pure on/off — a teacher can

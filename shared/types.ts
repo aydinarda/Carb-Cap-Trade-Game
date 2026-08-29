@@ -168,6 +168,12 @@ export interface YearRecord {
 export interface HostConfigView {
   /** Cost per tCO2 of emissions left uncovered at settlement. */
   penaltyRate: number
+  /** Year-1 reference price as a fraction of the penalty, before anything has traded. */
+  openingReferenceFraction: number
+  /** Grandfathering free credits = this × Σbaseline. */
+  freeCreditRatio: number
+  /** Whether the yearly reduction factor tightens grandfathering too. */
+  applyLRFToGrandfathering: boolean
   /** Auctioning supply = auctionCapRatio × Σbaseline (host-tunable, ≤ 1 = scarcer). */
   auctionCapRatio: number
   /** Auction supply and benchmark shrink by this factor each year (EU-ETS LRF); 1 = flat. */

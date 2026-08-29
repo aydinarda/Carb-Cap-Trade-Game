@@ -41,6 +41,8 @@ export function ModePicker({ capMode, compact }: { capMode: CapMode | null; comp
 export function SettingsPanel({ config }: { config: HostConfigView }) {
   const { hostAction } = useGame()
   const [penalty, setPenalty] = useState(String(config.penaltyRate))
+  const [openingRef, setOpeningRef] = useState(String(config.openingReferenceFraction))
+  const [freeCredit, setFreeCredit] = useState(String(config.freeCreditRatio))
   const [benchmark, setBenchmark] = useState<Record<string, string>>(() =>
     Object.fromEntries(Object.entries(config.benchmark).map(([k, v]) => [k, String(v)])),
   )
@@ -57,6 +59,8 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
   const benchmarkKey = JSON.stringify(config.benchmark)
   useEffect(() => {
     setPenalty(String(config.penaltyRate))
+    setOpeningRef(String(config.openingReferenceFraction))
+    setFreeCredit(String(config.freeCreditRatio))
     setAuctionCapRatio(String(config.auctionCapRatio))
     setCapReduction(String(config.capReductionFactor))
     setAbateCap(String(config.abatementLifetimeCap))
@@ -65,6 +69,8 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     config.penaltyRate,
+    config.openingReferenceFraction,
+    config.freeCreditRatio,
     config.auctionCapRatio,
     config.capReductionFactor,
     config.abatementLifetimeCap,
@@ -76,6 +82,8 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
     setBusy(true)
     const ok = await hostAction('host:updateSettings', {
       penaltyRate: Number(penalty),
+      openingReferenceFraction: Number(openingRef),
+      freeCreditRatio: Number(freeCredit),
       auctionCapRatio: Number(auctionCapRatio),
       capReductionFactor: Number(capReduction),
       abatementLifetimeCap: Number(abateCap),
@@ -113,8 +121,43 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
   return (
     <div className="flex flex-col gap-3">
       {field('Penalty rate', penalty, setPenalty, 'cost per tCO₂ uncovered — market price ceiling')}
+      {/* The strongest lever on where year one OPENS, and the only setting here that names
+          a price rather than a quantity. Shown with the euro figure worked out, because a
+          bare "0.25" tells an instructor nothing about what the class will see. */}
+      {field(
+        'Opening price',
+        openingRef,
+        setOpeningRef,
+        `× penalty — year 1 starts near €${Math.round(Number(openingRef) * config.penaltyRate) || 0} before anything trades`,
+      )}
+      {field('Free credit ratio', freeCredit, setFreeCredit, '× baseline (grandfathering; ≤1 = scarcer)')}
       {field('Auction supply ratio', auctionCapRatio, setAuctionCapRatio, '× baseline (auctioning; ≤1 = scarcer)')}
-      {field('Cap reduction / year', capReduction, setCapReduction, 'auction supply AND benchmark × this each year (EU-ETS LRF; 0.95 = −5%/yr)')}
+      {field('Cap reduction / year', capReduction, setCapReduction, `auction supply, benchmark${config.applyLRFToGrandfathering ? ' AND free credits' : ''} × this each year (${Math.round((1 - Number(capReduction)) * 100)}%/yr tighter)`)}
+      {/* Grandfathering used to be exempt from the reduction above, which made that setting
+          do nothing at all in that mode. Surfaced so the exemption is a visible choice. */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs text-foreground">Reduce free credits too</div>
+          <div className="text-[10px] text-muted-foreground font-mono">
+            apply the yearly cap reduction to grandfathering as well
+          </div>
+        </div>
+        <button
+          onClick={() =>
+            void hostAction('host:updateSettings', {
+              applyLRFToGrandfathering: !config.applyLRFToGrandfathering,
+            })
+          }
+          className={cn(
+            'shrink-0 text-[10px] font-mono uppercase tracking-wider border rounded-full px-3 py-1 transition-colors',
+            config.applyLRFToGrandfathering
+              ? 'text-primary border-primary/40 bg-primary/10'
+              : 'text-muted-foreground border-border',
+          )}
+        >
+          {config.applyLRFToGrandfathering ? 'on' : 'off'}
+        </button>
+      </div>
       {field('Abatement budget', abateCap, setAbateCap, 'most a company may EVER cut, as a fraction — a lifetime budget, not per year')}
       {/* Lowering the budget binds future installs only; nothing already built is undone. */}
       {field('Retrofit fee', abateFee, setAbateFee, '€ per t of baseline, charged AGAIN on every install step')}
@@ -152,7 +195,9 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
             // shows immediately how far below the sector average it lands.
             const average = config.sectorAverage[industry]
             const value = Number(benchmark[industry])
-            const belowPct =
+            // Signed: the shipped benchmark opens ABOVE the sector average and is tightened
+            // under it year by year, so this reads "below" or "above" as the number dictates.
+            const gapPct =
               average > 0 && Number.isFinite(value)
                 ? Math.round((1 - value / average) * 100)
                 : null
@@ -160,8 +205,8 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
               industry,
               benchmark[industry],
               (v) => setBenchmark((b) => ({ ...b, [industry]: v })),
-              belowPct !== null
-                ? `${belowPct}% below the ${average.toLocaleString()} t sector average`
+              gapPct !== null
+                ? `${Math.abs(gapPct)}% ${gapPct >= 0 ? 'below' : 'above'} the ${average.toLocaleString()} t sector average`
                 : 'free credits per company',
             )
           })}

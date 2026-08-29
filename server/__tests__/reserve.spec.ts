@@ -21,8 +21,37 @@ const BELOW_RUNG1 = RUNG[0] - 15
 
 const RESERVE_ON: DeepPartial<GameConfig> = { allocation: { reserve: { enabled: true } } }
 
+/**
+ * A deliberately SHORT class, on top of whatever else a test asks for.
+ *
+ * The shipped calibration opens every regime at roughly the class's full need — scarcity is
+ * built by the yearly cap reduction, not handed out in year one — so at the defaults the
+ * shortfall the reserve sizes itself from is zero and the ladder never arms. That is correct
+ * behaviour, and it is pinned on its own below; but it leaves the wiring tests here with
+ * nothing to exercise. Every test that needs a live ladder gets a tight opening supply.
+ */
+const SHORT: DeepPartial<GameConfig> = {
+  allocation: {
+    freeCreditRatio: 0.5,
+    benchmark: { 'Power & Utilities': 500, 'Heavy Materials': 400,
+                 'Manufacturing & Chemicals': 260, Transport: 150 },
+    auctionCapRatio: 0.5,
+  },
+}
+
+function merge(...parts: DeepPartial<GameConfig>[]): DeepPartial<GameConfig> {
+  const out: DeepPartial<GameConfig> = {}
+  for (const p of parts) {
+    out.allocation = { ...out.allocation, ...p.allocation }
+    if (p.allocation?.reserve) {
+      out.allocation.reserve = { ...out.allocation?.reserve, ...p.allocation.reserve }
+    }
+  }
+  return out
+}
+
 function opened(mode: 'grandfathering' | 'benchmarking' | 'auctioning', over = RESERVE_ON) {
-  const s = new Session(mode, 4, over)
+  const s = new Session(mode, 4, merge(SHORT, over))
   s.addPlayer('Alice', 'Power & Utilities') // P1
   s.addPlayer('Bob', 'Heavy Materials') // P2
   s.addPlayer('Cara', 'Transport') // P3
@@ -58,10 +87,13 @@ describe('reserve — the pot', () => {
     expect(rec.reserveCommitted).toBe(0)
   })
 
-  it('is ZERO under auctioning at the shipped ratio, and stays inert all year', () => {
-    // auctionCapRatio 1.0 issues supply equal to need, so there is no shortfall to relieve.
-    // This is the correct answer, not a wiring bug — pinned so it cannot rot into one.
-    const s = opened('auctioning')
+  it('is ZERO when issuance already meets need, and stays inert all year', () => {
+    // A ratio of 1.0 issues supply equal to need, so there is no shortfall to relieve. This
+    // is the correct answer, not a wiring bug — pinned so it cannot rot into one.
+    //
+    // Pinned explicitly rather than inherited: the shipped ratio is now 0.95, which DOES
+    // open a small shortfall, so relying on the default would silently stop testing this.
+    const s = opened('auctioning', merge(RESERVE_ON, { allocation: { auctionCapRatio: 1 } }))
     const rec = s.currentYearRecord()!
     expect(rec.reservePot).toBe(0)
 
@@ -203,7 +235,9 @@ describe('reserve — identity', () => {
   })
 
   it('a market maker may buy from it — blockedPair only vetoes maker-to-maker', () => {
-    const s = new Session('benchmarking', 4, RESERVE_ON)
+    // Builds its own session rather than going through `opened`, so it has to ask for the
+    // short class explicitly — at the shipped calibration there is no shortfall to arm on.
+    const s = new Session('benchmarking', 4, merge(SHORT, RESERVE_ON))
     const mm = s.addBot('marketMaker')
     s.addPlayer('Alice', 'Power & Utilities') // P2
     s.addPlayer('Bob', 'Heavy Materials') // P3

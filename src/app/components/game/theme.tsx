@@ -60,13 +60,13 @@ export const MODE_LABELS = {
   grandfathering: {
     label: 'Grandfathering',
     tagline: 'Free credits proportional to your emission history',
-    desc: 'The early ETS model: 80% of the class baseline is given out for free, split in proportion to each company\'s past ten years of emissions.',
+    desc: 'The early ETS model: the class baseline is given out for free, split in proportion to each company\'s past ten years of emissions — and then cut every year, so the free ride runs out.',
     implemented: true,
   },
   benchmarking: {
     label: 'Benchmarking',
-    tagline: 'A sector benchmark set 40% below the sector average',
-    desc: 'The EU model: every company in a sector gets the same free credits — the sector benchmark — regardless of its own history. Set 40% below the sector average, so an average emitter is short and only an efficient one is long. There is no primary sale: close the gap by cutting emissions or on the secondary market.',
+    tagline: 'One benchmark per sector, tightened every year',
+    desc: 'The EU model: every company in a sector gets the same free credits — the sector benchmark — regardless of its own history. It opens near the sector average, so year one is comfortable, and then shrinks every year until an average emitter is short and only an efficient one is long. There is no primary sale: close the gap by cutting emissions or on the secondary market.',
     implemented: true,
   },
   auctioning: {
@@ -96,7 +96,7 @@ export const CAP_FLOW: Record<CapMode, string[]> = {
   ],
   benchmarking: [
     'One benchmark for your whole sector',
-    'Set below the sector average',
+    'Shrinks every year',
     'Average emitters run short',
     'Close the gap on the market',
   ],

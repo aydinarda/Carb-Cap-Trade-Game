@@ -194,8 +194,11 @@ describe('benchmarking player snapshot', () => {
     s.startYear()
     const snap = playerSnapshot(s, 'P1')
     expect(snap.sectorAverage).toBe(1000) // midpoint of 850..1150
-    expect(snap.sectorBenchmark).toBe(600) // 40% below it
-    expect(snap.you.freeAllocation).toBe(600)
+    // Derived from the shipped level rather than restated: the benchmark is calibration and
+    // has moved from 40% below the sector average to slightly above it.
+    const expected = DEFAULT_GAME_CONFIG.allocation.benchmark['Power & Utilities']
+    expect(snap.sectorBenchmark).toBe(expected)
+    expect(snap.you.freeAllocation).toBe(expected)
     expect(snap.auctionSupply).toBe(0)
   })
 

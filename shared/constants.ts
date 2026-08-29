@@ -27,18 +27,27 @@ export const SECTOR_AVERAGE_EMISSIONS = Object.fromEntries(
 ) as Record<Industry, number>
 
 /**
- * EU-style benchmark stringency. A real benchmark is the average emission
- * intensity of the most efficient 10% of installations in the sector; here we
- * approximate that with a flat cut — the benchmark sits 40% below the sector
- * average. An average company is therefore structurally short and must cut
- * emissions or buy on the secondary market; only a genuinely efficient one is long.
+ * Benchmark free allocation as a multiple of the sector average.
+ *
+ * This is the calibrated opening level, not a statement about stringency: at 1.119 the
+ * class is issued almost exactly what it needs in year one, and the squeeze arrives through
+ * `capReductionFactor` shrinking the benchmark every year afterwards. Chosen so the price
+ * opens near €33 and climbs into the target band as the cap bites, rather than starting
+ * there — see the phase A+B calibration.
+ *
+ * It used to be 0.6, i.e. 40% BELOW the sector average, which made an average company
+ * structurally short from day one and pinned the opening price near the fine. The number
+ * moved above 1.0 for the same reason the auction ratio moved below it: scarcity is now
+ * meant to build over the game instead of being handed to the class in year one.
+ *
+ * Sector averages are 1000 / 800 / 525 / 300, so this ships 1119 / 895.2 / 587.5 / 335.7.
  */
-export const BENCHMARK_STRINGENCY = 0.6
+export const BENCHMARK_STRINGENCY = 1.119
 
 /**
  * Benchmarking free allocation: every company in an industry gets this many free
  * credits regardless of its own history. The host can tune them per sector.
- * 600 / 480 / 315 / 180 at the default stringency.
+ * 1119 / 895.2 / 587.5 / 335.7 at the shipped level.
  */
 export const DEFAULT_BENCHMARK = Object.fromEntries(
   INDUSTRY_NAMES.map((i) => [

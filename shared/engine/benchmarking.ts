@@ -8,7 +8,8 @@ import { isPureTrader } from './roles'
  * Benchmarking: every installation in a sector gets the same free allocation — the
  * sector benchmark — regardless of its own emission history. This is the textbook
  * contrast with grandfathering, which rewards your own past instead. The benchmark
- * is set 40% below the sector average (BENCHMARK_STRINGENCY), so an average company
+ * opens near the sector average (BENCHMARK_STRINGENCY) and is tightened every year by the
+ * cap reduction factor, so an average company
  * is structurally short and must either cut emissions or buy on the secondary
  * market; only a genuinely efficient one ends up long. As with the EU's annual
  * benchmark update, the allocation tightens each year by `capReductionFactor`.

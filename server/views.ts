@@ -43,6 +43,9 @@ function sectorAverages(config: GameConfig): Record<Industry, number> {
 function hostConfigView(config: GameConfig): HostConfigView {
   return {
     penaltyRate: config.market.penaltyRate,
+    openingReferenceFraction: config.market.openingReferenceFraction,
+    freeCreditRatio: config.allocation.freeCreditRatio,
+    applyLRFToGrandfathering: config.allocation.applyLRFToGrandfathering,
     auctionCapRatio: config.allocation.auctionCapRatio,
     capReductionFactor: config.allocation.capReductionFactor,
     benchmark: { ...config.allocation.benchmark },

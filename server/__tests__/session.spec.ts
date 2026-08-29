@@ -644,8 +644,10 @@ describe('trader-bot seed inventory', () => {
     s.startYear()
     const rec = s.currentYearRecord()!
 
-    // Year 1 has no discovered price yet, so the seed is priced at penaltyRate / 2.
-    expect(rec.primaryPrice).toBe(s.state.config.market.penaltyRate / 2)
+    // Year 1 has no discovered price yet, so the seed is priced at the opening anchor.
+    // Derived: the anchor is calibration and has already moved from a half to a quarter.
+    const { penaltyRate, openingReferenceFraction } = s.state.config.market
+    expect(rec.primaryPrice).toBe(penaltyRate * openingReferenceFraction)
     // The MM gets no free allocation but a seed it must pay for…
     expect(rec.freeAllocation[mm.id]).toBe(0)
     expect(rec.regulatorGranted[mm.id]).toBeGreaterThan(0)
@@ -679,7 +681,12 @@ describe('trader-bot seed inventory', () => {
 describe('the optimum benchmark sees the carry', () => {
   it('a debtor is not measured as though it still had the allowances it owes', () => {
     // Year 11: no abatement, no trades -> P2 ends short and carries a make-good debt.
-    const s = grandfathering()
+    //
+    // The tight ratio is what MAKES a debtor. The shipped calibration issues the class its
+    // full baseline in year one — scarcity arrives later, through the cap reduction — so at
+    // the defaults nobody ends year 11 short and this test would silently assert nothing.
+    const SHORT_Y11: DeepPartial<GameConfig> = { allocation: { freeCreditRatio: 0.5 } }
+    const s = grandfathering(1, SHORT_Y11)
     s.startYear()
     s.closeCapStage()
     s.openTrade()
@@ -696,7 +703,7 @@ describe('the optimum benchmark sees the carry', () => {
 
     // Same year with the debt cleared: the benchmark must be strictly cheaper, because
     // perfect play then starts with more allowances in hand.
-    const clean = grandfathering()
+    const clean = grandfathering(1, SHORT_Y11)
     clean.startYear()
     clean.closeCapStage()
     clean.openTrade()
