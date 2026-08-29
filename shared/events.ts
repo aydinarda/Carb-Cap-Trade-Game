@@ -2,7 +2,7 @@ import type { Industry } from './constants'
 import type { BotType, CapMode, OrderSide, PlayerProfile, Snapshot } from './types'
 
 export type Ack<T = unknown> = (
-  response: ({ ok: true } & T) | { ok: false; error: string },
+  response: ({ ok: true } & T) | { ok: false; error: string; code?: string },
 ) => void
 
 export interface ClientToServerEvents {

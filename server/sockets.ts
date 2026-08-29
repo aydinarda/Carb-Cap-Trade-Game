@@ -7,7 +7,11 @@ export const store = new SessionStore()
 
 function fail(ack: Ack<never>, error: unknown) {
   if (error instanceof GameError) {
-    ack({ ok: false, error: error.message })
+    // The CODE travels with the message. A caller that needs to tell an expected refusal
+    // (no shorting, retrofits are permanent) from a real fault could otherwise only pattern
+    // match on English prose — which silently reclassifies every rejection the moment
+    // somebody rewords an error string.
+    ack({ ok: false, error: error.message, code: error.code })
   } else {
     console.error(error)
     ack({ ok: false, error: 'Unexpected server error.' })

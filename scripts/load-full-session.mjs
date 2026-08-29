@@ -140,9 +140,26 @@ const M = {
   accepted: 0,
   rejected4xx: 0, // expected (no-shorting, wrong phase) — not a failure
   errors: 0, // unexpected / 5xx / timeouts
+  errorSamples: [], // first few, so a threshold failure names its own cause
   connectFail: 0,
   snapshots: 0,
 }
+/**
+ * Refusals this harness EXPECTS the engine to make, by `GameError` code.
+ *
+ * These are the engine working, not failing: a player asked for something the rules forbid,
+ * usually because 50 simulated players race each other inside one trade window. Anything
+ * NOT listed here counts against the error threshold.
+ */
+const EXPECTED_CODES = new Set([
+  'NO_SHORTING',    // selling more than you hold
+  'ABATE_DOWN',     // retrofits are permanent; a target below what is built is refused
+  'BAD_ABATE',      // a malformed fraction
+  'WRONG_PHASE',    // the year moved on between deciding and sending
+  'NO_ORDER',       // cancelling an order that already filled
+  'BAD_ORDER',      // size or price outside the allowed range
+])
+
 function pct(arr, p) {
   if (arr.length === 0) return 0
   const s = [...arr].sort((a, b) => a - b)
@@ -201,11 +218,12 @@ function optimalAbatement(price, spec, maxFraction = 1) {
 }
 
 class Player {
-  constructor(sock, id, penaltyRate) {
+  constructor(sock, id, penaltyRate, openingFraction = 0.25) {
     this.sock = sock
     this.id = id
     this.snap = null
     this.penaltyRate = penaltyRate
+    this.openingFraction = openingFraction
     sock.on('session:snapshot', (s) => {
       this.snap = s
       M.snapshots++
@@ -272,12 +290,25 @@ class Player {
 
     // Abate to the cost-minimising point first — that is what makes the residual, and
     // what makes the penalty bite as a ceiling rather than a formality.
-    const rStar = optimalAbatement(this.refPrice(), s.abatement, s.maxAbatement ?? 1)
-    if (Math.random() < 0.3) {
+    //
+    // `abatementLifetimeCap`, not `maxAbatement`: the latter is not a field on the snapshot,
+    // so it read `undefined` and the cap silently fell back to 1. The engine clamps to the
+    // real cap anyway, so nothing broke loudly — the harness just sized every residual
+    // against a cut its player was never allowed to make.
+    const installed = y?.abatementCommitted ?? 0
+    const rStar = optimalAbatement(this.refPrice(), s.abatement, s.abatementLifetimeCap ?? 1)
+    // Capacity is PERMANENT: `setAbatement` refuses a target below what is already built.
+    // The price moves within a year, so a naive "abate to r* every tick" issues a doomed
+    // call every time r* dips — 65 of them in a 7-year run, all counted as server errors.
+    // Ask only when there is something to add.
+    if (rStar > installed + 0.01 && Math.random() < 0.3) {
       this.tally(await emit(this.sock, 'player:abate', { fraction: round1(rStar) }))
     }
 
-    const need = expected * (1 - rStar) - held // >0 short, <0 surplus
+    // Against what is in force THIS year, not against the target: capacity bought now comes
+    // online next year, so planning this year's cover around r* buys too little.
+    const inForce = y?.abatementInForce ?? 0
+    const need = expected * (1 - inForce) - held // >0 short, <0 surplus
     if (need > 1) {
       const qty = round1(clamp(need * rand(0.3, 1), 1, need))
       this.tally(await emit(this.sock, 'player:placeOrder',
@@ -293,17 +324,33 @@ class Player {
   refPrice() {
     const s = this.snap
     const mv = s?.market
-    // Cold start matches the engine's own openingReference (penaltyRate × 0.5), not an
-    // arbitrary 10 — otherwise the harness and the bots anchor to different prices.
+    // Cold start matches the engine's own `openingReference`, which is
+    // `penaltyRate × openingReferenceFraction` — read, never assumed. It was hardcoded to
+    // half the fine; the shipped fraction is now 0.25, so the harness was anchoring its
+    // first year at €50 against an engine anchoring at €25. That is exactly the harness-vs-
+    // engine price drift this fallback exists to prevent.
     return mv?.lastPrice ?? mv?.vwap ?? s?.prevMarketPrice ?? s?.auctionPrice
-      ?? this.penaltyRate * 0.5
+      ?? this.penaltyRate * this.openingFraction
   }
 
+  /**
+   * Expected refusals vs real faults.
+   *
+   * Keyed on the error CODE the server now sends. The prose regex below is the fallback for
+   * a server that predates it — and is why this misfired in the first place: `ABATE_DOWN`'s
+   * message ("Retrofits are permanent — you can add more, but not take it back") matches
+   * none of those words, so every one of them was tallied as an unexpected error.
+   */
   tally(res) {
     if (!res) return
-    if (res.ok) M.accepted++
-    else if (/no shorting|at most|phase|not allowed|WRONG|INSUFFICIENT/i.test(res.error || '')) M.rejected4xx++
-    else M.errors++
+    if (res.ok) { M.accepted++; return }
+    if (res.code && EXPECTED_CODES.has(res.code)) { M.rejected4xx++; return }
+    if (!res.code && /no shorting|at most|phase|not allowed|WRONG|INSUFFICIENT|permanent/i.test(res.error || '')) {
+      M.rejected4xx++
+      return
+    }
+    M.errors++
+    if (M.errorSamples.length < 8) M.errorSamples.push(`${res.code ?? '—'}: ${res.error}`)
   }
 }
 
@@ -343,6 +390,10 @@ async function runSession(capMode, { withBots, joinGrace }) {
 
   await sleep(150)
   const penaltyRate = hostSnap?.config?.penaltyRate ?? 100
+  // Read from the host snapshot rather than assumed: it is a calibration knob and has
+  // already moved from 0.5 to 0.25.
+  const openingFraction = hostSnap?.config?.openingReferenceFraction ?? 0.25
+  console.log(`opening anchor: ${openingFraction} → year-1 reference ${round1(penaltyRate * openingFraction)}`)
   console.log(`penalty rate in force: ${penaltyRate}` +
     `  ·  capReduction ${hostSnap?.config?.capReductionFactor ?? '?'}` +
     `  ·  auctionCapRatio ${hostSnap?.config?.auctionCapRatio ?? '?'}`)
@@ -361,7 +412,7 @@ async function runSession(capMode, { withBots, joinGrace }) {
             industry: INDUSTRIES[n % INDUSTRIES.length],
           })
           if (!j.ok) { M.errors++; sock.close(); return null }
-          return new Player(sock, j.playerId, penaltyRate)
+          return new Player(sock, j.playerId, penaltyRate, openingFraction)
         } catch { M.connectFail++; return null }
       }),
     )
@@ -460,6 +511,9 @@ async function main() {
   const fails = []
   if (p95 > 8000) fails.push(`p95 action latency ${p95}ms > 8000ms`)
   if (M.errors > 50) fails.push(`${M.errors} unexpected errors > 50`)
+  if (M.errorSamples.length) {
+    console.log(`first errors:\n  ${M.errorSamples.join('\n  ')}`)
+  }
   if (M.connectFail > N_PLAYERS * 0.05) fails.push(`${M.connectFail} connect failures > 5%`)
   if (M.accepted === 0) fails.push('no actions were accepted (backend/host key wrong?)')
 
