@@ -91,15 +91,23 @@ describe('runScenario', () => {
     )
   })
 
-  it('agents value carbon at the dearest cut they are ALLOWED, not at a 100% cut', () => {
-    // With a lifetime cap of 0.5 the dearest meaningful cut is MAC(0.5) = a + 0.5b, well
-    // below MAC(1) = a + b. A lower cap must therefore lower what the market will pay —
-    // if it does not, the agents are ignoring the cap the engine enforces on them.
-    const price = (cap: number) => {
-      const r = runScenario(spec({ years: 3, config: { abatement: { lifetimeCap: cap } } }))
-      return Math.max(...r.years.map((y) => y.metrics.vwap ?? 0))
+  it('nobody ever installs more than the lifetime cap allows', () => {
+    // The bug this guards: `optimalAbatement` was called without the cap, so an agent's
+    // cost-minimising cut — and the fair value it derived from it — came from a 100% cut the
+    // engine forbids. Asserted on installed capacity, which is where the cap is enforced.
+    //
+    // NOT asserted on the price. The obvious version of that test ("a tighter cap means a
+    // cheaper tonne, because MAC(cap) is lower") is false at the market level and measurably
+    // so: cap 0.2 prints €104 against cap 0.8's €76. A class allowed to cut less stays
+    // shorter, and that scarcity dominates the valuation effect. Two real forces point
+    // opposite ways here, so the price is the wrong place to look for this invariant.
+    for (const cap of [0.2, 0.5, 0.8]) {
+      const r = runScenario(spec({ years: 6, config: { abatement: { lifetimeCap: cap } } }))
+      for (const y of r.years) {
+        expect(y.metrics.abatementInForceMean, `in force, cap ${cap}`).toBeLessThanOrEqual(cap + 1e-9)
+        expect(y.metrics.abatementCommittedMean, `committed, cap ${cap}`).toBeLessThanOrEqual(cap + 1e-9)
+      }
     }
-    expect(price(0.2)).toBeLessThan(price(0.8))
   })
 
   it('records every student with a behaviour and every bot without one', () => {

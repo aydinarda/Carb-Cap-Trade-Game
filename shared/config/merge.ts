@@ -151,5 +151,21 @@ export function resolveConfig(over?: DeepPartial<GameConfig>): GameConfig {
     }
   }
 
+  // Setting the scalar factor MEANS a flat factor.
+  //
+  // The shipped config carries a decelerating `capReductionSchedule`, and a schedule wins
+  // over the scalar wherever both exist — so without this, a scenario that overrode
+  // `capReductionFactor` would silently get the schedule instead and its arm would measure
+  // nothing. Five tests caught it; a sweep would not have.
+  //
+  // A caller that wants both sets both. A caller that sets only the factor is asking for the
+  // old, flat behaviour and gets it.
+  if (
+    over?.allocation?.capReductionFactor !== undefined &&
+    over?.allocation?.capReductionSchedule === undefined
+  ) {
+    config.allocation.capReductionSchedule = []
+  }
+
   return validateConfig(config)
 }

@@ -11,10 +11,15 @@ const CAP_MODES: CapMode[] = ['grandfathering', 'benchmarking', 'auctioning']
 /**
  * An even class: a realistic classroom mix across behaviours and sectors.
  *
- * 25 students and 22 bots — the population the price calibration runs on, so the catalog
- * and the calibration sweeps describe the same market. They used to differ (24 + 10 here,
- * 25 + 22 there), which meant a scenario result and a sweep result could not be compared
- * even when they varied the same parameter.
+ * 25 students and 25 bots — the population the price calibration runs on, so the catalog and
+ * the calibration sweeps describe the same market. They used to differ, which meant a
+ * scenario result and a sweep result could not be compared even when they varied the same
+ * parameter.
+ *
+ * No noise bots. They flipped side 25% of the time and jittered price ±25%, which is orders
+ * carrying no information about value. Removing them made the sell side collapse until
+ * `bots.compliance.coverTarget` gave the emitters a buffer to sell from — the two changes
+ * belong together.
  */
 const BALANCED: Population = {
   humans: 25,
@@ -25,7 +30,7 @@ const BALANCED: Population = {
     'Manufacturing & Chemicals': 0.25,
     Transport: 0.25,
   },
-  bots: { compliance: 9, marketMaker: 4, noise: 6, speculator: 3 },
+  bots: { compliance: 20, marketMaker: 4, speculator: 1 },
 }
 
 const pop = (over: Partial<Population>): Population => ({ ...BALANCED, ...over })
@@ -86,7 +91,7 @@ export const SCENARIOS: ScenarioDef[] = [
             base({
               population: pop({
                 humans,
-                bots: { compliance: 9, marketMaker: marketMakers, noise: 6, speculator: 3 },
+                bots: { compliance: 20, marketMaker: marketMakers, speculator: 1 },
               }),
             }),
           )

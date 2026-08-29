@@ -23,6 +23,15 @@ export interface BotRuntime {
    * belt-and-braces with `setAbatement`'s own idempotence.
    */
   lastInvestYear?: number
+  /**
+   * Trade-stage ticks this bot has seen in the current year, and the year they belong to.
+   *
+   * Counted in ticks rather than as a fraction of the round because the engine does not know
+   * how long a round will be — the instructor closes the market by hand, and the load test
+   * sets its own window. Ticks are the only unit both the live game and the simulator share.
+   */
+  tradeTicks?: number
+  tradeTicksYear?: number
 }
 
 /** Everything an archetype's advance() needs. */

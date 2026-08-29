@@ -29,9 +29,9 @@ describe('DEFAULT_GAME_CONFIG reproduces the shipped constants', () => {
     // Just short of need, so the auction is actually subscribed and its clearing price
     // carries information. At 1.0 it cleared at the marginal bid and said nothing.
     expect(c.allocation.auctionCapRatio).toBe(0.95)
-    // −16%/yr. Far steeper than any real scheme because demand here falls ~10%/yr on its
-    // own: abatement is permanent, so the class keeps every cut it makes.
-    expect(c.allocation.capReductionFactor).toBe(0.84)
+    // −5%/yr. Softened twice as longer horizons were measured; still steeper than the EU ETS,
+    // because demand here falls on its own as permanent capacity accumulates.
+    expect(c.allocation.capReductionFactor).toBe(0.95)
     // ON. With free credits opening at the full baseline, an exempt grandfathering would
     // start with no scarcity and never acquire any.
     expect(c.allocation.applyLRFToGrandfathering).toBe(true)

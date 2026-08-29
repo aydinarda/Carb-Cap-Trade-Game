@@ -52,6 +52,10 @@ on:
       # Calibration knobs. Blank = whatever shared/config/defaults.ts ships, which is what
       # you want for a plain load test; set them to reproduce a candidate from
       # sim/sweeps/price-calibration.ipynb against the real server.
+      free_credit_ratio:
+        description: 'freeCreditRatio — grandfathering free credits as a multiple of class baseline (blank = shipped 1.0)'
+        default: ''
+        required: false
       penalty_rate:
         description: 'penaltyRate (blank = shipped default)'
         default: ''
@@ -61,7 +65,7 @@ on:
         default: ''
         required: false
       cap_reduction_factor:
-        description: 'capReductionFactor — yearly tightening; 0.97 ships, ~0.86 tracks the fall in need'
+        description: 'capReductionFactor — a FLAT yearly tightening. Setting it DISABLES the shipped decelerating schedule (0.95 → 0.965 → 0.98 → 0.99 → 1.0). Blank = keep the schedule'
         default: ''
         required: false
       benchmark_stringency:
@@ -77,8 +81,8 @@ on:
         default: '0.18'
         required: false
       mm_inv_step:
-        description: 'Market maker target increase per round (0 = flat)'
-        default: '0.03'
+        description: 'Market maker target increase per round. Leave 0 — the maker now bids its FULL target each auction, so an escalating target compounds its inventory'
+        default: '0'
         required: false
 
 jobs:
@@ -117,6 +121,7 @@ jobs:
           AUCTION_CAP_RATIO: ${{ inputs.auction_cap_ratio }}
           CAP_REDUCTION_FACTOR: ${{ inputs.cap_reduction_factor }}
           BENCHMARK_STRINGENCY: ${{ inputs.benchmark_stringency }}
+          FREE_CREDIT_RATIO: ${{ inputs.free_credit_ratio }}
           MM_INV_START: ${{ inputs.mm_inv_start }}
           MM_INV_STEP: ${{ inputs.mm_inv_step }}
         run: node scripts/load-full-session.mjs

@@ -42,6 +42,8 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
      */
     openingReferenceFraction: 0.25,
     finalPriceFallbackFraction: 1,
+    // The last ten prints of the previous year — where the market closed, not its yearly mean.
+    referenceTrades: 10,
   },
   emissions: {
     industries: Object.fromEntries(
@@ -71,18 +73,30 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     // at 1.0 to 2.68 here.
     auctionCapRatio: 0.95,
     /**
-     * −16%/yr. The steepest tightening in the calibrated grid, and far steeper than any real
-     * scheme: the EU ETS runs −2.2%/yr in phase 4 and −4.3%/yr from 2024.
+     * −5%/yr.
      *
-     * That gap is not a mistake, it is the consequence of permanent abatement. A class of 25
-     * installs capacity within a few years and KEEPS the cut, so demand here falls roughly
-     * 10%/yr on its own. Supply has to fall faster than that to stay short at all — matched
-     * against Europe's pace the market simply drifts into a glut by year four.
-     *
-     * NOTE this sits on the edge of the swept range, so it is the best value TRIED, not a
-     * proven optimum. Nothing steeper has been measured.
+     * Softened twice: 0.84 held a clean path over ten years but compounded to under a tenth
+     * of the opening supply by year fourteen, and 0.90 still ran the price past €200 in a
+     * fourteen-year game. At 0.95 supply is still falling faster than the EU ETS tightens
+     * (−2.2%/yr in phase 4, −4.3%/yr from 2024), which is the point — demand here falls on
+     * its own as permanent capacity accumulates, so a flat cap would leave the class long.
      */
-    capReductionFactor: 0.84,
+    capReductionFactor: 0.95,
+    /**
+     * Tightens 5%/yr while the class is still long, then eases to nothing by round twenty.
+     *
+     * The early rounds have to build the scarcity the game is about; the late ones have to
+     * stop, or a fourteen-round game ends at €200 and a twenty-round game has no market left.
+     * Flat from round 20 means the cap stops falling entirely — by then the class has spent
+     * its abatement budget and the price should settle, not keep climbing.
+     */
+    capReductionSchedule: [
+      { fromRound: 1, factor: 0.95 },
+      { fromRound: 10, factor: 0.965 },
+      { fromRound: 13, factor: 0.98 },
+      { fromRound: 17, factor: 0.99 },
+      { fromRound: 20, factor: 1 },
+    ],
     /**
      * ON, which reverses the shipped asymmetry.
      *
@@ -103,21 +117,34 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
        * curves (every sector hits the 20% abatement cap between 25 and 70), not against the
        * fine.
        *
-       * The first rung sits at the TOP of the €60-70 target band, not inside it. Measured:
-       * a rung's price effect comes from where it sits, not from how much it sells — it is
-       * the cheapest ask in the book, so it caps every print regardless of size (halving the
-       * pot moved the price 2 €; raising the rung 10 € moved it 6 €). A rung inside the band
-       * therefore suppresses the market before it ever reaches the target. Starting at 70
-       * left the first six years' price path almost identical to having no reserve at all,
-       * while cutting trades pinned at the fine from 6-12% to 0-1%. See §10 of
-       * sim/sweeps/price-calibration.ipynb.
+       * A rung's price effect comes from WHERE IT SITS, not from how much it sells: it is the
+       * cheapest ask in the book while it rests, so it caps every print regardless of size.
+       * Measured on an earlier ladder, halving the pot moved the price €2 while raising a rung
+       * €10 moved it €6.
+       *
+       * The rungs used to start at €70 and run to €95 in four steps, sized for a €60-70 target
+       * band. With prices now reaching three figures that ladder was spent late and did almost
+       * nothing: under 5% of issuance, and 0% for the first five to seven rounds. Two rungs
+       * that ratchet to 20% by €70, then `recurring` below, replaces it.
        */
       steps: [
-        { triggerPrice: 70, cumulativeFraction: 0.08 },
-        { triggerPrice: 78, cumulativeFraction: 0.13 },
-        { triggerPrice: 86, cumulativeFraction: 0.19 },
-        { triggerPrice: 95, cumulativeFraction: 0.25 },
+        { triggerPrice: 65, cumulativeFraction: 0.1 },
+        { triggerPrice: 70, cumulativeFraction: 0.2 },
       ],
+      /**
+       * From €78 on, 5% of the pot is offered again at €78 and again at €85 EVERY round.
+       *
+       * The ladder alone is spent once and then silent, which left the reserve supplying
+       * under 5% of issuance and nothing at all in the rounds before the price reached its
+       * first rung. A market that keeps climbing needs relief that keeps arriving.
+       */
+      recurring: {
+        fromPrice: 78,
+        offers: [
+          { price: 78, fraction: 0.05 },
+          { price: 85, fraction: 0.05 },
+        ],
+      },
     },
   },
   abatement: {
@@ -156,6 +183,10 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       quoteSize: 15,
       bandFrac: 0.05,
       recentTrades: 5,
+      // A quarter of the simulator's 12-tick window. The maker is silent while the class
+      // opens the year, then quotes for the rest of it.
+      quietTicks: 3,
+      auctionPremium: 0.05,
     },
     speculator: { size: 10, initialInventory: 20, momentumEps: 0.01 },
     noise: {
@@ -167,7 +198,7 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       sizeJitter: 0.5,
     },
     // minTradeSize is TONNES and does not scale with money; priceStep is money.
-    compliance: { minTradeSize: 0.5, priceStep: 0.5 },
+    compliance: { minTradeSize: 0.5, priceStep: 0.5, coverTarget: 1.1 },
     fixes: {
       noiseAbatement: false,
       complianceReservation: false,
@@ -175,7 +206,10 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       // auction and each one sizes it off the entire pool, so four of them took 72% of the
       // cap every year and sat on it — 154k credits by year 20, seven times one year's
       // issuance, while emitters bid the price to the ceiling for want of a seller.
-      marketMakerIncrementalBid: true,
+      // OFF: it stopped the maker bidding at all once its target was met, which left the
+      // offer side of the book to drain. The hoarding it guarded against is now bounded by
+      // marketMakerShareByCount instead.
+      marketMakerIncrementalBid: false,
       marketMakerShareByCount: true,
       // ON. The fine is NOT a ceiling and the engine never treated it as one: an uncovered
       // tonne is fined AND still carried as make-good debt (see `settleYear`), so the true

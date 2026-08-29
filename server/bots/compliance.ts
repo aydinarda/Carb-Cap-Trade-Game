@@ -80,7 +80,21 @@ export function trade(ctx: BotCtx): boolean {
   const fairB = disperse(fair, ctx.rt.bias ?? 0, P) // personality-shifted fair value
   const planned = session.plannedEmission(bot.id)
   const held = session.creditsHeld(bot.id)
-  const need = round1(planned - held)
+  // Two thresholds, not one.
+  //
+  // It BUYS up to `coverTarget × planned` and SELLS anything above `planned`. A single
+  // threshold — buy and sell at the same level — is why the buffer did nothing when it was
+  // first added: the firm bought its way up to exactly 1.1× and stopped there, holding a
+  // surplus it would only part with above 1.1×, which it could never reach by buying. Fifteen
+  // of twenty firms ended up long and not one of them ever posted an offer.
+  //
+  // Splitting them makes the buffer real inventory: bought at the auction, offered back to
+  // the market during the year. It is not churn — the sell branch below only lifts bids above
+  // `fair` or rests an ask above it, so the firm parts with the buffer at a profit or not at
+  // all.
+  const buyTo = round1(planned * cfg.coverTarget - held)
+  const sellFrom = round1(planned - held)
+  const need = buyTo > cfg.minTradeSize ? buyTo : sellFrom
 
   if (need > cfg.minTradeSize) {
     // Short after abating: bid at what the shortfall is actually worth to us, which
@@ -122,9 +136,12 @@ export function auction(ctx: BotCtx): boolean {
   // emissions in full. Capacity bought at the cap stage would still leave THIS year's
   // residual untouched, so the decision is left to the trade stage where the price is
   // actually discovered.
+  const cfg = session.state.config.bots.compliance
   const planned = session.plannedEmission(bot.id)
   const held = session.creditsHeld(bot.id)
-  const residual = round1(planned - held)
+  // Same buffer as the trade stage: bidding the bare residual is what made these firms
+  // structurally incapable of ever holding a surplus.
+  const residual = round1(planned * cfg.coverTarget - held)
   if (residual <= 0) return false
   // An allowance is a tradeable asset worth ~the market price — bid at the reference,
   // not the private MAC, so the clearing price tracks the discovered price.

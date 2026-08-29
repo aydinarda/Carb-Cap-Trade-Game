@@ -1,5 +1,6 @@
 import type { CapMechanism } from './capMechanism'
 import { round1 } from './rng'
+import { cumulativeCapFactor } from './capReduction'
 
 /**
  * Auctioning: no free credits at all. The regulator puts a fixed supply — the cap —
@@ -20,8 +21,8 @@ export const auctioning: CapMechanism = {
     return allocation
   },
   poolFor(_players, targetYear, config, totalBaseline) {
-    const { auctionCapRatio, capReductionFactor } = config.allocation
-    const reduction = Math.pow(capReductionFactor, targetYear - config.emissions.firstGameYear)
+    const { auctionCapRatio } = config.allocation
+    const reduction = cumulativeCapFactor(config, targetYear)
     return round1(auctionCapRatio * totalBaseline * reduction)
   },
   primaryPrice(record) {

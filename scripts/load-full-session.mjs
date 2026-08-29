@@ -43,6 +43,7 @@
  *   BASE_URL=https://carb-cap-trade-api.onrender.com HOST_KEY=admin123 \
  *     N_PLAYERS=100 YEARS_PER_MODE=3 ROUND_WINDOW=25 node scripts/load-full-session.mjs
  */
+import { appendFileSync, writeFileSync } from 'node:fs'
 import { io } from 'socket.io-client'
 
 const BASE = (process.env.BASE_URL || 'https://carb-cap-trade-api.onrender.com').replace(/\/$/, '')
@@ -112,10 +113,25 @@ const MODES = (() => {
  *
  * Growing the target each round keeps a gap for the maker to bid into, so it stays a
  * participant instead of retiring after round one. `MM_INV_START` is the year-one share and
- * `MM_INV_STEP` the increase per year; 0 disables the escalation entirely.
+ * `MM_INV_STEP` the increase per year.
+ *
+ * STEP DEFAULTS TO 0, and must, because the engine no longer bids the gap. The maker now
+ * bids its FULL target at every auction (`bots.fixes.marketMakerIncrementalBid` ships off),
+ * so an escalating target is re-bought in full each round and inventory compounds — measured
+ * at a FIXED target it already ran 1900 to 6426 tonnes over eight rounds. Escalation on top
+ * of that is not a knob worth turning without a paired measurement.
  */
+/**
+ * Where to write every executed trade, one CSV row each.
+ *
+ * The console line per year is a vwap and a min/max, which cannot tell a price that climbed
+ * from one that jumped and stuck — and "is it pinning at the ceiling?" is answered by the
+ * distribution of prints, not by their average. Unset to skip.
+ */
+const TRADE_LOG = process.env.TRADE_LOG || ''
+
 const MM_INV_START = process.env.MM_INV_START ? Number(process.env.MM_INV_START) : 0.18
-const MM_INV_STEP = process.env.MM_INV_STEP ? Number(process.env.MM_INV_STEP) : 0.03
+const MM_INV_STEP = process.env.MM_INV_STEP ? Number(process.env.MM_INV_STEP) : 0
 
 const BOTS_OVERRIDE = process.env.BOTS ? process.env.BOTS.trim().toLowerCase() : null
 const withBotsFor = (mode) =>
@@ -136,12 +152,17 @@ const INDUSTRIES = [
  * PLAYERS trading alongside the bots. With bots carrying the book on their own — a lightly
  * attended room — six is not enough: measured on a bots-only auctioning game, year one
  * printed 0 trades at six bots and 15 at twenty-two.
+ *
+ * NOISE BOTS ARE GONE. They flipped side 25% of the time and jittered price +-25%, which is
+ * a lot of orders carrying no information about value — noise in the book, not liquidity in
+ * it. Speculators are down to one for the same reason: they only amplify moves, and three of
+ * them in a thin book amplify each other. What is left is twenty emitters that price off
+ * their own abatement cost, and four makers to two-side the book.
  */
 const BOT_PLAN = [
-  ['compliance', 9],
+  ['compliance', 20],
   ['marketMaker', 4],
-  ['noise', 6],
-  ['speculator', 3],
+  ['speculator', 1],
 ]
 
 // ── tiny helpers ─────────────────────────────────────────────────────────────
@@ -404,7 +425,10 @@ async function runSession(capMode, { withBots, joinGrace }) {
   const settings = {}
   if (PENALTY_RATE !== null) settings.penaltyRate = PENALTY_RATE
   if (AUCTION_CAP_RATIO !== null) settings.auctionCapRatio = AUCTION_CAP_RATIO
+  // NOTE this DISABLES the shipped `capReductionSchedule`: setting the scalar means a flat
+  // factor, by design, so a run that passes it is measuring a different tightening rule.
   if (CAP_REDUCTION !== null) settings.capReductionFactor = CAP_REDUCTION
+  if (FREE_CREDIT_RATIO !== null) settings.freeCreditRatio = FREE_CREDIT_RATIO
   if (BENCHMARK_STRINGENCY !== null) {
     settings.benchmark = Object.fromEntries(
       Object.entries(SECTOR_AVERAGE).map(([k, v]) => [k, Math.round(v * BENCHMARK_STRINGENCY * 10) / 10]),
@@ -415,11 +439,6 @@ async function runSession(capMode, { withBots, joinGrace }) {
     if (!r.ok) throw new Error(`updateSettings failed: ${r.error}`)
     console.log(`settings applied: ${JSON.stringify(settings)}`)
   }
-  if (FREE_CREDIT_RATIO !== null) {
-    console.log(`  ⚠ FREE_CREDIT_RATIO=${FREE_CREDIT_RATIO} ignored — host:updateSettings has no`)
-    console.log('    field for it; set allocation.freeCreditRatio in defaults.ts to test it.')
-  }
-
   await sleep(150)
   const penaltyRate = hostSnap?.config?.penaltyRate ?? 100
   // Read from the host snapshot rather than assumed: it is a calibration knob and has
@@ -432,6 +451,17 @@ async function runSession(capMode, { withBots, joinGrace }) {
       (MM_INV_STEP === 0 ? ' (flat)' : ` → ${round3(MM_INV_START + MM_INV_STEP * (YEARS_PER_MODE - 1))} by the last year`),
   )
   console.log(`price ceiling: ${ceilingCarry ? 'penalty + reference (carry)' : 'penalty'}`)
+  console.log(
+    `cap tightening: ${
+      CAP_REDUCTION !== null
+        ? `flat ${CAP_REDUCTION}/yr (schedule DISABLED by the override)`
+        : 'shipped decelerating schedule'
+    }`,
+  )
+  if (TRADE_LOG) {
+    writeFileSync(TRADE_LOG, 'mode,year,seq,price,qty,buyer,seller,ceiling,atCeilingPct\n')
+    console.log(`trade log → ${TRADE_LOG}`)
+  }
   console.log(`penalty rate in force: ${penaltyRate}` +
     `  ·  capReduction ${hostSnap?.config?.capReductionFactor ?? '?'}` +
     `  ·  auctionCapRatio ${hostSnap?.config?.auctionCapRatio ?? '?'}`)
@@ -526,6 +556,29 @@ async function runSession(capMode, { withBots, joinGrace }) {
     await Promise.allSettled(loops)
 
     await emit(host, 'host:closeTrade', {})
+
+    if (TRADE_LOG) {
+      // Read AFTER closeTrade but BEFORE advanceYear: the record is still the current one,
+      // so `market.trades` is this year's complete tape.
+      await sleep(300)
+      const trades = hostSnap?.market?.trades ?? []
+      const ceil = ceilingCarry ? penaltyRate + (hostSnap?.auctionPrice || penaltyRate * openingFraction) : penaltyRate
+      const atCeil = trades.length
+        ? (trades.filter((t) => t.price >= 0.98 * ceil).length / trades.length) * 100
+        : 0
+      const rows = trades
+        .map((t) => `${capMode},${year},${t.seq},${t.price},${t.qty},${t.buyerId},${t.sellerId},${round1(ceil)},${round1(atCeil)}`)
+        .join('\n')
+      if (rows) appendFileSync(TRADE_LOG, rows + '\n')
+      // `market.trades` is the TAPE, capped at the last 60 prints by `buildMarketView` —
+      // so this is a sample of the end of the window, not the whole year. The vwap and
+      // volume printed alongside are computed server-side over every trade, and are complete.
+      console.log(
+        `        last ${trades.length} prints logged (tape cap 60) · ceiling ${round1(ceil)} · ` +
+          `${round1(atCeil)}% within 2% of it`,
+      )
+    }
+
     const lb = players[0]?.snap?.leaderboard
     // Print the discovered price: this harness's price path is read as a result, so a
     // runaway must be visible in the log rather than only in a browser.

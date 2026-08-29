@@ -115,6 +115,26 @@ export function meanOfLast(trades: Trade[], n: number): number | null {
   return round1(tail.reduce((sum, t) => sum + t.price, 0) / tail.length)
 }
 
+/**
+ * Volume-weighted average of the LAST `n` prints — where the market ended, not where it
+ * averaged.
+ *
+ * The whole-year VWAP was the wrong anchor for the next year: a year that opened at 40,
+ * spiked to 190 and settled back to 90 hands the next year an average that matches none of
+ * those, and in a volatile year it is dominated by whichever phase happened to carry the
+ * volume. The tail is what the class actually last agreed a tonne was worth.
+ *
+ * Volume-weighted rather than a plain mean (`meanOfLast`) because one 200-tonne block and
+ * one 2-tonne odd lot are not equal evidence about the price.
+ */
+export function vwapOfLast(trades: Trade[], n: number): number | null {
+  if (trades.length === 0) return null
+  const tail = trades.slice(-Math.max(1, n))
+  const volume = tail.reduce((s, t) => s + t.qty, 0)
+  if (volume <= 0) return null
+  return Math.round((tail.reduce((s, t) => s + t.qty * t.price, 0) / volume) * 100) / 100
+}
+
 /** Cash a player spent buying and earned selling via executed trades. */
 export function tradedCash(trades: Trade[], playerId: string): { buyCash: number; sellCash: number } {
   let buyCash = 0

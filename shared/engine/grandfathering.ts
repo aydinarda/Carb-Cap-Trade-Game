@@ -3,6 +3,7 @@ import type { Player } from '../types'
 import type { CapMechanism } from './capMechanism'
 import { round1 } from './rng'
 import { isPureTrader } from './roles'
+import { cumulativeCapFactor } from './capReduction'
 
 /** Sum of a player's emissions over the moving window [targetYear − window, targetYear − 1]. */
 export function windowSum(player: Player, targetYear: number, historyWindow: number): number {
@@ -58,10 +59,10 @@ export const grandfathering: CapMechanism = {
       ]),
     )
     const total = [...sums.values()].reduce((a, b) => a + b, 0)
-    const { applyLRFToGrandfathering, capReductionFactor } = config.allocation
+    const { applyLRFToGrandfathering } = config.allocation
     const limit = applyLRFToGrandfathering
       ? freeCreditLimit *
-        Math.pow(capReductionFactor, targetYear - config.emissions.firstGameYear)
+        cumulativeCapFactor(config, targetYear)
       : freeCreditLimit
     const allocation: Record<string, number> = {}
     for (const player of players) {

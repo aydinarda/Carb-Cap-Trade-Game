@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_GAME_CONFIG, type DeepPartial, type GameConfig } from '../../shared/config'
+import { DEFAULT_GAME_CONFIG, resolveConfig, type DeepPartial, type GameConfig } from '../../shared/config'
 
 const FIRST_GAME_YEAR = DEFAULT_GAME_CONFIG.emissions.firstGameYear
-import { clearAuction, round1 } from '../../shared/engine'
+import { clearAuction, cumulativeCapFactor, round1 } from '../../shared/engine'
 import { GameError, Session, SessionStore } from '../session'
 
 // Session is fully drivable without sockets; a numeric seed makes emission
@@ -675,6 +675,42 @@ describe('trader-bot seed inventory', () => {
     const rec = s.currentYearRecord()!
     expect(rec.regulatorGranted[mm.id]).toBeUndefined()
     expect(rec.primaryPrice).toBe(0) // no auction price until the cap stage closes
+  })
+})
+
+describe('the cap reduction schedule', () => {
+  // The shipped schedule decelerates: 0.95 for the first nine rounds, then 0.965, 0.98, 0.99
+  // and finally flat from round 20. A single factor cannot both build scarcity early and stop
+  // building it later, which is what every long game kept running into.
+  it('applies each round\'s factor cumulatively, not one factor exponentially', () => {
+    const c = resolveConfig()
+    const first = c.emissions.firstGameYear
+    // Round 1 is the baseline the schedule shrinks FROM, so no reduction applies to it.
+    expect(cumulativeCapFactor(c, first)).toBe(1)
+    expect(cumulativeCapFactor(c, first + 1)).toBeCloseTo(0.95, 9)
+    expect(cumulativeCapFactor(c, first + 2)).toBeCloseTo(0.95 ** 2, 9)
+    // Rounds 1-9 at 0.95, then round 10 onward at 0.965.
+    expect(cumulativeCapFactor(c, first + 10)).toBeCloseTo(0.95 ** 9 * 0.965, 9)
+  })
+
+  it('stops shrinking once the schedule reaches 1', () => {
+    const c = resolveConfig()
+    const first = c.emissions.firstGameYear
+    const atTwenty = cumulativeCapFactor(c, first + 20)
+    expect(cumulativeCapFactor(c, first + 25)).toBeCloseTo(atTwenty, 9)
+  })
+
+  it('setting the scalar factor means a FLAT factor, clearing the schedule', () => {
+    // Otherwise an override is silently ignored: the schedule wins wherever both exist.
+    const c = resolveConfig({ allocation: { capReductionFactor: 0.9 } })
+    expect(c.allocation.capReductionSchedule).toEqual([])
+    expect(cumulativeCapFactor(c, c.emissions.firstGameYear + 3)).toBeCloseTo(0.9 ** 3, 9)
+  })
+
+  it('the host panel clears it too, so a typed factor actually takes effect', () => {
+    const s = grandfathering()
+    s.updateSettings({ capReductionFactor: 0.8 })
+    expect(s.state.config.allocation.capReductionSchedule).toEqual([])
   })
 })
 

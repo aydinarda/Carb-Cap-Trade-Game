@@ -3,6 +3,7 @@ import type { Player } from '../types'
 import type { CapMechanism } from './capMechanism'
 import { round1 } from './rng'
 import { isPureTrader } from './roles'
+import { cumulativeCapFactor } from './capReduction'
 
 /**
  * Benchmarking: every installation in a sector gets the same free allocation — the
@@ -20,8 +21,7 @@ import { isPureTrader } from './roles'
 export function benchmarkFor(player: Player, targetYear: number, config: GameConfig): number {
   // Pure-trader bots have no activity level to benchmark against — see roles.ts.
   if (isPureTrader(player)) return 0
-  const { capReductionFactor } = config.allocation
-  const reduction = Math.pow(capReductionFactor, targetYear - config.emissions.firstGameYear)
+  const reduction = cumulativeCapFactor(config, targetYear)
   return round1((config.allocation.benchmark[player.industry] ?? 0) * reduction)
 }
 

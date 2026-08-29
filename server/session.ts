@@ -3,6 +3,7 @@ import { resolveConfig, type DeepPartial, type GameConfig } from '../shared/conf
 import { INDUSTRY_NAMES, RESERVE_ID, type Industry } from '../shared/constants'
 import {
   buildMarketView,
+  vwapOfLast,
   cancelOrder,
   CAP_MECHANISMS,
   clearAuction,
@@ -17,6 +18,7 @@ import {
   meanOfLast,
   openSellRemaining,
   optimalYearCost,
+  plannedRecurring,
   plannedRelease,
   reserveBase,
   reservePot,
@@ -159,12 +161,17 @@ export class Session {
    * and shown to players as the previous round's price signal.
    */
   previousMarketPrice(): number | null {
+    const n = this.state.config.market.referenceTrades
     const completed = Object.values(this.state.years)
       .filter((y) => y.year !== this.state.currentYear && Object.keys(y.realized).length > 0)
       .sort((a, b) => b.year - a.year)
     for (const y of completed) {
+      // The CLOSING price, not the yearly average: the volume-weighted mean of the last few
+      // prints. A year that swung widely used to hand the next one a number that matched
+      // neither where it traded most recently nor where anyone expected it to open.
+      const closing = vwapOfLast(y.trades, n)
+      if (closing !== null) return closing
       const mv = buildMarketView(y.orders, y.trades)
-      if (mv.vwap !== null) return mv.vwap
       if (mv.lastPrice !== null) return mv.lastPrice
       if (y.auctionPrice) return y.auctionPrice
     }
@@ -384,6 +391,11 @@ export class Session {
         throw new GameError('BAD_SETTING', 'capReductionFactor must be in (0, 1].')
       }
       this.state.config.allocation.capReductionFactor = Math.round(v * 1000) / 1000
+      // Typing a factor MEANS a flat factor. The shipped config carries a decelerating
+      // `capReductionSchedule`, and a schedule wins wherever both exist — so without this an
+      // instructor could set this field on the host panel, see it accepted, and watch the cap
+      // keep following the schedule instead. Same silent-drop as the unknown-key case above.
+      this.state.config.allocation.capReductionSchedule = []
     }
     if (settings.benchmark) {
       for (const [industry, value] of Object.entries(settings.benchmark)) {
@@ -533,6 +545,7 @@ export class Session {
       reserveReleased: 0,
       reserveCommitted: 0,
       reserveRevenue: 0,
+      reserveRecurringDone: false,
     }
     record.primaryPrice = mechanism.primaryPrice(record, this.state.config, this.openingReference())
     this.seedTraderBots(record, mechanism.usesAuction)
@@ -858,6 +871,16 @@ export class Session {
     for (const rung of plannedRelease(cfg, base, price, record.reserveCommitted)) {
       record.reserveCommitted = round1(record.reserveCommitted + rung.qty)
       this.submitOrder(RESERVE_ID, 'sell', rung.qty, rung.price)
+    }
+    // The repeating top-up, once per round. Flagged rather than folded into
+    // `reserveCommitted`: that total is the ladder's own accumulator, and adding the top-up
+    // to it would make the ladder believe it had already released more than it has.
+    if (!record.reserveRecurringDone) {
+      const extra = plannedRecurring(cfg, base, price)
+      if (extra.length) {
+        record.reserveRecurringDone = true
+        for (const offer of extra) this.submitOrder(RESERVE_ID, 'sell', offer.qty, offer.price)
+      }
     }
   }
 

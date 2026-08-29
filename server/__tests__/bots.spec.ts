@@ -12,21 +12,35 @@ import * as noise from '../bots/noise'
 import * as speculator from '../bots/speculator'
 import { botAvgCost, disperse, priceCeiling, referencePrice, sellCapacity } from '../bots/helpers'
 import { Session } from '../session'
-import type { BotCtx } from '../bots/types'
+import type { BotCtx, BotRuntime } from '../bots/types'
 
 const ARCHETYPES = { compliance, marketMaker, speculator, noise }
 
-function ctxFor(s: Session, botId: string, seed = 42): BotCtx {
+/**
+ * `rt` is a parameter so a caller can keep ONE runtime across ticks, the way `BotManager`
+ * does. A fresh `{}` per call — the previous behaviour — silently disabled everything the
+ * runtime carries: the resting-quote ids, the once-a-year install lock, and the market
+ * maker's opening quiet period, which counts ticks and so never advanced past its first.
+ */
+function ctxFor(s: Session, botId: string, seed = 42, rt: BotRuntime = {}): BotCtx {
   const rec = s.currentYearRecord()
   return {
     session: s,
     bot: s.getPlayer(botId)!,
     rng: createRng(seed),
-    rt: {},
+    rt,
     // stepBots builds this once per tick and shares it; rebuild it here so each call
     // sees the book as it stands right now.
     market: buildMarketView(rec?.orders ?? [], rec?.trades ?? []),
   }
+}
+
+/** Ticks the maker past its quiet opening on one persistent runtime, then returns it. */
+function warmMaker(s: Session, mmId: string, seed = 42): BotRuntime {
+  const rt: BotRuntime = {}
+  const quiet = s.state.config.bots.marketMaker.quietTicks
+  for (let i = 0; i < quiet; i++) marketMaker.trade(ctxFor(s, mmId, seed, rt))
+  return rt
 }
 
 describe('bot helpers', () => {
@@ -121,7 +135,7 @@ describe('grandfathering bots', () => {
 
     s.closeCapStage()
     s.openTrade()
-    marketMaker.trade(ctxFor(s, mm.id))
+    marketMaker.trade(ctxFor(s, mm.id, 42, warmMaker(s, mm.id)))
     const own = rec.orders.filter((o) => o.playerId === mm.id && o.status === 'open')
     expect(own.some((o) => o.side === 'buy')).toBe(true)
     expect(own.some((o) => o.side === 'sell')).toBe(true)
@@ -347,6 +361,50 @@ describe('market makers do not trade with each other', () => {
   })
 })
 
+describe('the market maker sits out the opening of each year', () => {
+  function opened() {
+    const s = new Session('benchmarking', 1)
+    const mm = s.addBot('marketMaker')
+    s.addPlayer('A', 'Power & Utilities')
+    s.addPlayer('B', 'Heavy Materials')
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    return { s, mm }
+  }
+
+  it('places nothing for the first quietTicks, then quotes', () => {
+    const { s, mm } = opened()
+    const rt: BotRuntime = {}
+    const quiet = s.state.config.bots.marketMaker.quietTicks
+    const mine = () => s.currentYearRecord()!.orders.filter((o) => o.playerId === mm.id)
+
+    for (let i = 0; i < quiet; i++) {
+      marketMaker.trade(ctxFor(s, mm.id, 42, rt))
+      expect(mine(), `tick ${i + 1} of the quiet period`).toHaveLength(0)
+    }
+    marketMaker.trade(ctxFor(s, mm.id, 42, rt))
+    expect(mine().length).toBeGreaterThan(0)
+  })
+
+  it('goes quiet again when the next year opens', () => {
+    const { s, mm } = opened()
+    const rt: BotRuntime = {}
+    const quiet = s.state.config.bots.marketMaker.quietTicks
+    for (let i = 0; i <= quiet; i++) marketMaker.trade(ctxFor(s, mm.id, 42, rt))
+    expect(s.currentYearRecord()!.orders.filter((o) => o.playerId === mm.id).length)
+      .toBeGreaterThan(0)
+
+    s.closeTrade()
+    s.advanceYear()
+    s.closeCapStage()
+    s.openTrade()
+    // A fresh year means a fresh silence — the counter is keyed on the year, not the bot.
+    marketMaker.trade(ctxFor(s, mm.id, 42, rt))
+    expect(s.currentYearRecord()!.orders.filter((o) => o.playerId === mm.id)).toHaveLength(0)
+  })
+})
+
 describe('market maker quotes stay inside the band around the recent price', () => {
   it('buys at or below the recent price and sells at or above it', () => {
     const s = new Session('benchmarking', 1)
@@ -366,7 +424,7 @@ describe('market maker quotes stay inside the band around the recent price', () 
     const ref = rec.trades.slice(-5).reduce((t, x) => t + x.price, 0) / 5
     const band = s.state.config.bots.marketMaker.bandFrac
 
-    marketMaker.trade(ctxFor(s, mm.id))
+    marketMaker.trade(ctxFor(s, mm.id, 42, warmMaker(s, mm.id)))
     const own = rec.orders.filter((o) => o.playerId === mm.id && o.status === 'open')
     const bid = own.find((o) => o.side === 'buy')!
     const ask = own.find((o) => o.side === 'sell')
@@ -411,7 +469,7 @@ describe('bot archetypes under benchmarking (no primary auction)', () => {
     s.closeCapStage()
     s.openTrade()
 
-    marketMaker.trade(ctxFor(s, mm.id))
+    marketMaker.trade(ctxFor(s, mm.id, 42, warmMaker(s, mm.id)))
     const rec = s.currentYearRecord()!
     const own = rec.orders.filter((o) => o.playerId === mm.id && o.status === 'open')
     // The bug this guards: with target inventory keyed off the (zero) auction pool the
@@ -440,7 +498,8 @@ describe('bot archetypes under benchmarking (no primary auction)', () => {
     s.placeOrder('P2', 'sell', 5, P)
     s.placeOrder('P3', 'buy', 5, P)
 
-    for (let i = 0; i < 4; i++) marketMaker.trade(ctxFor(s, mm.id))
+    const mmRt = warmMaker(s, mm.id)
+    for (let i = 0; i < 4; i++) marketMaker.trade(ctxFor(s, mm.id, 42, mmRt))
     const rec = s.currentYearRecord()!
     for (const o of rec.orders.filter((x) => x.playerId === mm.id)) {
       expect(o.price).toBeLessThanOrEqual(ceiling)

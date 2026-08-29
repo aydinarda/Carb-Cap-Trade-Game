@@ -46,6 +46,28 @@ export function reservePot(cfg: ReserveConfig, base: number): number {
  * because `committed` counts offered as well as sold — counting only fills would re-post an
  * unfilled rung on every single order.
  */
+/**
+ * This round's repeating top-up, or nothing.
+ *
+ * Separate from `plannedRelease` because it is a different rule: the ladder is a one-way
+ * ratchet measured against everything released so far, while this is a fixed slice offered
+ * afresh each round for as long as the price stays high. Mixing them into one `committed`
+ * running total would let the ladder's ceiling swallow the top-up, or the top-up exhaust the
+ * ladder — the two must not share an accumulator.
+ */
+export function plannedRecurring(
+  cfg: ReserveConfig,
+  base: number,
+  marketPrice: number,
+): { price: number; qty: number }[] {
+  if (!cfg.enabled || base <= 0) return []
+  const rec = cfg.recurring
+  if (!rec?.offers?.length || marketPrice < rec.fromPrice) return []
+  return rec.offers
+    .map((o) => ({ price: o.price, qty: round1(base * o.fraction) }))
+    .filter((o) => o.qty > 0)
+}
+
 export function plannedRelease(
   cfg: ReserveConfig,
   base: number,

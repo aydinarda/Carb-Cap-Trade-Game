@@ -43,6 +43,19 @@ export function trade(ctx: BotCtx): boolean {
   const cfg = session.state.config.bots.marketMaker
   const minPrice = session.state.config.bots.minPrice
 
+  // Sit out the opening of the year: no quotes, no lifts, nothing.
+  //
+  // The maker prices off `recentPrice`, which before any print this year is last year's
+  // reference — so quoting from tick one carries the old price into the new year and every
+  // other bot then prices off the maker. The class opens the year; the maker joins once
+  // there is a market to make.
+  if (ctx.rt.tradeTicksYear !== record.year) {
+    ctx.rt.tradeTicksYear = record.year
+    ctx.rt.tradeTicks = 0
+  }
+  ctx.rt.tradeTicks = (ctx.rt.tradeTicks ?? 0) + 1
+  if (ctx.rt.tradeTicks <= cfg.quietTicks) return false
+
   // The maker prices against liquidity it can actually take: not its own resting quotes
   // (it would chase itself), and not any other market maker's (the engine refuses
   // maker-to-maker fills — see Session.blockedPair). Without the second exclusion it would
@@ -113,30 +126,34 @@ export function auction(ctx: BotCtx): boolean {
   if (!record) return false
   const P = priceCeiling(session)
   const cfg = session.state.config.bots.marketMaker
+  const minPrice = session.state.config.bots.minPrice
   const fixes = session.state.config.bots.fixes
   // Same helper the quote uses. Without `marketMakerShareByCount` every maker sizes off the
   // WHOLE pool, so N makers chase N × invFrac of it — four of them bid 72% of the cap.
   let target = makerTarget(session, cfg.invFrac)
-  // The target is a LEVEL, but it was bid every year as an incremental purchase — nothing
-  // subtracted what the maker already held, so its inventory compounded without bound and
-  // it ended up sitting on credits nobody could buy. Gated: bots.fixes.marketMakerIncrementalBid.
+  // `marketMakerIncrementalBid` subtracts what the maker already holds, which is what made
+  // it stop bidding once its target was met. Kept as a flag so the two behaviours can still
+  // be compared on identical seeds, but it is OFF by default now: a maker that withdraws from
+  // the auction has no book to sell from for the rest of the game.
   if (fixes.marketMakerIncrementalBid) {
     target = Math.max(0, target - session.creditsHeld(bot.id))
   }
   if (target <= 0) return false
-  // Same rule as the resting quotes: a maker buys at or below the recent price, never above
-  // it. An earlier version bid `reference × 1.3` — 30% over the market — which is how four
-  // makers took 72% of the pool before any emitter got a look at it. The knob that drove it
-  // (`bots.marketMaker.auctionAggr`) was deleted rather than left at a value nothing reads:
-  // a config field the engine ignores is one somebody eventually sweeps for a day.
+  // Bids its FULL target at a premium over the reference, rather than the gap at or under it.
   //
-  // What DOES move this bid: `bandFrac` (how far under the reference it may sit) and
-  // `invFrac` (the target, and so the quantity).
+  // The previous rule did the opposite on both counts and the maker stopped participating:
+  // it bid only `target − held`, which is zero once the target is met, and never above the
+  // reference, which loses to any emitter covering itself. Measured, it took 18% of the pool
+  // in year one and 0-2% in every year after, while the offer side of the book thinned out.
+  //
+  // The cost of this is real and is the reason the incremental rule existed: bidding the full
+  // target every year lets inventory compound. `marketMakerShareByCount` divides the target
+  // between the makers, which is what keeps that bounded.
   const ref = recentPrice(session, record, cfg.recentTrades)
   const price = clamp(
-    disperse(ref, ctx.rt.bias ?? 0, P),
-    ref * (1 - cfg.bandFrac),
-    ref,
+    disperse(ref * (1 + cfg.auctionPremium), ctx.rt.bias ?? 0, P),
+    minPrice,
+    P,
   )
   return trySubmitBid(session, bot.id, target, round1(price))
 }

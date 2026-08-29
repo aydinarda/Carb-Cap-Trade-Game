@@ -54,6 +54,16 @@ export interface MarketConfig {
   openingReferenceFraction: number
   /** End-of-game carry monetization fallback, as a fraction of `penaltyRate`. */
   finalPriceFallbackFraction: number
+  /**
+   * How many of the PREVIOUS year's closing prints the next year's reference price averages
+   * over, volume-weighted.
+   *
+   * The reference seeds every bot's anchor and the auction's opening bid, so it decides where
+   * a year starts. It used to be the whole previous year's VWAP, which in a volatile year is
+   * an average of prices nobody was still paying by the close — a year that ran 40 → 190 → 90
+   * handed the next one a number matching none of those phases.
+   */
+  referenceTrades: number
 }
 
 export interface EmissionsConfig {
@@ -112,8 +122,26 @@ export interface ReserveConfig {
   /**
    * The ladder, strictly increasing in both fields. The pot is the LAST rung's fraction —
    * there is deliberately no separate size knob, which could contradict the ladder.
+   *
+   * Strictly increasing is a requirement, not a style note: a rung whose cumulative fraction
+   * is at or below the one before it releases `ceiling − covered ≤ 0` and is silently inert.
    */
   steps: ReserveStep[]
+  /**
+   * A top-up that repeats EVERY round, once the price has climbed past `fromPrice`.
+   *
+   * The ladder above ratchets one way and then it is spent: a market that keeps climbing
+   * gets nothing more from it, which is exactly when the relief is wanted. Measured on the
+   * shipped ladder, the reserve supplied 0% of issuance for the first five to seven rounds
+   * and never more than 5% after — it was, in practice, not a mechanism.
+   *
+   * This offers `fraction × base` at each listed price, once per round, for as long as the
+   * price stays above `fromPrice`. Set `offers` empty to disable.
+   */
+  recurring: {
+    fromPrice: number
+    offers: { price: number; fraction: number }[]
+  }
 }
 
 export interface AllocationConfig {
@@ -129,6 +157,22 @@ export interface AllocationConfig {
   auctionCapRatio: number
   /** Supply/benchmark shrinks by this factor each year (EU-ETS LRF); 1 = flat. */
   capReductionFactor: number
+  /**
+   * A DECELERATING tightening schedule: the factor in force from a given round onward.
+   *
+   * A single factor compounds, and compounding is what broke every long game. 0.84 left
+   * supply under a tenth of its opening level by round fourteen; 0.90 still ran the price
+   * past €200; 0.95 stopped the explosion but only by tightening so slowly that rounds two
+   * to four collapsed to €13 before scarcity caught up. There is no constant that both
+   * builds scarcity early and stops building it later, because a constant cannot do two
+   * things.
+   *
+   * A schedule can: tighten hard while the class is long, then ease off as the cap starts to
+   * bite, and go flat once the market should plateau. Entries are `{ fromRound, factor }`
+   * with `fromRound` 1-based from the first game year; the factor applies from that round
+   * until the next entry. Empty = use `capReductionFactor` for every round.
+   */
+  capReductionSchedule: { fromRound: number; factor: number }[]
   /**
    * Whether the LRF also tightens grandfathering. Defaults to `false`, preserving the
    * shipped asymmetry where only benchmarking and auctioning tighten; simulations turn it
@@ -199,6 +243,23 @@ export interface MarketMakerConfig {
   bandFrac: number
   /** How many recent trades the reference price averages over. */
   recentTrades: number
+  /**
+   * Trade-stage ticks the maker sits out at the start of each year, quoting nothing and
+   * taking nothing.
+   *
+   * It exists so the class sets the opening price. A maker that quotes from tick one anchors
+   * the year on last year's reference before any emitter has expressed what it needs, and
+   * every other bot then prices off that anchor.
+   */
+  quietTicks: number
+  /**
+   * Premium over the reference the maker bids at the auction, as a fraction.
+   *
+   * The maker is buying a book to sell from, so it has to outbid the emitters that only want
+   * to cover themselves — bidding at or under the reference (the previous rule) left it
+   * winning 18% of the pool once and nothing afterwards.
+   */
+  auctionPremium: number
 }
 
 export interface BotsConfig {
@@ -255,6 +316,22 @@ export interface BotsConfig {
     minTradeSize: number
     /** How far inside its reservation/fair value it rests an order. */
     priceStep: number
+    /**
+     * How much cover the firm buys, as a multiple of what it must surrender. 1.1 = a 10%
+     * buffer.
+     *
+     * Above 1 for a structural reason, not for realism. Under auctioning a compliance firm
+     * starts every year holding nothing and bids for EXACTLY its residual, so the best
+     * position it can reach is square — it is arithmetically incapable of holding a surplus,
+     * and therefore of ever selling. Measured over six years: 1477 tonnes of buy orders,
+     * ZERO sell orders, zero firms ever long. That leaves the entire offer side to the market
+     * makers, and the book goes one-sided.
+     *
+     * The buffer makes an emitter a potential seller. It becomes sellable exactly when the
+     * firm's need falls — it installed capacity, or its emissions drifted down — which under
+     * a tightening cap is when the market most needs an offer.
+     */
+    coverTarget: number
   }
   /**
    * Corrections to bot behaviour, each off by default so the shipped game is unchanged and

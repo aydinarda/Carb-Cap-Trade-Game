@@ -155,6 +155,14 @@ export interface YearRecord {
   reserveCommitted: number
   /** Cash the reserve collected. Belongs to nobody — never enters a player's ledger. */
   reserveRevenue: number
+  /**
+   * Whether this round's repeating top-up has already been offered.
+   *
+   * The ladder is idempotent through `reserveCommitted`, but the recurring offer must fire
+   * exactly ONCE per round no matter how many times the price is re-checked — the release is
+   * evaluated on every order placed.
+   */
+  reserveRecurringDone: boolean
 }
 
 /**

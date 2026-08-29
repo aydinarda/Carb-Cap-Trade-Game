@@ -55,7 +55,10 @@ export {
   tradedCash,
   openSellRemaining,
   meanOfLast,
+  vwapOfLast,
   buildMarketView,
 } from './orderBook'
 export { settleYear } from './settlement'
-export { plannedRelease, reserveBase, reservePot } from './reserve'
+export { plannedRecurring, plannedRelease, reserveBase, reservePot } from './reserve'
+
+export { cumulativeCapFactor } from './capReduction'

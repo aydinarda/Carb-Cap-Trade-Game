@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_GAME_CONFIG } from '../../config'
 import type { ReserveConfig } from '../../config/schema'
-import { plannedRelease, reserveBase, reservePot } from '../reserve'
+import { plannedRecurring, plannedRelease, reserveBase, reservePot } from '../reserve'
 
 /** The shipped ladder, forced on. Thresholds are read from it, never assumed. */
 const CFG: ReserveConfig = {
@@ -95,5 +95,47 @@ describe('plannedRelease', () => {
     expect(plannedRelease(CFG, BASE, RUNG[0], part)).toEqual([
       { price: RUNG[0], qty: round1(qtyOf(0) - part) },
     ])
+  })
+})
+
+describe('the repeating top-up', () => {
+  const cfg = (over: Partial<ReserveConfig> = {}): ReserveConfig => ({
+    enabled: true,
+    basis: 'shortfall',
+    triggerTrades: 5,
+    steps: [
+      { triggerPrice: 65, cumulativeFraction: 0.1 },
+      { triggerPrice: 70, cumulativeFraction: 0.2 },
+    ],
+    recurring: { fromPrice: 78, offers: [{ price: 78, fraction: 0.05 }, { price: 85, fraction: 0.05 }] },
+    ...over,
+  })
+
+  it('offers nothing below its trigger', () => {
+    expect(plannedRecurring(cfg(), 1000, 77.9)).toEqual([])
+  })
+
+  it('offers every listed slice once the price is past it', () => {
+    expect(plannedRecurring(cfg(), 1000, 78)).toEqual([
+      { price: 78, qty: 50 },
+      { price: 85, qty: 50 },
+    ])
+  })
+
+  it('does NOT share the ladder accumulator — a spent ladder still tops up', () => {
+    // The ladder is one-way and finite; the top-up is the relief that keeps arriving. If the
+    // two shared a running total the exhausted ladder would swallow it.
+    const spent = plannedRelease(cfg(), 1000, 90, 200) // ladder fully released
+    expect(spent).toEqual([])
+    expect(plannedRecurring(cfg(), 1000, 90)).toHaveLength(2)
+  })
+
+  it('is inert when disabled or given no offers', () => {
+    expect(plannedRecurring(cfg({ enabled: false }), 1000, 90)).toEqual([])
+    expect(plannedRecurring(cfg({ recurring: { fromPrice: 78, offers: [] } }), 1000, 90)).toEqual([])
+  })
+
+  it('is inert when there is no pot to draw on', () => {
+    expect(plannedRecurring(cfg(), 0, 90)).toEqual([])
   })
 })
