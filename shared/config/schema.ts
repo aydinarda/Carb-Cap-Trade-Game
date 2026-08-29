@@ -188,8 +188,6 @@ export interface MarketMakerConfig {
   skewCapFrac: number
   /** Target inventory = this × the credits in circulation. */
   invFrac: number
-  /** Auction bid = this × reference price, capped at the penalty. */
-  auctionAggr: number
   /** Resting quote size each side. */
   quoteSize: number
   /**

@@ -174,6 +174,8 @@ export interface HostConfigView {
   freeCreditRatio: number
   /** Whether the yearly reduction factor tightens grandfathering too. */
   applyLRFToGrandfathering: boolean
+  /** Market-maker target inventory, as a share of everything in circulation. */
+  marketMakerInvFrac: number
   /** Auctioning supply = auctionCapRatio × Σbaseline (host-tunable, ≤ 1 = scarcer). */
   auctionCapRatio: number
   /** Auction supply and benchmark shrink by this factor each year (EU-ETS LRF); 1 = flat. */

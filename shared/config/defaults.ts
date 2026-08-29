@@ -151,7 +151,6 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       skew: 0.04,
       skewCapFrac: 0.4,
       invFrac: 0.18,
-      auctionAggr: 1.3,
       quoteSize: 15,
       bandFrac: 0.05,
       recentTrades: 5,

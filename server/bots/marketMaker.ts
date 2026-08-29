@@ -108,8 +108,13 @@ export function auction(ctx: BotCtx): boolean {
   }
   if (target <= 0) return false
   // Same rule as the resting quotes: a maker buys at or below the recent price, never above
-  // it. The old `reference × auctionAggr (1.3)` bid 30% over the market, which is how four
-  // makers took 72% of the pool before any emitter got a look at it.
+  // it. An earlier version bid `reference × 1.3` — 30% over the market — which is how four
+  // makers took 72% of the pool before any emitter got a look at it. The knob that drove it
+  // (`bots.marketMaker.auctionAggr`) was deleted rather than left at a value nothing reads:
+  // a config field the engine ignores is one somebody eventually sweeps for a day.
+  //
+  // What DOES move this bid: `bandFrac` (how far under the reference it may sit) and
+  // `invFrac` (the target, and so the quantity).
   const ref = recentPrice(session, record, cfg.recentTrades)
   const price = clamp(
     disperse(ref, ctx.rt.bias ?? 0, P),

@@ -65,8 +65,20 @@ on:
         default: ''
         required: false
       benchmark_stringency:
-        description: 'benchmark as a fraction of sector average (0.6 ships)'
+        description: 'benchmark as a fraction of sector average (1.119 ships)'
         default: ''
+        required: false
+      # Market-maker target inventory, escalating per round. A maker bids the GAP between its
+      # target and its holdings, so a flat target is filled in round one and bid at zero ever
+      # after — measured, it takes 18% of the pool in year one and 0-2% afterwards. Growing
+      # the target keeps a gap for it to bid into. Step 0 = flat, i.e. today's behaviour.
+      mm_inv_start:
+        description: 'Market maker target inventory, year 1 (share of credits in circulation)'
+        default: '0.18'
+        required: false
+      mm_inv_step:
+        description: 'Market maker target increase per round (0 = flat)'
+        default: '0.03'
         required: false
 
 jobs:
@@ -105,4 +117,6 @@ jobs:
           AUCTION_CAP_RATIO: ${{ inputs.auction_cap_ratio }}
           CAP_REDUCTION_FACTOR: ${{ inputs.cap_reduction_factor }}
           BENCHMARK_STRINGENCY: ${{ inputs.benchmark_stringency }}
+          MM_INV_START: ${{ inputs.mm_inv_start }}
+          MM_INV_STEP: ${{ inputs.mm_inv_step }}
         run: node scripts/load-full-session.mjs

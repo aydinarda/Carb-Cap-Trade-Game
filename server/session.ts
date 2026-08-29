@@ -283,6 +283,7 @@ export class Session {
     reserveEnabled?: boolean
     abatementLifetimeCap?: number
     abatementFixedCost?: number
+    marketMakerInvFrac?: number
   }) {
     this.requirePhase('lobby', 'yearSummary')
     if (settings.abatementLifetimeCap !== undefined) {
@@ -335,6 +336,16 @@ export class Session {
     }
     if (settings.applyLRFToGrandfathering !== undefined) {
       this.state.config.allocation.applyLRFToGrandfathering = !!settings.applyLRFToGrandfathering
+    }
+    if (settings.marketMakerInvFrac !== undefined) {
+      const v = settings.marketMakerInvFrac
+      // Bounded well under 1: the target is a share of everything in circulation, and a
+      // maker chasing most of the pool is the hoarding failure the incremental-bid fix
+      // exists to prevent, not a liquidity setting.
+      if (!Number.isFinite(v) || v < 0 || v > 0.9) {
+        throw new GameError('BAD_SETTING', 'marketMakerInvFrac must be between 0 and 0.9.')
+      }
+      this.state.config.bots.marketMaker.invFrac = Math.round(v * 1000) / 1000
     }
     if (settings.reserveEnabled !== undefined) {
       // The pot is sized at year open regardless, so this is a pure on/off — a teacher can

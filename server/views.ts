@@ -46,6 +46,7 @@ function hostConfigView(config: GameConfig): HostConfigView {
     openingReferenceFraction: config.market.openingReferenceFraction,
     freeCreditRatio: config.allocation.freeCreditRatio,
     applyLRFToGrandfathering: config.allocation.applyLRFToGrandfathering,
+    marketMakerInvFrac: config.bots.marketMaker.invFrac,
     auctionCapRatio: config.allocation.auctionCapRatio,
     capReductionFactor: config.allocation.capReductionFactor,
     benchmark: { ...config.allocation.benchmark },

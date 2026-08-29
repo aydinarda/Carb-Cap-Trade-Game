@@ -102,6 +102,21 @@ const MODES = (() => {
  * Bots per mode. Grandfathering ships without them because that is how the broadcast-load
  * failure was originally reproduced; override with BOTS=on/off to make the three comparable.
  */
+/**
+ * Market-maker target inventory, ESCALATING year by year.
+ *
+ * A maker's auction bid is the gap between its target and what it already holds, so a fixed
+ * target is filled once and then bid at zero forever: measured over six years it took 18% of
+ * the pool in year one and 0-2% in every year after, leaving the compliance bots to take
+ * 63% -> 98% of it and the sell side of the book to thin out.
+ *
+ * Growing the target each round keeps a gap for the maker to bid into, so it stays a
+ * participant instead of retiring after round one. `MM_INV_START` is the year-one share and
+ * `MM_INV_STEP` the increase per year; 0 disables the escalation entirely.
+ */
+const MM_INV_START = process.env.MM_INV_START ? Number(process.env.MM_INV_START) : 0.18
+const MM_INV_STEP = process.env.MM_INV_STEP ? Number(process.env.MM_INV_STEP) : 0.03
+
 const BOTS_OVERRIDE = process.env.BOTS ? process.env.BOTS.trim().toLowerCase() : null
 const withBotsFor = (mode) =>
   BOTS_OVERRIDE ? BOTS_OVERRIDE === 'on' || BOTS_OVERRIDE === 'true' : mode !== 'grandfathering'
@@ -133,6 +148,7 @@ const BOT_PLAN = [
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const rand = (a, b) => a + Math.random() * (b - a)
 const round1 = (n) => Math.round(n * 10) / 10
+const round3 = (n) => Math.round(n * 1000) / 1000
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x))
 const connect = (auth) =>
   new Promise((resolve, reject) => {
@@ -401,6 +417,10 @@ async function runSession(capMode, { withBots, joinGrace }) {
   // already moved from 0.5 to 0.25.
   const openingFraction = hostSnap?.config?.openingReferenceFraction ?? 0.25
   console.log(`opening anchor: ${openingFraction} → year-1 reference ${round1(penaltyRate * openingFraction)}`)
+  console.log(
+    `mm target inventory: ${MM_INV_START} +${MM_INV_STEP}/yr` +
+      (MM_INV_STEP === 0 ? ' (flat)' : ` → ${round3(MM_INV_START + MM_INV_STEP * (YEARS_PER_MODE - 1))} by the last year`),
+  )
   console.log(`penalty rate in force: ${penaltyRate}` +
     `  ·  capReduction ${hostSnap?.config?.capReductionFactor ?? '?'}` +
     `  ·  auctionCapRatio ${hostSnap?.config?.auctionCapRatio ?? '?'}`)
@@ -446,6 +466,14 @@ async function runSession(capMode, { withBots, joinGrace }) {
 
   // ── play YEARS_PER_MODE years ──
   for (let year = 1; year <= YEARS_PER_MODE; year++) {
+    // Set BEFORE the year opens: `updateSettings` is lobby/yearSummary only, and this is
+    // the last moment in the loop where the session is still in one of those phases.
+    const invFrac = round3(MM_INV_START + MM_INV_STEP * (year - 1))
+    if (MM_INV_STEP !== 0 || year === 1) {
+      const u = await emit(host, 'host:updateSettings', { marketMakerInvFrac: invFrac })
+      if (!u.ok) { M.errors++; console.log(`  mm invFrac ${invFrac} rejected: ${u.error}`) }
+    }
+
     const r = await emit(host, year === 1 ? 'host:startYear' : 'host:advanceYear', {})
     if (!r.ok) { M.errors++; console.log(`  year ${year} start failed: ${r.error}`); break }
 
