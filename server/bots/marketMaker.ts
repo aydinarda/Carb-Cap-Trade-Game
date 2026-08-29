@@ -21,6 +21,20 @@ import type { BotCtx } from './types'
  * pinned to where the market is actually trading, it cannot walk the price away from the
  * class — and it cannot stop offering just because it is holding a lot.
  */
+/**
+ * A single maker's target inventory: its share of the pool, split between the makers when
+ * `marketMakerShareByCount` is on. Defined once because both the quote and the auction bid
+ * must read the identical number.
+ */
+function makerTarget(session: BotCtx['session'], invFrac: number): number {
+  let target = invFrac * session.circulatingCap()
+  if (session.state.config.bots.fixes.marketMakerShareByCount) {
+    const makers = session.state.players.filter((p) => p.botType === 'marketMaker').length
+    if (makers > 1) target /= makers
+  }
+  return target
+}
+
 export function trade(ctx: BotCtx): boolean {
   const { session, bot } = ctx
   const record = session.currentYearRecord()
@@ -52,7 +66,14 @@ export function trade(ctx: BotCtx): boolean {
   // the price stayed pinned near the ceiling.
   const ref = recentPrice(session, record, cfg.recentTrades)
   const band = cfg.bandFrac
-  const target = cfg.invFrac * session.circulatingCap()
+  // The SAME target the auction bids to — `marketMakerShareByCount` divides it between the
+  // makers there, and this read has to agree or the two halves of one bot contradict each
+  // other. They did: the auction bought to invFrac/N of the pool while the quote priced
+  // against invFrac of it, so a maker holding exactly what it had just been told to buy
+  // still read itself as three quarters short. That pins `lean` near 1 — bid at the
+  // reference, offer at the top of the band — which is a maker that only ever wants to
+  // acquire, and is why the offer side of the book stayed empty.
+  const target = makerTarget(session, cfg.invFrac)
   const held = session.creditsHeld(bot.id)
   const skewCap = cfg.skewCapFrac * P
 
@@ -93,13 +114,9 @@ export function auction(ctx: BotCtx): boolean {
   const P = priceCeiling(session)
   const cfg = session.state.config.bots.marketMaker
   const fixes = session.state.config.bots.fixes
-  let target = cfg.invFrac * session.circulatingCap() // deep inventory to two-side the market
-  // Every maker sizes its target off the WHOLE pool, so N makers chase N × invFrac of it —
-  // four of them bid 72% of the cap. Gated: bots.fixes.marketMakerShareByCount.
-  if (fixes.marketMakerShareByCount) {
-    const makers = session.state.players.filter((p) => p.botType === 'marketMaker').length
-    if (makers > 1) target /= makers
-  }
+  // Same helper the quote uses. Without `marketMakerShareByCount` every maker sizes off the
+  // WHOLE pool, so N makers chase N × invFrac of it — four of them bid 72% of the cap.
+  let target = makerTarget(session, cfg.invFrac)
   // The target is a LEVEL, but it was bid every year as an incremental purchase — nothing
   // subtracted what the maker already held, so its inventory compounded without bound and
   // it ended up sitting on credits nobody could buy. Gated: bots.fixes.marketMakerIncrementalBid.
