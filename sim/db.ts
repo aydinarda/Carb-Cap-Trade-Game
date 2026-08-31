@@ -61,6 +61,8 @@ export interface PlayerRow {
   optimalCost: number
   /** Cumulative euros of forgone retrofit value — the investment half of the score. */
   investmentGapTotal: number
+  /** This year's ledger with the emission draw removed — what the leaderboard scores. */
+  decisionCost: number
   /** Baseline-year emission: the divisor that makes both gaps size-neutral. */
   baseline: number
 }
@@ -128,7 +130,7 @@ CREATE TABLE IF NOT EXISTS players (
   free_allocation REAL, regulator_granted REAL, held REAL, realized REAL,
   abatement REAL, abatement_committed REAL, abatement_spend REAL, installed INTEGER,
   traded_net REAL, year_cost REAL, optimal_cost REAL,
-  investment_gap_total REAL, baseline REAL,
+  investment_gap_total REAL, baseline REAL, decision_cost REAL,
   PRIMARY KEY (run_id, year, player_id)
 );
 
@@ -364,15 +366,15 @@ export class SimDb {
          run_id, year, player_id, behaviour, industry, is_bot, bot_type,
          free_allocation, regulator_granted, held, realized,
          abatement, abatement_committed, abatement_spend, installed,
-         traded_net, year_cost, optimal_cost, investment_gap_total, baseline
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         traded_net, year_cost, optimal_cost, investment_gap_total, baseline, decision_cost
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     for (const r of rows) {
       stmt.run(
         runId, year, r.playerId, r.behaviour, r.industry, r.isBot ? 1 : 0, r.botType,
         r.freeAllocation, r.regulatorGranted, r.held, r.realized,
         r.abatement, r.abatementCommitted, r.abatementSpend, r.installed ? 1 : 0,
-        r.tradedNet, r.yearCost, r.optimalCost, r.investmentGapTotal, r.baseline,
+        r.tradedNet, r.yearCost, r.optimalCost, r.investmentGapTotal, r.baseline, r.decisionCost,
       )
     }
   }

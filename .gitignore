@@ -23,3 +23,6 @@ sim/out/
 
 # throwaway sweep scripts (analysis, not part of the app)
 sim/sweeps/
+
+# per-round score/trade logs from a live or load-test run (SCORE_LOG / TRADE_LOG)
+game-logs/

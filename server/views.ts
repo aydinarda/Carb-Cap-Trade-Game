@@ -86,9 +86,18 @@ function leaderboard(session: Session): LeaderboardRow[] {
   const gaps = (p: Session['state']['players'][number]) => {
     const baseline = p.emissions[baselineYear] ?? 0
     const per = (value: number) => (baseline > 0 ? round1(value / baseline) : round1(value))
-    // Clamped at 0: the optimum is a minimum, so a negative gap is rounding, not skill.
+    // NOT clamped at 0. The optimum is only a minimum against the prices of a single year,
+    // and a company that buys cheaply in one round and sells into a dearer one genuinely
+    // beats it — clamping hid that, handing an identical 100 to everyone at or above the
+    // bar and compressing the whole top of the table. A negative trading gap now means what
+    // it says: you did better than the benchmark, and the points go above 100.
+    //
+    // `decisionScore`, not `score`: the money is scored with the emission draw removed, so
+    // the ranking measures the cover decision rather than the dice. See Player.decisionScore.
     return {
-      tradingGap: Math.max(0, per(p.score - p.optimalScore)),
+      tradingGap: per(p.decisionScore - p.optimalScore),
+      // The investment gap IS clamped: `investmentGap` already returns 0 for beating the
+      // payback rule, so a negative value here could only be rounding.
       investmentGap: Math.max(0, per(p.investmentGapTotal)),
     }
   }
@@ -315,6 +324,9 @@ function historyRowsForYear(
       creditsHeld: round1(free + granted + carriedIn + net),
       netPosition: y.netPosition[p.id] ?? null,
       settlement: y.settlement?.[p.id] ?? null,
+      optimalCost: y.optimalCost?.[p.id] ?? null,
+      investmentGap: y.investmentGap?.[p.id] ?? null,
+      decisionCost: y.decisionCost?.[p.id] ?? null,
     }
   }
   return rows

@@ -12,6 +12,7 @@
     "start": "node dist/server/index.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc -p server/tsconfig.json && tsc -p sim/tsconfig.json",
+    "ref": "tsx scripts/reference.ts",
     "sim": "tsx sim/cli.ts",
     "sim:viz": "tsx sim/viz/server.ts"
   },

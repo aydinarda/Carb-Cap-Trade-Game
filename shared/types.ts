@@ -36,6 +36,19 @@ export interface Player extends PlayerProfile {
    */
   investmentGapTotal: number
   /**
+   * The same ledger as `score`, but with the penalty charged against the emission the
+   * company PLANNED for rather than the one the dice produced.
+   *
+   * `score` is the money — it always uses the realized emission, because that is what was
+   * actually owed. This is the version the leaderboard scores, and it exists because the
+   * benchmark it is compared against never pays a fine: the optimum covers `plannedEmission`
+   * exactly, while a real player has to commit before the draw. Measured over 45 companies
+   * running byte-identical strategy code, that asymmetry alone spread the leaderboard from
+   * 10 to 100 points, with the cover error explaining r = −0.74 of it. Charging both sides
+   * against the same number cancels the draw instead of scoring it.
+   */
+  decisionScore: number
+  /**
    * EU-ETS carry balance rolled between years: positive = allowances banked from a
    * surplus year; negative = a make-good debt from an uncovered year. Added to the
    * next year's holdings; monetized at the final market price when the game ends.
@@ -145,6 +158,19 @@ export interface YearRecord {
    */
   primaryPrice: number | null
   settlement: Record<string, PlayerSettlement> | null
+  /**
+   * The benchmark this year's ledger is scored against, per company — what `optimalYearCost`
+   * says the same position would have cost played perfectly.
+   *
+   * Stored rather than recomputed because it depends on the year's discovered price, which
+   * is only knowable at settlement, and because "my costs look fine, why is my score low?"
+   * is unanswerable without putting the two numbers side by side for the round in question.
+   */
+  optimalCost: Record<string, number>
+  /** Value left on the table by this year's investment decision — see `investmentGap`. */
+  investmentGap: Record<string, number>
+  /** The ledger with the penalty taken against `planned` — see `Player.decisionScore`. */
+  decisionCost: Record<string, number>
   netPosition: Record<string, number>
   /**
    * Cost containment reserve. Fixed at year open; 0 means inert for this year — which is the
@@ -444,6 +470,12 @@ export interface PlayerHistoryYear {
   creditsHeld: number
   netPosition: number | null
   settlement: PlayerSettlement | null
+  /** What playing this year perfectly would have cost — the benchmark behind the score. */
+  optimalCost: number | null
+  /** Value forgone on this year's retrofit decision. */
+  investmentGap: number | null
+  /** This year's ledger with the dice removed — see `Player.decisionScore`. */
+  decisionCost: number | null
 }
 
 export interface HostSnapshot {

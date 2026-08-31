@@ -204,6 +204,9 @@ function naivePlayerHistory(session: Session): Record<string, PlayerHistoryYear[
         creditsHeld: round1(free + granted + carriedIn + traded),
         netPosition: y.netPosition[p.id] ?? null,
         settlement: y.settlement?.[p.id] ?? null,
+        optimalCost: y.optimalCost?.[p.id] ?? null,
+        investmentGap: y.investmentGap?.[p.id] ?? null,
+        decisionCost: y.decisionCost?.[p.id] ?? null,
       }
     })
   }

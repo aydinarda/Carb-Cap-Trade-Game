@@ -234,6 +234,7 @@ export class Session {
       score: 0,
       optimalScore: 0,
       investmentGapTotal: 0,
+      decisionScore: 0,
       bankedCredits: 0,
       abatementInForce: 0,
       abatementCommitted: 0,
@@ -264,6 +265,7 @@ export class Session {
       score: 0,
       optimalScore: 0,
       investmentGapTotal: 0,
+      decisionScore: 0,
       bankedCredits: 0,
       abatementInForce: 0,
       abatementCommitted: 0,
@@ -559,6 +561,9 @@ export class Session {
       auctionPrice: null,
       primaryPrice: null,
       settlement: null,
+      optimalCost: {},
+      investmentGap: {},
+      decisionCost: {},
       netPosition: {},
       // Cost containment reserve: sized once, from the shortfall this year opens with.
       // `issuance` matches circulatingCap()'s definition (free + pool) so the two agree.
@@ -701,6 +706,7 @@ export class Session {
     const abateCost: Record<string, number> = {}
     const optimal: Record<string, number> = {}
     const investGap: Record<string, number> = {}
+    const decisionCost: Record<string, number> = {}
     const { penaltyRate } = this.state.config.market
     // Whatever went into regulatorGranted was sold at this price: the auction
     // clearing price, or the reference price for the trader-bot seed. 0 for free credits.
@@ -722,12 +728,23 @@ export class Session {
       // banked in the record until here, the only place `player.score` moves.
       const abateSpend = round1(record.abatementSpend[player.id] ?? 0)
       abateCost[player.id] = abateSpend
-      // What the company received without paying for it: the free allocation and the carry.
-      // Deliberately NOT `regulatorGranted` — anything won at the auction was BOUGHT, at
-      // `capPrice`, and counting it here would hand the benchmark for free the one thing
-      // that dominates a player's bill under an auction-bearing mode. See `optimalYearCost`.
+      // What the company received without paying for it — and ONLY that.
+      //
+      // Not `regulatorGranted`: anything won at the auction was bought, at `capPrice`.
+      // Not a banked SURPLUS either, for exactly the same reason — a company banks credits
+      // because it bought them last year, so crediting them here hands the benchmark an
+      // asset it never paid for. That was the remaining half of the same defect: a player
+      // who stocked up cheaply in a rising market was charged for the purchase in the year
+      // they made it, and then measured against a benchmark that was given the identical
+      // stock for nothing in the year they used it. Measured on a four-round game, undoing
+      // it moved one company from 30th to 1st without any other change.
+      //
+      // A make-good DEBT is different and still carries: the company really does owe those
+      // tonnes, and a benchmark pretending otherwise would punish the same debt a third
+      // time, after the fine and the obligation itself.
       const endowment = round1(
-        (record.freeAllocation[player.id] ?? 0) + (record.carriedIn[player.id] ?? 0),
+        (record.freeAllocation[player.id] ?? 0) +
+          Math.min(0, record.carriedIn[player.id] ?? 0),
       )
       // This year's emissions are already fixed — capacity was bought a year ago — so the
       // benchmark scores the cover decision alone, and the sunk spend passes through both
@@ -744,6 +761,13 @@ export class Session {
       // screen while it was being taken — `refPrice` is this year's discovered price, and
       // the step it is compared to came online for NEXT year. `record.abatement` holds what
       // was committed when the year opened, so the difference is exactly this year's step.
+      // The ledger with the dice removed: the same money, but the shortfall measured against
+      // the emission that was planned for rather than the one that was drawn. See
+      // `Player.decisionScore` — this is what the leaderboard scores.
+      const plannedShort = Math.max(0, this.plannedFor(player, record.year) - held[player.id])
+      decisionCost[player.id] = round1(
+        abateSpend + purchaseCost[player.id] - sellIncome[player.id] + plannedShort * penaltyRate,
+      )
       investGap[player.id] = investmentGap({
         spec: this.state.config.abatement.sectors[player.industry],
         price: refPrice,
@@ -760,6 +784,10 @@ export class Session {
       penaltyRate,
     })
     record.settlement = settlement
+    // Kept on the record so a completed year can still explain its own score.
+    record.optimalCost = optimal
+    record.investmentGap = investGap
+    record.decisionCost = decisionCost
     record.netPosition = computeNetPositions(record.realized, held)
     for (const player of this.state.players) {
       player.score = round1(player.score + (settlement[player.id]?.yearCost ?? 0))
@@ -767,6 +795,7 @@ export class Session {
       player.investmentGapTotal = round1(
         player.investmentGapTotal + (investGap[player.id] ?? 0),
       )
+      player.decisionScore = round1(player.decisionScore + (decisionCost[player.id] ?? 0))
       // EU-ETS carry: the year's net position rolls forward — surplus is banked,
       // an uncovered shortfall becomes a make-good debt (on top of the penalty just
       // charged). It adjusts next year's holdings via carriedIn.

@@ -33,6 +33,7 @@ function player(
     score: 0,
     optimalScore: 0,
     investmentGapTotal: 0,
+    decisionScore: 0,
     bankedCredits: 0,
     abatementInForce: 0,
     abatementCommitted: 0,

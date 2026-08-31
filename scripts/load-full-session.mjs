@@ -159,6 +159,22 @@ const MODES = (() => {
  */
 const TRADE_LOG = process.env.TRADE_LOG || ''
 
+/**
+ * Where to write the per-player, per-round SCORE breakdown, one CSV row each.
+ *
+ * The console prints one leader per year, which cannot answer the question a student
+ * actually asks — "I sold well and barely paid a fine, why is my score low?". That question
+ * is only answerable by putting the cost ledger next to the BENCHMARK the ledger is scored
+ * against, per round, per player. A low score with a healthy ledger means the optimum for
+ * the same position was cheaper still, and the columns below say by how much and on which
+ * of the two decisions.
+ *
+ * Unset to skip. `SCORE_TOP` also prints a per-round table to the console for the first N
+ * players (0 = console table off, CSV only).
+ */
+const SCORE_LOG = process.env.SCORE_LOG || ''
+const SCORE_TOP = process.env.SCORE_TOP ? Number(process.env.SCORE_TOP) : 12
+
 const MM_INV_START = process.env.MM_INV_START ? Number(process.env.MM_INV_START) : 0.18
 const MM_INV_STEP = process.env.MM_INV_STEP ? Number(process.env.MM_INV_STEP) : 0
 
@@ -634,6 +650,82 @@ async function runSession(capMode, { withBots, joinGrace }) {
         `        last ${trades.length} prints logged (tape cap 60) · ceiling ${round1(ceil)} · ` +
           `${round1(atCeil)}% within 2% of it`,
       )
+    }
+
+    // ── per-player, per-round score breakdown ──
+    //
+    // Read after `closeTrade` and before `advanceYear`, so the settlement being described is
+    // the one that just happened. Two sources, deliberately side by side: `playerHistory`
+    // carries the LEDGER (what the company actually paid and earned) and the leaderboard
+    // carries the BENCHMARK (what the same position would have cost played perfectly). A
+    // score only makes sense as the distance between them.
+    if (SCORE_LOG || SCORE_TOP > 0) {
+      await sleep(300)
+      const board = new Map((hostSnap?.leaderboard ?? []).map((r) => [r.id, r]))
+      const hist = hostSnap?.playerHistory ?? {}
+      const rows = (hostSnap?.players ?? []).map((p) => {
+        const years = hist[p.id] ?? []
+        const h = years[years.length - 1]
+        const st = h?.settlement
+        const b = board.get(p.id)
+        return {
+          id: p.id, name: p.name, industry: p.industry, isBot: !!p.isBot,
+          botType: p.botType ?? '',
+          free: h?.free ?? 0, auctionWon: h?.regulatorGranted ?? 0,
+          traded: h?.traded ?? 0, banked: h?.banked ?? 0, held: h?.creditsHeld ?? 0,
+          realized: h?.realized ?? 0, netPos: h?.netPosition ?? 0,
+          abatementCost: st?.abatementCost ?? 0, purchaseCost: st?.purchaseCost ?? 0,
+          sellIncome: st?.sellIncome ?? 0, penalty: st?.penaltyCost ?? 0,
+          shortage: st?.shortage ?? 0, yearCost: st?.yearCost ?? 0,
+          // The benchmark for THIS round, beside the ledger for this round. `roundGap` is
+          // the whole answer to "my costs look fine, why is my score low?": a positive
+          // number is euros this position could have been settled for and was not.
+          optimalCost: h?.optimalCost ?? 0,
+          // The ledger the LEADERBOARD scores: the same money, but the fine taken against
+          // the emission planned for rather than the one the dice produced. `roundGap` is
+          // built from it, so the gap reflects decisions and not the draw.
+          decisionCost: h?.decisionCost ?? 0,
+          roundGap: round1((h?.decisionCost ?? st?.yearCost ?? 0) - (h?.optimalCost ?? 0)),
+          roundInvGap: h?.investmentGap ?? 0,
+          cumScore: p.score,
+          points: b?.points ?? '', tradingGap: b?.tradingGap ?? '',
+          investmentGap: b?.investmentGap ?? '',
+          rank: (hostSnap?.leaderboard ?? []).findIndex((r) => r.id === p.id) + 1,
+        }
+      })
+
+      if (SCORE_LOG) {
+        if (year === 1 && capMode === MODES[0]) {
+          writeFileSync(SCORE_LOG,
+            'mode,year,rank,id,name,industry,isBot,botType,free,auctionWon,traded,banked,held,' +
+            'realized,netPos,abatementCost,purchaseCost,sellIncome,penalty,shortage,yearCost,' +
+            'optimalCost,decisionCost,roundGap,roundInvGap,cumScore,points,tradingGap,investmentGap\n')
+        }
+        appendFileSync(SCORE_LOG, rows.map((r) =>
+          [capMode, year, r.rank, r.id, r.name, r.industry, r.isBot ? 1 : 0, r.botType,
+           r.free, r.auctionWon, r.traded, r.banked, r.held, r.realized, r.netPos,
+           r.abatementCost, r.purchaseCost, r.sellIncome, r.penalty, r.shortage, r.yearCost,
+           r.optimalCost, r.decisionCost, r.roundGap, r.roundInvGap,
+           r.cumScore, r.points, r.tradingGap, r.investmentGap].join(',')).join('\n') + '\n')
+      }
+
+      if (SCORE_TOP > 0) {
+        // Humans first: this table exists for the person who just played the round, and a
+        // page of bots between them and their own row defeats it.
+        const ordered = [...rows].sort((a, b) =>
+          (a.isBot === b.isBot ? a.rank - b.rank : a.isBot ? 1 : -1))
+        console.log(`\n  ── year ${year} scores (rank · ledger · benchmark) ──`)
+        console.log('  ' + ['#', 'player', 'free', 'won', 'traded', 'emit', 'abate€',
+          'buy€', 'sell€', 'fine€', 'yearCost', 'optimal', 'roundGap', 'invGap', 'PTS']
+          .map((h, i) => h.padStart(i === 1 ? 12 : 9)).join(''))
+        for (const r of ordered.slice(0, SCORE_TOP)) {
+          const cells = [r.rank, (r.isBot ? '🤖 ' : '') + r.name, r.free, r.auctionWon,
+            r.traded, r.realized, r.abatementCost, r.purchaseCost, r.sellIncome, r.penalty,
+            r.yearCost, r.optimalCost, r.roundGap, r.roundInvGap, r.points]
+          console.log('  ' + cells.map((c, i) =>
+            String(typeof c === 'number' ? Math.round(c * 10) / 10 : c).padStart(i === 1 ? 12 : 9)).join(''))
+        }
+      }
     }
 
     const lb = players[0]?.snap?.leaderboard

@@ -80,6 +80,24 @@ export function runScenario(spec: RunSpec): RunResult {
   const { humans, behaviourMix, sectorMix, bots } = spec.population
   const behaviours = allocateMix(behaviourMix, humans)
   const sectors = allocateMix(sectorMix, humans)
+  /**
+   * Break the pairing between the two mixes before zipping them.
+   *
+   * `allocateMix` returns its categories in BLOCKS — every `rational` first, then every
+   * `passive`, and so on — and the sector list is built the same way, so pairing them by
+   * index made behaviour and sector perfectly correlated: on the balanced population every
+   * Manufacturing & Chemicals company was a `passive` trader, which read as that sector
+   * being catastrophically bad at the game (a cumulative shortage of 5.9× its own baseline)
+   * when it was really the archetype that never trades, all filed under one industry.
+   *
+   * Any cross-tab of sector against behaviour — and any comparison of sectors on a mixed
+   * population — was measuring this instead of the game. Shuffled with the run's own seeded
+   * RNG, so the draw stays deterministic in `seed`.
+   */
+  for (let i = sectors.length - 1; i > 0; i--) {
+    const j = Math.floor(agentRng.next() * (i + 1))
+    ;[sectors[i], sectors[j]] = [sectors[j], sectors[i]]
+  }
   const agents = behaviours.map((behaviour, i) => {
     const { player } = session.addPlayer(`S${i + 1}`, sectors[i])
     return { playerId: player.id, behaviour }
@@ -164,6 +182,7 @@ export function runScenario(spec: RunSpec): RunResult {
       // slice of it would say nothing about where a player stands.
       investmentGapTotal: p.investmentGapTotal,
       baseline: p.emissions[session.state.config.emissions.baselineYear] ?? 0,
+      decisionCost: round1(record.decisionCost[p.id] ?? 0),
     }))
 
     result.years.push({

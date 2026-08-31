@@ -89,6 +89,11 @@ Refreshing a device resumes the same identity automatically (token in localStora
 ## Tests
 
 ```bash
+pnpm ref             # the sector table and every formula, printed from the config in
+                     # force — never a transcription. `pnpm ref -- sectors` or
+                     # `-- formulas` for one section; `-- --price 90 --year 16` to
+                     # see the curves and the tightened benchmark at another point.
+
 pnpm test            # engine + config + sim unit tests. Grandfathering math is
                      # verified against the designer's own xlsx output, and
                      # server/__tests__/golden.spec.ts pins the engine's literal
