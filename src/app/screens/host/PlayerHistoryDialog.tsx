@@ -82,9 +82,23 @@ export function PlayerHistoryDialog({
             <span>
               Cumulative cost: <span className="text-foreground font-bold">{num(board.score)}</span>
             </span>
+            {/* The host gets the breakdown, not just the grade: which half of the game a
+                student is losing points on is the whole reason to open this dialog. */}
             <span>
-              Skill score (vs own optimum):{' '}
-              <span className="text-foreground font-bold">{num(board.normalizedScore)}</span>
+              {board.points !== null ? (
+                <>
+                  Points: <span className="text-foreground font-bold">{num(board.points)}</span>
+                  <span className="text-muted-foreground">
+                    {' '}/100 · trading {num(board.tradingGap)} + investment{' '}
+                    {num(board.investmentGap)} €/t
+                  </span>
+                </>
+              ) : (
+                <>
+                  Raw P&amp;L:{' '}
+                  <span className="text-foreground font-bold">{num(board.normalizedScore)}</span>
+                </>
+              )}
             </span>
           </div>
         )}

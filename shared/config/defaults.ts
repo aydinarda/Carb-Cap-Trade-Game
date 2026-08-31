@@ -72,6 +72,27 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     // the price it prints says nothing about scarcity. Measured bid-to-cover goes from 1.01
     // at 1.0 to 2.68 here.
     auctionCapRatio: 0.95,
+    /**
+     * Hybrid mode's free-allocation shares: two sectors cushioned, two paying for every
+     * tonne, at a level where the mode is genuinely its own thing.
+     *
+     * The SHAPE is the teaching choice — only Power & Utilities and Heavy Materials receive
+     * anything, and Power receives more, so the class can ask why the biggest emitter is
+     * also the biggest beneficiary. The LEVEL is measured. `hybrid-share-sweep` put the
+     * free half at these shares near a quarter of the cap; below about 10% of the cap the
+     * price is within noise of pure auctioning (72.5 vs 72.7 at a uniform 0.05) and the
+     * mode has nothing of its own to show.
+     *
+     * NOT a settled calibration: these shares and the scoring were tuned together and the
+     * price path has to be re-measured whenever either moves. This table, not
+     * `auctionCapRatio`, is the lever for the hybrid mode's stringency.
+     */
+    hybridFreeShare: {
+      'Power & Utilities': 0.45,
+      'Heavy Materials': 0.21,
+      'Manufacturing & Chemicals': 0,
+      Transport: 0,
+    },
     // The regulator will not sell more than 10% under what a tonne last traded at.
     auctionReserveFrac: 0.9,
     /**
@@ -172,6 +193,28 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     // Agents only. Long enough that a genuine retrofit pays back, short enough that they
     // will not buy capacity on a single year's price spike.
     investmentHorizon: 3,
+  },
+  scoring: {
+    // Equal billing. The game is called cap AND trade; a student who reads the market
+    // perfectly and never retrofits should not be able to top the table, and neither
+    // should one who retrofits perfectly and hands the market its money.
+    investmentWeight: 1,
+    /**
+     * Measured, over 2 000 simulated students across the four regimes on the balanced
+     * 10-year population. The combined gap separates the behaviour archetypes cleanly —
+     * median 70 €/t of baseline for `rational`, 109 `hedger`, 172 `opportunist`, 787
+     * `passive` — and at this scale that becomes 63 / 48 / 32 / 1 points, with the class
+     * median at 43 and the 90th percentile at 77.
+     *
+     * Chosen so a competent player lands in the 60s-70s rather than at 100: the top of the
+     * scale is reserved for play with genuinely nothing left on the table, and a student who
+     * never trades scores near zero, which is the honest reading of doing nothing.
+     *
+     * It is denominated in euros per tonne, so it moves with `market.penaltyRate` and the
+     * price level. A session that changes the fine substantially should re-measure rather
+     * than assume this still lands where it did.
+     */
+    pointsScale: 150,
   },
   bots: {
     // `underAuction` ships OFF: it changes who holds the opening book under auctioning, and

@@ -38,6 +38,10 @@ const MODE_TEACHING: Record<CapMode, { headline: string; note: string }> = {
     headline: 'The full market',
     note: 'No free credits at all — every allowance is bought at a sealed-bid auction before the market opens. The most demanding of the three, and the closest to where the EU ETS has ended up.',
   },
+  hybrid: {
+    headline: 'What the EU actually does',
+    note: 'Both at once: you choose which sectors keep a share of their benchmark for free, and the rest of the cap is auctioned. Because free credits come OUT of the auction supply rather than on top of it, the class can see who pays for an exemption — the argument that runs through every real allocation decision. Set the shares per sector in the lobby.',
+  },
 }
 
 export function HostCreateScreen() {

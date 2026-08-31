@@ -3,11 +3,13 @@ import { auctioning } from './auctioning'
 import { benchmarking } from './benchmarking'
 import type { CapMechanism } from './capMechanism'
 import { grandfathering } from './grandfathering'
+import { hybrid } from './hybrid'
 
 export const CAP_MECHANISMS: Record<CapMode, CapMechanism> = {
   grandfathering,
   benchmarking,
   auctioning,
+  hybrid,
 }
 
 export { type CapMechanism } from './capMechanism'
@@ -16,6 +18,8 @@ export {
   abatementCost,
   incrementalFraction,
   installCost,
+  installValue,
+  investmentGap,
   marginalCost,
   optimalAbatement,
   optimalYearCost,
@@ -46,6 +50,7 @@ export { isPureTrader } from './roles'
 export { computeNetPositions } from './trade'
 export { windowSum, computeFreeCreditLimit } from './grandfathering'
 export { benchmarkFor } from './benchmarking'
+export { hybridFreeFor } from './hybrid'
 export { clearAuction } from './auction'
 export {
   matchOrder,

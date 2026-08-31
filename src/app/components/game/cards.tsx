@@ -309,6 +309,8 @@ export function AllocationCard({
           'The benchmark set for your sector — every company in it gets the same free credits regardless of its own history. It starts near the sector average and is cut every year, so an average emitter runs short as the game goes on.'}
         {mode === 'auctioning' &&
           'No free credits under auctioning — every allowance must be bought at the sealed-bid auction or on the market.'}
+        {mode === 'hybrid' &&
+          "The share of your sector's benchmark the regulator issues free. Everything given away this year came out of the auction supply, so the sectors bidding for the rest are paying for it — the cap itself does not move."}
       </p>
     </div>
   )
@@ -367,7 +369,7 @@ export function SettlementCard({
       </div>
       <div className="text-xs font-mono text-muted-foreground mt-2 pt-2 border-t border-border">
         Total cost so far: <span className="text-foreground font-bold">{scoreTotal}</span>{' '}
-        (lowest wins)
+        (your bill — the leaderboard scores it against your own optimum)
       </div>
     </div>
   )
@@ -417,18 +419,28 @@ export function LeaderboardTable({
             ) : (
               <span style={{ color: meta.color }}>{meta.icon}</span>
             )}
+            {/* Points, not the raw gap. Higher is better, which is the direction a class
+                expects a leaderboard to run — the gap itself is still one hover away, and
+                the host sees the full breakdown in the history dialog. Pure-trader bots
+                have no points (see LeaderboardRow.points) and fall back to their P&L. */}
             <span
               className={cn(
                 'font-mono font-bold w-20 text-right',
-                row.normalizedScore <= 0.05 ? 'text-primary' : 'text-foreground',
+                row.points === null
+                  ? 'text-muted-foreground'
+                  : row.points >= 75
+                    ? 'text-primary'
+                    : row.points >= 40
+                      ? 'text-foreground'
+                      : 'text-muted-foreground',
               )}
               title={
-                row.isBot
-                  ? 'raw cumulative P&L (skill metric N/A for bots)'
-                  : 'cost above your own optimum, per baseline tonne — lower is better'
+                row.points === null
+                  ? 'raw cumulative P&L (points are N/A for pure-trader bots)'
+                  : `${row.points} / 100 — trading gap ${row.tradingGap} + investment gap ${row.investmentGap} € per baseline tonne, lower gap scores higher`
               }
             >
-              {row.normalizedScore.toLocaleString()}
+              {row.points === null ? row.normalizedScore.toLocaleString() : `${row.points}`}
             </span>
           </div>
         )

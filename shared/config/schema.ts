@@ -21,7 +21,39 @@ export interface GameConfig {
   emissions: EmissionsConfig
   allocation: AllocationConfig
   abatement: AbatementConfig
+  scoring: ScoringConfig
   bots: BotsConfig
+}
+
+/**
+ * How the leaderboard turns two cost gaps into one number a student can read.
+ *
+ * The gaps themselves are engine output and not configurable — what lives here is the
+ * editorial part: how much the investment decision counts relative to the trading one, and
+ * how steeply points fall away from perfect play.
+ */
+export interface ScoringConfig {
+  /**
+   * Weight on the investment gap relative to the trading gap, which is fixed at 1.
+   *
+   * Both arrive in the same units (euros per tonne of baseline emission), so this is a
+   * straight statement of what the game is about. Below 1 the market is the lesson and the
+   * retrofit is a side quest; at 1 they are equal; above 1 a class is being told that what
+   * it builds matters more than what it trades. Set 0 to score trading alone, which is what
+   * every session before this one did.
+   */
+  investmentWeight: number
+  /**
+   * The combined gap, in euros per tonne of baseline, at which a player scores 100/e ≈ 37
+   * points. Twice this scores ≈ 13, three times ≈ 5.
+   *
+   * An exponential rather than a linear scale for one reason: a linear map needs a WORST
+   * case to divide by, and the worst case in this game is unbounded (a company can default
+   * on everything, every year, at any price). Anchoring on the good end instead means the
+   * scale never has to be re-chosen because one student had a catastrophic round, and the
+   * top of the table — where the interesting differences are — keeps its resolution.
+   */
+  pointsScale: number
 }
 
 export interface SessionLimits {
@@ -156,6 +188,17 @@ export interface AllocationConfig {
   /** Auction supply = this × Σbaseline. Host-editable. */
   auctionCapRatio: number
   /**
+   * Hybrid mode: the share of its sector benchmark a company is issued FREE, per sector
+   * (0..1). 1 issues the whole benchmark free, 0 issues nothing — that sector buys every
+   * allowance at the auction. Host-editable.
+   *
+   * It multiplies `benchmark`, so the yearly cap reduction tightens the free allocation
+   * exactly as it tightens it under benchmarking; and the result is DEDUCTED from the
+   * auction pool rather than added on top of it, so the shares redistribute a fixed cap
+   * instead of loosening it. See `shared/engine/hybrid.ts`.
+   */
+  hybridFreeShare: Record<Industry, number>
+  /**
    * Auction reserve price, as a fraction of the reference (the previous round's closing
    * price). The regulator sells nothing below it.
    *
@@ -188,7 +231,7 @@ export interface AllocationConfig {
    * on to compare the three modes on equal footing.
    */
   applyLRFToGrandfathering: boolean
-  /** Price-triggered supply release. Applies to all three cap mechanisms. */
+  /** Price-triggered supply release. Applies to every cap mechanism. */
   reserve: ReserveConfig
 }
 

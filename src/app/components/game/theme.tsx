@@ -75,6 +75,12 @@ export const MODE_LABELS = {
     desc: 'The modern ETS model: no free credits. The regulator puts a fixed supply on offer at a sealed-bid uniform-price auction, and every allowance is bought there or on the secondary market.',
     implemented: true,
   },
+  hybrid: {
+    label: 'Hybrid (Benchmark + Auction)',
+    tagline: 'Some sectors get their benchmark free — the rest of the cap is auctioned',
+    desc: 'What the EU actually does: the cap is set first, then chosen sectors receive a share of their benchmark for free and everything left over goes to the sealed-bid auction. Free allocation is subtracted from the auction, never added on top — so a sector that keeps its free credits is shrinking the pool everyone else has to bid for.',
+    implemented: true,
+  },
 } as const
 
 /**
@@ -106,6 +112,12 @@ export const CAP_FLOW: Record<CapMode, string[]> = {
     'Highest bidders win the supply',
     'Everyone pays one clearing price',
   ],
+  hybrid: [
+    'Your sector may get free credits',
+    'What is given away leaves the auction',
+    'Bid for the rest, with a max price',
+    'Everyone pays one clearing price',
+  ],
 }
 
 /** Once the market is open the rules are the same whatever issued the credits. */
@@ -121,6 +133,7 @@ export const TRADE_FLOW: Record<CapMode, string[]> = {
   grandfathering: ['Trade your free credits', ...TRADE_FLOW_COMMON],
   benchmarking: ['Trade your benchmark credits', ...TRADE_FLOW_COMMON],
   auctioning: ['Trade what you won at auction', ...TRADE_FLOW_COMMON],
+  hybrid: ['Trade your free and auctioned credits', ...TRADE_FLOW_COMMON],
 }
 
 /** Backend bot archetype labels (auctioning mode). */

@@ -29,6 +29,7 @@ export const benchmarking: CapMechanism = {
   mode: 'benchmarking',
   implemented: true,
   usesAuction: false,
+  freeAllocation: 'benchmark',
   computeFreeCreditLimit(players, config) {
     // The class total in the first game year, matching when this is computed.
     return round1(

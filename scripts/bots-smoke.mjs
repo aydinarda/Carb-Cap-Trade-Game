@@ -1,5 +1,5 @@
 import { io } from 'socket.io-client'
-const URL = 'http://localhost:3001'
+const URL = process.env.GAME_URL || 'http://localhost:3001'
 const call = (s, e, p = {}) => new Promise((r, j) => s.emit(e, p, (x) => (x.ok ? r(x) : j(new Error(x.error)))))
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 let fails = 0

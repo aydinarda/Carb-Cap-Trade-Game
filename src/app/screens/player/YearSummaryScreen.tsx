@@ -87,7 +87,7 @@ export function YearSummaryScreen({ snap }: { snap: PlayerSnapshot }) {
         <div className="rounded-xl border border-border bg-card/70 p-5">
           <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
             <Trophy size={12} className="text-accent" />
-            Leaderboard — closest to your own optimum wins
+            Leaderboard — points out of 100, highest wins
           </div>
           <LeaderboardTable rows={snap.leaderboard} youId={snap.you.id} />
         </div>

@@ -28,7 +28,7 @@ const PLAYERS: [string, Parameters<Session['addPlayer']>[1]][] = [
   ['Cara', 'Heavy Materials'],
 ]
 
-function seeded(mode: 'grandfathering' | 'benchmarking' | 'auctioning') {
+function seeded(mode: 'grandfathering' | 'benchmarking' | 'auctioning' | 'hybrid') {
   const s = new Session(mode, 1)
   for (const [name, industry] of PLAYERS) s.addPlayer(name, industry)
   return s
@@ -480,9 +480,9 @@ describe('golden — auctioning', () => {
           "P3": 202.9,
         },
         "optimalScore": {
-          "P1": 19151,
-          "P2": -4902,
-          "P3": 22812.4,
+          "P1": 56270,
+          "P2": 9823.5,
+          "P3": 50137.9,
         },
         "primaryPrice": 45,
         "realized": {
@@ -563,9 +563,9 @@ describe('golden — auctioning', () => {
           "P3": 401.9,
         },
         "optimalScore": {
-          "P1": 40787.7,
-          "P2": -246,
-          "P3": 56394.5,
+          "P1": 126177.7,
+          "P2": 14091.5,
+          "P3": 120606.5,
         },
         "primaryPrice": 55,
         "realized": {
@@ -625,6 +625,187 @@ describe('golden — auctioning', () => {
           "year": 12,
         },
       ]
+    `)
+  })
+})
+
+/**
+ * Hybrid pins one thing the other three cannot: the SPLIT of the cap.
+ *
+ * `freeAllocation` and `regulatorPool` are both non-zero here and have to add up to the
+ * cap, so a change that quietly makes free allocation additive rather than deducted moves
+ * these numbers even though every per-mode invariant elsewhere still holds. P1 is Power &
+ * Utilities, whose shipped share is 0 — it must show a free allocation of exactly 0 and buy
+ * its whole cover at the auction.
+ */
+describe('golden — hybrid', () => {
+  it('year 11 and 12 settle to fixed numbers', () => {
+    const s = seeded('hybrid')
+    playYear(s, true)
+    expect(capture(s)).toMatchInlineSnapshot(`
+      {
+        "abatement": {
+          "P1": 0,
+          "P2": 0,
+          "P3": 0,
+        },
+        "abatementCommitted": {
+          "P1": 0.2,
+          "P2": 0,
+          "P3": 0.1,
+        },
+        "abatementSpend": {
+          "P1": 5627,
+          "P3": 6114.4,
+        },
+        "auctionPrice": 55,
+        "banked": {
+          "P1": 263.5,
+          "P2": -188.8,
+          "P3": -100.6,
+        },
+        "freeAllocation": {
+          "P1": 503.6,
+          "P2": 0,
+          "P3": 188,
+        },
+        "netPosition": {
+          "P1": -263.5,
+          "P2": 188.8,
+          "P3": 100.6,
+        },
+        "optimalScore": {
+          "P1": 39826,
+          "P2": 12006.5,
+          "P3": 49580.9,
+        },
+        "primaryPrice": 55,
+        "realized": {
+          "P1": 1132.1,
+          "P2": 188.8,
+          "P3": 910.9,
+        },
+        "regulatorGranted": {
+          "P1": 900,
+          "P2": 0,
+          "P3": 614.3,
+        },
+        "regulatorPool": 1514.3,
+        "score": {
+          "P1": 54647,
+          "P2": 18880,
+          "P3": 50440.9,
+        },
+        "settlement": {
+          "P1": {
+            "abatementCost": 5627,
+            "penaltyCost": 0,
+            "purchaseCost": 49500,
+            "sellIncome": 480,
+            "shortage": 0,
+            "yearCost": 54647,
+          },
+          "P2": {
+            "abatementCost": 0,
+            "penaltyCost": 18880,
+            "purchaseCost": 0,
+            "sellIncome": 0,
+            "shortage": 188.8,
+            "yearCost": 18880,
+          },
+          "P3": {
+            "abatementCost": 6114.4,
+            "penaltyCost": 10060,
+            "purchaseCost": 34266.5,
+            "sellIncome": 0,
+            "shortage": 100.6,
+            "yearCost": 50440.9,
+          },
+        },
+      }
+    `)
+    playYear(s, false)
+    expect(capture(s)).toMatchInlineSnapshot(`
+      {
+        "abatement": {
+          "P1": 0.2,
+          "P2": 0,
+          "P3": 0.1,
+        },
+        "abatementCommitted": {
+          "P1": 0.35,
+          "P2": 0,
+          "P3": 0.3,
+        },
+        "abatementSpend": {
+          "P1": 6888.7,
+          "P3": 14220.1,
+        },
+        "auctionPrice": 55,
+        "banked": {
+          "P1": 610,
+          "P2": -377.7,
+          "P3": -256.8,
+        },
+        "freeAllocation": {
+          "P1": 485.9,
+          "P2": 0,
+          "P3": 181.4,
+        },
+        "netPosition": {
+          "P1": -610,
+          "P2": 377.7,
+          "P3": 256.8,
+        },
+        "optimalScore": {
+          "P1": 55311.2,
+          "P2": 32774.5,
+          "P3": 104446,
+        },
+        "primaryPrice": 55,
+        "realized": {
+          "P1": 1031.4,
+          "P2": 188.9,
+          "P3": 907,
+        },
+        "regulatorGranted": {
+          "P1": 900,
+          "P2": 0,
+          "P3": 561.4,
+        },
+        "regulatorPool": 1461.4,
+        "score": {
+          "P1": 110555.7,
+          "P2": 56650,
+          "P3": 121698,
+        },
+        "settlement": {
+          "P1": {
+            "abatementCost": 6888.7,
+            "penaltyCost": 0,
+            "purchaseCost": 49500,
+            "sellIncome": 480,
+            "shortage": 0,
+            "yearCost": 55908.7,
+          },
+          "P2": {
+            "abatementCost": 0,
+            "penaltyCost": 37770,
+            "purchaseCost": 0,
+            "sellIncome": 0,
+            "shortage": 377.7,
+            "yearCost": 37770,
+          },
+          "P3": {
+            "abatementCost": 14220.1,
+            "penaltyCost": 25680,
+            "purchaseCost": 31357,
+            "sellIncome": 0,
+            "shortage": 256.8,
+            "yearCost": 71257.1,
+          },
+        },
+      }
     `)
   })
 })

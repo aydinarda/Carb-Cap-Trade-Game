@@ -2,7 +2,7 @@ import type { GameConfig } from './config/schema'
 import type { Industry } from './constants'
 import type { AbatementSpec } from './engine/abatementModels'
 
-export type CapMode = 'grandfathering' | 'benchmarking' | 'auctioning'
+export type CapMode = 'grandfathering' | 'benchmarking' | 'auctioning' | 'hybrid'
 
 /** Backend bot archetypes (auctioning mode). See server/bots/. */
 export type BotType = 'compliance' | 'marketMaker' | 'speculator' | 'noise'
@@ -29,6 +29,12 @@ export interface Player extends PlayerProfile {
   score: number
   /** Cumulative best-achievable cost — the per-company optimum benchmark. */
   optimalScore: number
+  /**
+   * Cumulative euros of value left on the table by the yearly investment decision, measured
+   * against the payback rule at the price that was on screen when the decision was taken.
+   * See `investmentGap`. Never decreases — beating the rule scores 0, not a credit.
+   */
+  investmentGapTotal: number
   /**
    * EU-ETS carry balance rolled between years: positive = allowances banked from a
    * surplus year; negative = a make-good debt from an uncovered year. Added to the
@@ -199,6 +205,8 @@ export interface HostConfigView {
   capReductionFactor: number
   /** Benchmarking mode: free credits per company, by industry. */
   benchmark: Record<Industry, number>
+  /** Hybrid mode: share of the sector benchmark issued free, by industry (0 = none). */
+  hybridFreeShare: Record<Industry, number>
   /** Sector averages the benchmark is set against, so the panel's "% below" hint follows
    *  a scenario that changed the emission ranges. */
   sectorAverage: Record<Industry, number>
@@ -292,9 +300,23 @@ export interface LeaderboardRow {
   /** Raw cumulative cost. */
   score: number
   /**
-   * Emitters: (score − optimalScore) / baseline — skill vs own optimum, lowest wins.
-   * Pure-trader bots (MM/speculator): raw cumulative P&L (skill-vs-optimum is
-   * meaningless for a ~0-emission financial player); they sort after the emitters.
+   * 0–100, **higher is better**, and the column the table is ranked on.
+   *
+   * `100 × exp(−gap / pointsScale)` where `gap = tradingGap + investmentWeight ×
+   * investmentGap`. 100 is play with nothing left on the table; the scale is exponential so
+   * the ranking never has to be re-based on whatever the worst round of the day happened to
+   * be. Pure-trader bots have no baseline to normalize against and no emissions to abate,
+   * so they get `null` here and sort after the emitters on raw P&L.
+   */
+  points: number | null
+  /** Euros of excess cover cost per tonne of baseline — the trading half of the gap. */
+  tradingGap: number
+  /** Euros of forgone retrofit value per tonne of baseline — the investment half. */
+  investmentGap: number
+  /**
+   * Emitters: the combined gap, lowest is best — the quantity `points` is derived from,
+   * kept so the host can see the raw number behind the grade.
+   * Pure-trader bots: raw cumulative P&L.
    */
   normalizedScore: number
   isBot?: boolean
@@ -328,13 +350,22 @@ export interface PlayerSnapshot {
    * debt (see `settleYear`), so paying the fine does not discharge the obligation.
    */
   penaltyRate: number
-  /** Auctioning mode: total supply on offer this year (= the cap). */
+  /**
+   * Whether this mode runs a sealed-bid auction at the cap stage.
+   *
+   * Asked of the mechanism rather than derived from `capMode` on the client, so a screen
+   * showing the bid panel does not have to keep a list of which mode names have an auction —
+   * two of them do now.
+   */
+  usesAuction: boolean
+  /** Total supply on offer at this year's auction (= the residual cap under hybrid). */
   auctionSupply: number
-  /** Auctioning mode: uniform clearing price, once the auction has closed. */
+  /** Uniform clearing price, once the auction has closed. */
   auctionPrice: number | null
-  /** Benchmarking mode: this year's tightened benchmark for the player's sector. */
+  /** Benchmark modes: this year's tightened benchmark for the player's sector. Under
+   *  hybrid this is the FULL sector benchmark; `you.freeAllocation` is the share issued. */
   sectorBenchmark: number | null
-  /** Benchmarking mode: the sector average the benchmark is set below. */
+  /** Benchmark modes: the sector average the benchmark is set against. */
   sectorAverage: number | null
   /** Previous settled year's discovered market price (VWAP) — a price signal. */
   prevMarketPrice: number | null
@@ -417,7 +448,9 @@ export interface HostSnapshot {
   regulatorPool: number | null
   config: HostConfigView
   leaderboard: LeaderboardRow[]
-  /** Auctioning mode: this year's clearing price (null before the auction closes). */
+  /** Whether this mode runs a cap-stage auction — see PlayerSnapshot.usesAuction. */
+  usesAuction: boolean
+  /** This year's clearing price (null before the auction closes). */
   auctionPrice: number | null
   /** Previous settled year's discovered market price (VWAP) — a price signal. */
   prevMarketPrice: number | null

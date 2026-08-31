@@ -22,6 +22,7 @@ function traderBot(id: string): Player {
     connected: true,
     score: 0,
     optimalScore: 0,
+    investmentGapTotal: 0,
     bankedCredits: 0,
     abatementInForce: 0,
     abatementCommitted: 0,
@@ -32,24 +33,34 @@ function traderBot(id: string): Player {
 }
 
 describe('cap mechanism registry', () => {
-  it('exposes all three modes, all implemented', () => {
+  it('exposes all four modes, all implemented', () => {
     expect(Object.keys(CAP_MECHANISMS).sort()).toEqual([
       'auctioning',
       'benchmarking',
       'grandfathering',
+      'hybrid',
     ])
     for (const mode of Object.values(CAP_MECHANISMS)) {
       expect(mode.implemented).toBe(true)
     }
   })
 
-  it('only auctioning runs a cap-stage auction', () => {
+  it('the auction-bearing modes are auctioning and hybrid', () => {
     expect(CAP_MECHANISMS.auctioning.usesAuction).toBe(true)
+    expect(CAP_MECHANISMS.hybrid.usesAuction).toBe(true)
     expect(CAP_MECHANISMS.benchmarking.usesAuction).toBe(false)
     expect(CAP_MECHANISMS.grandfathering.usesAuction).toBe(false)
   })
 
-  it('only auctioning offers a primary supply', () => {
+  // The views gate the sector-benchmark fields on this rather than on the mode name.
+  it('declares what its free allocation is derived from', () => {
+    expect(CAP_MECHANISMS.grandfathering.freeAllocation).toBe('history')
+    expect(CAP_MECHANISMS.benchmarking.freeAllocation).toBe('benchmark')
+    expect(CAP_MECHANISMS.hybrid.freeAllocation).toBe('benchmark')
+    expect(CAP_MECHANISMS.auctioning.freeAllocation).toBe('none')
+  })
+
+  it('only the auction-bearing modes offer a primary supply', () => {
     const baseline = 28332.7
     for (const mode of ['benchmarking', 'grandfathering'] as const) {
       expect(CAP_MECHANISMS[mode].poolFor(players, 11, DEFAULT_CONFIG, baseline)).toBe(0)
@@ -58,6 +69,9 @@ describe('cap mechanism registry', () => {
     expect(CAP_MECHANISMS.auctioning.poolFor(players, 11, DEFAULT_CONFIG, baseline)).toBe(
       Math.round(baseline * DEFAULT_CONFIG.allocation.auctionCapRatio * 10) / 10,
     )
+    expect(
+      CAP_MECHANISMS.hybrid.poolFor(players, 11, DEFAULT_CONFIG, baseline),
+    ).toBeGreaterThan(0)
   })
 })
 
@@ -117,6 +131,135 @@ describe('benchmarking', () => {
     // reference price — nothing else ever lands in regulatorGranted under either.
     expect(CAP_MECHANISMS.benchmarking.primaryPrice(record, DEFAULT_CONFIG, 12.4)).toBe(12.4)
     expect(CAP_MECHANISMS.grandfathering.primaryPrice(record, DEFAULT_CONFIG, 12.4)).toBe(12.4)
+  })
+})
+
+/**
+ * Hybrid: a share of the sector benchmark free, and the REST OF THE CAP auctioned.
+ *
+ * The identity every case here circles is `free + pool === cap`: the shares decide who is
+ * handed allowances and who has to bid for them, and they must not be able to change how
+ * many exist. That is the whole claim the mode makes to a class.
+ */
+describe('hybrid', () => {
+  const BASELINE = 28332.7
+  /** The class's total issuance for a year — what has to stay pinned to the cap. */
+  const issued = (config: typeof DEFAULT_CONFIG, year: number, ps = players) =>
+    Math.round(
+      (Object.values(CAP_MECHANISMS.hybrid.allocate(ps, year, 0, config)).reduce(
+        (a, b) => a + b,
+        0,
+      ) +
+        CAP_MECHANISMS.hybrid.poolFor(ps, year, config, BASELINE)) *
+        10,
+    ) / 10
+  const capFor = (config: typeof DEFAULT_CONFIG, year: number) =>
+    config.allocation.auctionCapRatio * BASELINE * Math.pow(config.allocation.capReductionFactor, year - 11)
+
+  /** Flat LRF (not the shipped decelerating schedule) so a year's cap is one power. */
+  const flat = (share: Partial<Record<(typeof players)[number]['industry'], number>>) =>
+    resolveConfig({
+      allocation: {
+        capReductionFactor: 0.97,
+        capReductionSchedule: [],
+        hybridFreeShare: share,
+      },
+    })
+
+  it('issues share × the sector benchmark, and nothing to an excluded sector', () => {
+    const config = flat({ 'Power & Utilities': 0, 'Heavy Materials': 1, Transport: 0.5 })
+    const allocation = CAP_MECHANISMS.hybrid.allocate(players, 11, 0, config)
+    for (const p of players) {
+      const share = config.allocation.hybridFreeShare[p.industry]
+      expect(allocation[p.id]).toBe(
+        Math.round(config.allocation.benchmark[p.industry] * share * 10) / 10,
+      )
+    }
+    // The exclusion is the headline behaviour: a 0 share means literally nothing free.
+    for (const p of players.filter((x) => x.industry === 'Power & Utilities')) {
+      expect(allocation[p.id]).toBe(0)
+    }
+  })
+
+  it('the auction sells the residual, so free + pool is the cap however the shares move', () => {
+    const generous = flat({
+      'Power & Utilities': 1,
+      'Heavy Materials': 1,
+      'Manufacturing & Chemicals': 0.5,
+      Transport: 0.5,
+    })
+    const stingy = flat({
+      'Power & Utilities': 0,
+      'Heavy Materials': 0.1,
+      'Manufacturing & Chemicals': 0,
+      Transport: 0,
+    })
+    // Wildly different distributions, one cap. Free allocation is deducted from the pool,
+    // never added on top of it — the property the whole mode rests on.
+    expect(issued(generous, 11)).toBeCloseTo(capFor(generous, 11), 0)
+    expect(issued(stingy, 11)).toBeCloseTo(capFor(stingy, 11), 0)
+    // …and the generous table really did shrink the auction rather than just relabel it.
+    expect(CAP_MECHANISMS.hybrid.poolFor(players, 11, generous, BASELINE)).toBeLessThan(
+      CAP_MECHANISMS.hybrid.poolFor(players, 11, stingy, BASELINE),
+    )
+  })
+
+  it('tightens both halves each year by the cap reduction factor', () => {
+    const config = flat({
+      'Power & Utilities': 0,
+      'Heavy Materials': 1,
+      'Manufacturing & Chemicals': 0.8,
+      Transport: 0.3,
+    })
+    const [p] = players
+    const share = config.allocation.hybridFreeShare[p.industry]
+    for (const year of [11, 12, 13]) {
+      const allocation = CAP_MECHANISMS.hybrid.allocate([p], year, 0, config)
+      const benchmark = Math.round(
+        config.allocation.benchmark[p.industry] * Math.pow(0.97, year - 11) * 10,
+      ) / 10
+      expect(allocation[p.id]).toBe(Math.round(benchmark * share * 10) / 10)
+      // The cap falls with it, so the identity holds in every year, not just the first.
+      expect(issued(config, year)).toBeCloseTo(capFor(config, year), 0)
+    }
+  })
+
+  it('clamps the pool at zero when the shares exhaust the cap', () => {
+    // Every sector at its full benchmark, against a cap ratio small enough that the free
+    // allocation alone overruns it. The mode degenerates to benchmarking rather than
+    // reporting a negative supply.
+    const config = resolveConfig({
+      allocation: {
+        auctionCapRatio: 0.05,
+        hybridFreeShare: {
+          'Power & Utilities': 1,
+          'Heavy Materials': 1,
+          'Manufacturing & Chemicals': 1,
+          Transport: 1,
+        },
+      },
+    })
+    expect(CAP_MECHANISMS.hybrid.poolFor(players, 11, config, BASELINE)).toBe(0)
+  })
+
+  it('gives pure-trader bots nothing and does not let them shrink the auction', () => {
+    const bot = traderBot('B1')
+    const allocation = CAP_MECHANISMS.hybrid.allocate([...players, bot], 11, 0, DEFAULT_CONFIG)
+    expect(allocation[bot.id]).toBe(0)
+    expect(
+      CAP_MECHANISMS.hybrid.computeFreeCreditLimit([...players, bot], DEFAULT_CONFIG),
+    ).toBe(CAP_MECHANISMS.hybrid.computeFreeCreditLimit(players, DEFAULT_CONFIG))
+    // A trader drawing free credits would have taken them out of the pool everyone bids in.
+    expect(CAP_MECHANISMS.hybrid.poolFor([...players, bot], 11, DEFAULT_CONFIG, BASELINE)).toBe(
+      CAP_MECHANISMS.hybrid.poolFor(players, 11, DEFAULT_CONFIG, BASELINE),
+    )
+  })
+
+  it('charges the auction clearing price for what was won there', () => {
+    // The free allocation never lands in `regulatorGranted`, so this price only ever
+    // applies to auctioned credits — which is what keeps the free half free.
+    expect(CAP_MECHANISMS.hybrid.primaryPrice({ auctionPrice: 31.5 } as never, DEFAULT_CONFIG, 12.4)).toBe(31.5)
+    expect(CAP_MECHANISMS.hybrid.primaryPrice({ auctionPrice: null } as never, DEFAULT_CONFIG, 12.4)).toBe(0)
   })
 })
 

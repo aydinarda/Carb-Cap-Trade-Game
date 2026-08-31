@@ -51,6 +51,7 @@ function hostConfigView(config: GameConfig): HostConfigView {
     auctionCapRatio: config.allocation.auctionCapRatio,
     capReductionFactor: config.allocation.capReductionFactor,
     benchmark: { ...config.allocation.benchmark },
+    hybridFreeShare: { ...config.allocation.hybridFreeShare },
     sectorAverage: sectorAverages(config),
     abatement: { ...config.abatement.sectors },
     abatementLifetimeCap: config.abatement.lifetimeCap,
@@ -73,29 +74,60 @@ function publicRoster(session: Session): PublicPlayerInfo[] {
 
 function leaderboard(session: Session): LeaderboardRow[] {
   const { baselineYear } = session.state.config.emissions
-  const skill = (p: Session['state']['players'][number]) => {
+  const { investmentWeight, pointsScale } = session.state.config.scoring
+
+  /**
+   * The two gaps, both in euros per tonne of baseline emission so they can be added.
+   *
+   * Dividing by the baseline is what makes the table size-neutral: a Power & Utilities
+   * company moves ten times the tonnes a Transport one does, and without this the ranking
+   * would be a list of who drew the big sectors.
+   */
+  const gaps = (p: Session['state']['players'][number]) => {
     const baseline = p.emissions[baselineYear] ?? 0
-    return baseline > 0 ? round1((p.score - p.optimalScore) / baseline) : round1(p.score - p.optimalScore)
+    const per = (value: number) => (baseline > 0 ? round1(value / baseline) : round1(value))
+    // Clamped at 0: the optimum is a minimum, so a negative gap is rounding, not skill.
+    return {
+      tradingGap: Math.max(0, per(p.score - p.optimalScore)),
+      investmentGap: Math.max(0, per(p.investmentGapTotal)),
+    }
   }
-  // Emitters ranked by skill; pure-trader bots ranked by raw P&L and pushed to the end.
+  const combined = (p: Session['state']['players'][number]) => {
+    const { tradingGap, investmentGap } = gaps(p)
+    return round1(tradingGap + investmentWeight * investmentGap)
+  }
+
+  // Emitters ranked on points; pure-trader bots have neither a baseline nor emissions to
+  // abate, so they keep raw P&L and are pushed to the end rather than being given a grade
+  // that would mean something different from everyone else's.
   const metric = (p: Session['state']['players'][number]) =>
-    isPureTrader(p) ? round1(p.score) : skill(p)
+    isPureTrader(p) ? round1(p.score) : combined(p)
+
   return [...session.state.players]
     .sort((a, b) => {
       const ta = isPureTrader(a)
       const tb = isPureTrader(b)
       if (ta !== tb) return ta ? 1 : -1
+      // Both metrics are "lower is better" — the gap directly, P&L because it is a cost.
       return metric(a) - metric(b)
     })
-    .map((p) => ({
-      id: p.id,
-      name: p.name,
-      industry: p.industry,
-      score: p.score,
-      normalizedScore: metric(p),
-      isBot: p.isBot,
-      botType: p.botType,
-    }))
+    .map((p) => {
+      const { tradingGap, investmentGap } = gaps(p)
+      return {
+        id: p.id,
+        name: p.name,
+        industry: p.industry,
+        score: p.score,
+        points: isPureTrader(p)
+          ? null
+          : round1(100 * Math.exp(-combined(p) / Math.max(1e-9, pointsScale))),
+        tradingGap,
+        investmentGap,
+        normalizedScore: metric(p),
+        isBot: p.isBot,
+        botType: p.botType,
+      }
+    })
 }
 
 function classAggregate(session: Session): ClassAggregate {
@@ -195,16 +227,21 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     abatement: state.config.abatement.sectors[player.industry],
     abatementLifetimeCap: session.abatementLifetimeCap,
     penaltyRate: state.config.market.penaltyRate,
+    usesAuction: session.usesAuction,
     auctionSupply: session.usesAuction ? (record?.regulatorPool ?? 0) : 0,
     auctionPrice: record?.auctionPrice ?? null,
-    // Benchmarking: what this player's sector benchmark is worth this year, and the
-    // sector average it is set below — the two numbers the cap-stage panel explains.
+    // What this player's sector benchmark is worth this year, and the sector average it is
+    // set against — the two numbers the benchmark cap-stage panels explain. Gated on what
+    // the mechanism says its free allocation is DERIVED from, not on the mode name, so a
+    // combined regime inherits the panel without this file learning a fourth name.
     sectorBenchmark:
-      state.capMode === 'benchmarking'
+      session.freeAllocationBasis === 'benchmark'
         ? benchmarkFor(player, state.currentYear, state.config)
         : null,
     sectorAverage:
-      state.capMode === 'benchmarking' ? sectorAverages(state.config)[player.industry] : null,
+      session.freeAllocationBasis === 'benchmark'
+        ? sectorAverages(state.config)[player.industry]
+        : null,
     prevMarketPrice: session.previousMarketPrice(),
     market:
       record && (state.phase === 'trade' || settled)
@@ -324,6 +361,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
     config: hostConfigView(state.config),
     classAggregate: classAggregate(session),
     leaderboard: leaderboard(session),
+    usesAuction: session.usesAuction,
     auctionPrice: record?.auctionPrice ?? null,
     prevMarketPrice: session.previousMarketPrice(),
     market: record ? buildMarketView(record.orders, record.trades) : null,

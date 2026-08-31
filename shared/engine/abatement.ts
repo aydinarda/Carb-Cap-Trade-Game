@@ -183,6 +183,93 @@ export function planInstall(args: {
 }
 
 /**
+ * The net worth of an install step, at the price the decision was actually taken at.
+ *
+ * `horizon` years of savings at `price`, less what the step cost — the same undiscounted
+ * arithmetic `planInstall` gates on, exposed so the scorer and the agents cannot disagree
+ * about what a retrofit was worth. Doing nothing is worth exactly 0, which is why a step
+ * whose fee outruns its savings scores NEGATIVE: over-investing is a mistake in the same
+ * currency as under-investing, and the leaderboard should say so.
+ */
+export function installValue(args: {
+  step: number
+  cost: number
+  unabated: number
+  price: number
+  horizon: number
+}): number {
+  const { step, cost, unabated, price, horizon } = args
+  if (step <= 0) return 0
+  return round1(horizon * price * unabated * step - cost)
+}
+
+/**
+ * How much value a company left on the table with this year's investment decision.
+ *
+ * **Why this can be scored at all.** `optimalYearCost` deliberately does not score the
+ * investment: capacity is installed a year ahead, so at settlement the spend is sunk and
+ * passes through both sides of `score − optimalScore` unchanged. The stated objection to
+ * fixing that was that scoring the decision would mean scoring it against a price path
+ * nobody knew at the time.
+ *
+ * This measures it against a price path everybody DID know: `price` is the year the decision
+ * was taken in, and the rule it is compared to is `planInstall` — the same myopic
+ * size-and-payback rule the compliance bots and the simulated students already follow. So it
+ * is a benchmark the class could have hit, using only information the class had.
+ *
+ * Returns euros of forgone value, never negative: beating the rule (a step the myopic
+ * benchmark would not have taken but which paid off at this price) scores 0, not a bonus.
+ * The rule is a floor on competence, not a target to be gamed by out-guessing it.
+ */
+export function investmentGap(args: {
+  spec: AbatementInput
+  /** The price the decision was taken at — the year's discovered market price. */
+  price: number
+  /** Un-abated emissions: the base both the step and its savings are fractions of. */
+  unabated: number
+  /** Capacity already committed when the year opened. */
+  committedBefore: number
+  /** Capacity committed by the time the year closed. */
+  committedAfter: number
+  /** What the company actually paid for that step, fees included. */
+  actualCost: number
+  lifetimeCap: number
+  fixedCost: number
+  horizon: number
+  minStep?: number
+}): number {
+  const { spec, price, unabated, committedBefore, committedAfter, actualCost } = args
+  const yours = installValue({
+    step: Math.max(0, committedAfter - committedBefore),
+    cost: actualCost,
+    unabated,
+    price,
+    horizon: args.horizon,
+  })
+  const plan = planInstall({
+    spec,
+    price,
+    unabated,
+    committed: committedBefore,
+    lifetimeCap: args.lifetimeCap,
+    fixedCost: args.fixedCost,
+    horizon: args.horizon,
+    minStep: args.minStep,
+  })
+  // `install: false` means the rule would have sat this year out, and sitting out is worth 0.
+  const best = plan.install
+    ? installValue({
+        step: plan.target - committedBefore,
+        cost: plan.cost,
+        unabated,
+        price,
+        horizon: args.horizon,
+      })
+    : 0
+  return round1(Math.max(0, best - yours))
+}
+
+/**
  * The minimum achievable cost for a company playing this year perfectly: take this year's
  * emissions as given, and settle them against the credits it holds — buy the shortfall or
  * sell the surplus. Used as the per-company benchmark so the leaderboard measures skill
@@ -193,39 +280,62 @@ export function planInstall(args: {
  * sunk. `abatementSpend` is therefore passed straight through to both sides of
  * `score − optimalScore`, where it cancels.
  *
- * The stated consequence, which is a real cost of the lag and not an oversight: **this
- * leaderboard now measures trading skill only.** A student who never installs and one who
- * installs perfectly are indistinguishable on this axis. Scoring the investment decision
- * would mean scoring it against a price path nobody knew at the time — a benchmark the
- * class could not have hit, which is worse.
+ * So this function measures **trading skill only**, and that is now deliberate rather than a
+ * gap: the investment decision is scored separately by `investmentGap`, against the price
+ * that was on screen when it was taken. Keeping them apart is what lets each be measured on
+ * its own information — this one on the year that has just closed, that one on the year the
+ * decision was made in. The leaderboard combines the two.
  *
- * `credits` is everything the company starts the year with, INCLUDING the carry: a
- * banked surplus is real credits it can sell, and a make-good debt is real credits
- * it must replace. Leaving the carry out made the benchmark assume a debtor had
- * allowances it did not have, which inflated its measured skill gap year after year
- * and effectively punished the same debt a third time (after the fine and the
- * obligation itself).
+ * `endowment` is what the company received WITHOUT paying for it: its free allocation plus
+ * the carry. The carry belongs here because a banked surplus is real credits it can sell and
+ * a make-good debt is real credits it must replace — leaving it out made the benchmark
+ * assume a debtor held allowances it did not have, and punished the same debt a third time
+ * (after the fine and the obligation itself).
  *
- * `penaltyRate` caps what covering a shortfall can cost: nobody playing perfectly
- * pays more than the fine to buy an allowance, so the residual is settled at
- * min(price, penaltyRate). Surplus is always sold at the market price.
+ * **What it must NOT include is anything the company bought at the auction.** That is the
+ * defect this parameter was renamed to fix. `regulatorGranted` used to be counted here, so
+ * the benchmark was handed the auction award for free while the player was charged
+ * `award × clearingPrice` for it. Under a regime that auctions most of the cap that
+ * difference is the player's entire allowance bill, it is identical for everyone, and no
+ * decision can avoid it — measured over a balanced ten-year class it put the median gap at
+ * 525 €/t of baseline under auctioning against 71 under grandfathering, so a leaderboard
+ * comparing the two was mostly reporting which mode was being played.
  *
- * OPEN QUESTION, under review — do not "fix" this in passing. That cap assumes paying the
- * fine ends the matter, but `settleYear` carries the uncovered tonne forward as a make-good
- * debt, so defaulting really costs the fine PLUS settling the tonne later. The consequence
- * is quantified in `sim/sweeps/price-calibration.ipynb` (§6.5); the shipped behaviour is
- * deliberately unchanged until that has been read.
+ * `primaryPrice` is the other half of that fix: where there WAS an auction to bid into, the
+ * cheapest way to cover a tonne was the lower of the clearing price and the market, so that
+ * is what perfect play paid. Pass it only for a mechanism that actually ran one — under the
+ * free-allocation modes the field carries the trader-bot seed price, which no student could
+ * buy at. Surplus is always sold at the market price: there is no selling into an auction.
+ *
+ * **Both sides of the position settle at the market price, and there is no penalty cap.**
+ *
+ * There used to be one: a shortfall was settled at `min(price, penaltyRate)`, on the reading
+ * that nobody playing perfectly pays more than the fine for an allowance. That reading is
+ * wrong in this game, and the docstring said so as an open question for as long as it
+ * shipped. `settleYear` carries an uncovered tonne forward as a make-good debt on top of the
+ * fine, so defaulting costs `penaltyRate` NOW and the tonne LATER — approximately
+ * `penaltyRate + price`, which is what `bots.fixes.ceilingIncludesCarry` has been pricing
+ * for the agents all along. Since `price ≤ penaltyRate + price` for any non-negative fine,
+ * buying is always at least as cheap as defaulting and the cap could never bind for a player
+ * actually playing well.
+ *
+ * What the cap did instead was understate the benchmark whenever the market traded above the
+ * fine: it credited a perfect player with covering at €100 while the class was paying €130,
+ * so everyone's measured gap absorbed a €30 difference nobody could have avoided. Removing
+ * it makes a high-price year score the decisions taken in it rather than the price level.
  */
 export function optimalYearCost(
   planned: number,
-  credits: number,
+  endowment: number,
   abatementSpend: number,
   price: number,
-  penaltyRate?: number,
+  primaryPrice?: number,
 ): number {
-  const cover = planned - credits // > 0 → buy the shortfall; < 0 → sell the surplus
+  const cover = planned - endowment // > 0 → buy the shortfall; < 0 → sell the surplus
   const coverRate =
-    cover > 0 && penaltyRate !== undefined ? Math.min(price, penaltyRate) : price
+    cover > 0 && primaryPrice !== undefined && primaryPrice > 0
+      ? Math.min(price, primaryPrice)
+      : price
   return round1(abatementSpend + coverRate * cover)
 }
 

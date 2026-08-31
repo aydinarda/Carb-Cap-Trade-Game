@@ -10,7 +10,21 @@ import { useGame } from '../../net/GameContext'
 
 const r1 = (n: number) => Math.round(n * 10) / 10
 
-/** Auctioning cap stage: submit a sealed bid (quantity + max price). */
+/**
+ * What the company still has to buy: this year's emissions less everything it already
+ * holds — free allocation and the carry banked from last year.
+ *
+ * Only the residual, not the whole expectation. Under a regime that issues free credits
+ * AND runs an auction, defaulting the quantity to the full planned emission would have
+ * every company bid for tonnes it has already been given. Under pure auctioning the free
+ * allocation is zero, so this only adds the banked carry the default used to ignore.
+ */
+function residualNeed(snap: PlayerSnapshot): number {
+  const held = (snap.you.freeAllocation ?? 0) + (snap.you.banked ?? 0)
+  return Math.max(0, Math.round(snap.you.plannedEmission - held))
+}
+
+/** Cap-stage auction: submit a sealed bid (quantity + max price). */
 export function AuctionBidPanel({ snap }: { snap: PlayerSnapshot }) {
   const { submitBid } = useGame()
   const expected = snap.you.plannedEmission
@@ -18,12 +32,12 @@ export function AuctionBidPanel({ snap }: { snap: PlayerSnapshot }) {
   const cleared = snap.auctionPrice !== null
 
   const priceAnchor = snap.prevMarketPrice ?? 10
-  const [qty, setQty] = useState<number>(committed?.qty ?? Math.round(expected))
+  const [qty, setQty] = useState<number>(committed?.qty ?? residualNeed(snap))
   const [price, setPrice] = useState<number>(committed?.price ?? r1(priceAnchor))
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    setQty(snap.you.auctionBid?.qty ?? Math.round(snap.you.plannedEmission))
+    setQty(snap.you.auctionBid?.qty ?? residualNeed(snap))
     setPrice(snap.you.auctionBid?.price ?? r1(snap.prevMarketPrice ?? 10))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap.currentYear])
@@ -70,10 +84,15 @@ export function AuctionBidPanel({ snap }: { snap: PlayerSnapshot }) {
           Auction — sealed bid, Year {snap.currentYear}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {/* What this company has to cover — it is what the quantity field defaults to, so
-              without it on screen the default is a number out of nowhere. */}
+          {/* What this company still has to BUY — it is what the quantity field defaults to,
+              so without it on screen the default is a number out of nowhere. Where credits
+              are already held the full expectation is shown too, or the residual looks
+              unrelated to the emission the rest of the screen talks about. */}
           <span className="text-xs font-mono text-muted-foreground border border-border rounded-full px-2 py-0.5">
-            you need ≈ {expected.toLocaleString()} t
+            you still need ≈ {residualNeed(snap).toLocaleString()} t
+            {residualNeed(snap) !== Math.round(expected) && (
+              <> of {expected.toLocaleString()}</>
+            )}
           </span>
           {snap.prevMarketPrice !== null && (
             <span className="text-xs font-mono text-primary border border-primary/30 rounded-full px-2 py-0.5">

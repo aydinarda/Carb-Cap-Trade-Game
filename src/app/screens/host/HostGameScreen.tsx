@@ -60,7 +60,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
         <div className="flex-1 min-w-48">
           {/* Only a cap-stage auction has something to wait on; the free-allocation
               modes have already issued everything, so report the scarcity instead. */}
-          {snap.phase === 'cap' && snap.capMode === 'auctioning' && (
+          {snap.phase === 'cap' && snap.usesAuction && (
             <div>
               <div className="flex justify-between text-xs font-mono text-muted-foreground mb-1.5">
                 <span>Bids submitted</span>
@@ -71,7 +71,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
               <Progress value={submittedPct} className="h-2" />
             </div>
           )}
-          {snap.phase === 'cap' && snap.capMode !== 'auctioning' && (
+          {snap.phase === 'cap' && !snap.usesAuction && (
             <span className="text-sm text-muted-foreground font-mono">
               Allocations issued ·{' '}
               <span className="text-foreground font-bold">
@@ -93,7 +93,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           )}
           {(snap.phase === 'reveal' || snap.phase === 'yearSummary') && (
             <span className="text-sm text-muted-foreground font-mono">
-              {snap.capMode === 'auctioning' && snap.auctionPrice !== null ? (
+              {snap.usesAuction && snap.auctionPrice !== null ? (
                 <>
                   Auction cleared at{' '}
                   <span className="text-accent font-bold">{snap.auctionPrice}</span> / credit ·{' '}
@@ -136,9 +136,16 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           label="Free allocation (this year)"
           value={agg.totalFreeAllocation ?? 0}
           unit="cr"
-          hint="this year, by mode"
+          hint={
+            // Under a regime that auctions the residual cap the two numbers are one
+            // subtraction, and the whole point is that they add up to the cap — so say so
+            // here rather than leaving the instructor to add them off the projector.
+            snap.usesAuction && (agg.totalFreeAllocation ?? 0) > 0
+              ? `+ ${pool.toLocaleString()} auctioned = ${((agg.totalFreeAllocation ?? 0) + pool).toLocaleString()} cap`
+              : 'this year, by mode'
+          }
         />
-        {snap.capMode === 'auctioning' ? (
+        {snap.usesAuction ? (
           <StatCard
             label="Auction demand / supply"
             value={`${requests.toLocaleString()} / ${pool.toLocaleString()}`}
@@ -231,7 +238,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           <div className="rounded-xl border border-border bg-card/70 p-5">
             <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
               <Trophy size={12} className="text-accent" />
-              Leaderboard — closest to your own optimum wins (skill, size-neutral) · click a row for history
+              Leaderboard — points out of 100, highest wins (trading + investment vs your own optimum, size-neutral) · click a row for the breakdown
             </div>
             <LeaderboardTable rows={snap.leaderboard} onRowClick={setHistoryId} />
           </div>

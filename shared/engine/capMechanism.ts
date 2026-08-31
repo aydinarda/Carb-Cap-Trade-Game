@@ -13,6 +13,16 @@ export interface CapMechanism {
   readonly implemented: boolean
   /** Does the cap stage run a sealed-bid primary auction? */
   readonly usesAuction: boolean
+  /**
+   * What the free allocation is derived from — the views ask this instead of the mode name.
+   *
+   * `'history'` is the company's own past emissions (grandfathering), `'benchmark'` a flat
+   * sector figure it is measured against, `'none'` no free issuance at all. The player
+   * snapshot sends the sector benchmark and its sector average whenever this is
+   * `'benchmark'`, which is what lets a combined regime inherit that panel without
+   * `views.ts` learning a fourth mode name.
+   */
+  readonly freeAllocation: 'none' | 'history' | 'benchmark'
   /** Total free credits available to the class, from the baseline year. */
   computeFreeCreditLimit(players: Player[], config: GameConfig): number
   /** Per-player free credit allocation for the target year. */

@@ -43,6 +43,91 @@ describe('leaderboard normalization', () => {
   })
 })
 
+describe('leaderboard points', () => {
+  const board = (s: Session) => hostSnapshot(s).leaderboard
+
+  it('scores emitters 0–100 with higher first, and leaves traders ungraded', () => {
+    const s = new Session('hybrid', 1)
+    s.addPlayer('Alice', 'Power & Utilities')
+    s.addPlayer('Bob', 'Transport')
+    s.addBot('compliance')
+    s.addBot('marketMaker')
+    runFullYear(s)
+
+    const rows = board(s)
+    const emitters = rows.filter((r) => r.points !== null)
+    expect(emitters.length).toBe(3)
+    for (const row of emitters) {
+      expect(row.points!).toBeGreaterThanOrEqual(0)
+      expect(row.points!).toBeLessThanOrEqual(100)
+      // Both halves are reported, both non-negative — the gap is a distance, never a credit.
+      expect(row.tradingGap).toBeGreaterThanOrEqual(0)
+      expect(row.investmentGap).toBeGreaterThanOrEqual(0)
+    }
+    // Ranked by points descending, which is the direction the table now reads.
+    for (let i = 1; i < emitters.length; i++) {
+      expect(emitters[i - 1].points!).toBeGreaterThanOrEqual(emitters[i].points!)
+    }
+    // A pure trader has no baseline to normalize against and nothing to abate.
+    const trader = rows.find((r) => r.botType === 'marketMaker')!
+    expect(trader.points).toBeNull()
+    expect(trader.normalizedScore).toBe(round1(s.getPlayer(trader.id)!.score))
+  })
+
+  it('awards 100 only when nothing was left on the table', () => {
+    // A gap of exactly 0 is the only way to reach the top: `100 × exp(0)`.
+    const s = new Session('grandfathering', 7)
+    s.addPlayer('Alice', 'Transport')
+    runFullYear(s)
+    const [row] = board(s)
+    const gap = row.tradingGap + DEFAULT_GAME_CONFIG.scoring.investmentWeight * row.investmentGap
+    expect(row.points).toBe(
+      round1(100 * Math.exp(-gap / DEFAULT_GAME_CONFIG.scoring.pointsScale)),
+    )
+    if (gap === 0) expect(row.points).toBe(100)
+  })
+
+  it('counts the investment decision, which the old metric could not see', () => {
+    // Two identical companies; one follows the payback rule, one ignores it. Under the
+    // previous scoring their spend cancelled out and they were indistinguishable.
+    const build = (invest: boolean) => {
+      const s = new Session('benchmarking', 3)
+      s.addPlayer('Alice', 'Power & Utilities')
+      s.startYear()
+      s.closeCapStage()
+      s.openTrade()
+      if (invest) s.setAbatement('P1', 0.3)
+      s.closeTrade()
+      return board(s)[0]
+    }
+    const investor = build(true)
+    const idler = build(false)
+    // The idler passed up value the rule says was there, so it carries a gap the
+    // investor does not — and that has to show up in the points.
+    expect(idler.investmentGap).toBeGreaterThan(investor.investmentGap)
+    expect(idler.points!).toBeLessThan(investor.points!)
+  })
+
+  it('does not charge the auction award to the benchmark as if it were free', () => {
+    // The defect the endowment fix removed: under a mode that auctions the cap, the
+    // benchmark used to be handed every bought allowance for nothing, so a player who bid
+    // sensibly still measured a gap the size of their whole bill. A single company bidding
+    // to cover itself at a sane price must not look catastrophic.
+    const s = new Session('auctioning', 11)
+    s.addPlayer('Alice', 'Transport')
+    s.startYear()
+    const planned = s.plannedEmission('P1')
+    s.submitBid('P1', planned, 40)
+    s.closeCapStage()
+    s.openTrade()
+    s.closeTrade()
+    const [row] = board(s)
+    // Covered almost exactly, at a price the auction cleared at: the residual gap is the
+    // realization noise, not the allowance bill. Well under the fine per baseline tonne.
+    expect(row.tradingGap).toBeLessThan(DEFAULT_GAME_CONFIG.market.penaltyRate)
+  })
+})
+
 describe('classAggregate', () => {
   it('reports auction demand only under auctioning and nulls before realization', () => {
     const s = new Session('auctioning', 1)

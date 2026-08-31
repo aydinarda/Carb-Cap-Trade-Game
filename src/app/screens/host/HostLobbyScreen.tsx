@@ -30,9 +30,22 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
   const joinUrl = `${window.location.origin}/`
   // Previewed in the lobby, before the engine has issued anything. Pure-trader bots
   // are excluded, matching the benchmarking mechanism.
-  const benchmarkTotal = snap.players
-    .filter((p) => !(p.isBot && (p.botType === 'marketMaker' || p.botType === 'speculator')))
-    .reduce((sum, p) => sum + (snap.config.benchmark[p.industry] ?? 0), 0)
+  const emitters = snap.players.filter(
+    (p) => !(p.isBot && (p.botType === 'marketMaker' || p.botType === 'speculator')),
+  )
+  const benchmarkTotal = emitters.reduce(
+    (sum, p) => sum + (snap.config.benchmark[p.industry] ?? 0),
+    0,
+  )
+  // Hybrid preview, mirroring shared/engine/hybrid.ts at the opening year (no cap reduction
+  // applies to round one, so the factor is 1 and can be left out here).
+  const hybridFreeTotal = emitters.reduce(
+    (sum, p) =>
+      sum + (snap.config.benchmark[p.industry] ?? 0) * (snap.config.hybridFreeShare[p.industry] ?? 0),
+    0,
+  )
+  const hybridCap = snap.classAggregate.totalBaselineEmissions * snap.config.auctionCapRatio
+  const hybridPool = Math.max(0, hybridCap - hybridFreeTotal)
 
   const addBots = () => {
     const count = Math.max(1, Math.min(20, Math.floor(Number(botCount) || 1)))
@@ -208,6 +221,24 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
             <div className="text-xs text-muted-foreground mt-1 font-mono">
               → free credits = {(Math.round(benchmarkTotal * 10) / 10).toLocaleString()} from
               per-sector benchmarks, tightened every year (see settings)
+            </div>
+          )}
+          {snap.capMode === 'hybrid' && (
+            <div className="text-xs text-muted-foreground mt-1 font-mono">
+              → cap = {(Math.round(hybridCap * 10) / 10).toLocaleString()} ·{' '}
+              {(Math.round(hybridFreeTotal * 10) / 10).toLocaleString()} issued free ·{' '}
+              <span className={hybridPool > 0 ? 'text-accent' : 'text-destructive'}>
+                {(Math.round(hybridPool * 10) / 10).toLocaleString()} auctioned
+              </span>
+              {hybridPool <= 0 && (
+                // Not a hard error — the year still plays — but the auction the mode exists
+                // for would never open, so it must not be discovered mid-class.
+                <div className="text-destructive mt-1">
+                  The free shares use up the whole cap: nothing would be auctioned and this
+                  plays as pure benchmarking. Lower the shares or raise the auction supply
+                  ratio in settings.
+                </div>
+              )}
             </div>
           )}
         </div>

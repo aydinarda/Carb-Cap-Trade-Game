@@ -44,7 +44,15 @@ export function EmissionsRevealScreen({ snap }: { snap: PlayerSnapshot }) {
           label="Credits held"
           value={cover}
           unit="cr"
-          hint={snap.capMode === 'auctioning' ? 'won at auction' : 'free allocation'}
+          hint={
+            // Where the credits came from. Under a regime that does both, say both — the
+            // mode name alone no longer answers it.
+            snap.usesAuction
+              ? (snap.you.freeAllocation ?? 0) > 0
+                ? 'free allocation + won at auction'
+                : 'won at auction'
+              : 'free allocation'
+          }
         />
         <StatCard label="Expected" value={expected} unit="tCO₂" tone="accent" />
         <StatCard

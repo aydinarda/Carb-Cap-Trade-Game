@@ -16,6 +16,8 @@ export interface ClientToServerEvents {
     payload: {
       penaltyRate?: number
       benchmark?: Partial<Record<Industry, number>>
+      /** Hybrid mode: per-sector share of the benchmark issued free (0..1; 0 = none). */
+      hybridFreeShare?: Partial<Record<Industry, number>>
       abatement?: Partial<Record<Industry, { a: number; b: number }>>
       auctionCapRatio?: number
       capReductionFactor?: number

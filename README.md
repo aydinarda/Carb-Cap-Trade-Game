@@ -15,6 +15,7 @@ reference — never edit that folder). Currently implemented:
 | **Grandfathering** | ✅ fully playable — free credits ∝ past ten-year emissions, cap = 80% of class baseline |
 | **Benchmarking** | ✅ fully playable — a flat sector benchmark set 40% below the sector average, tightening yearly by the LRF; no primary sale, so the gap is closed by cutting emissions or on the market |
 | **Auctioning** | ✅ fully playable — no free credits; a single-round sealed-bid uniform-price auction sells a supply that shrinks each year by the LRF |
+| **Hybrid** | ✅ fully playable — chosen sectors receive a share of their benchmark free, and the *residual* cap is auctioned. Free allocation is **deducted** from the auction pool, never added on top, so `Σfree + pool` is the cap however the shares are set. Ships at Power & Utilities 0.45 / Heavy Materials 0.21 / others 0 — about a quarter of the cap free, which `hybrid-share-sweep` puts clear of both walls (VWAP 68.8, against 74.6 auctioning and 23.4 benchmarking) |
 | **Student market** | ✅ order book: limit buy/sell orders, price-time priority, partial fills, no shorting — prices come entirely from students |
 | **Abatement** | ✅ each company chooses a cut fraction against its sector MAC curve (`a + b·f`); optimal play is where marginal cost meets the carbon price |
 | **Penalty settlement** | ✅ uncovered tonnes are charged `penaltyRate` each — the effective ceiling on the market price |
@@ -22,9 +23,22 @@ reference — never edit that folder). Currently implemented:
 | **Market bots** | ✅ four archetypes (compliance, market maker, speculator, noise) in any mode with a market; they anchor to the previous year's price with the penalty as the ceiling. **About five is the sweet spot** — two market makers already keep the book two-sided, and past that extra bots cost CPU without tightening the market |
 | **Mode switching** | ✅ instructor can change the cap mechanism in the lobby and between years |
 
-Scores are cumulative costs — abatement spend + credit purchases − sale income +
-penalties — and the leaderboard ranks emitters by distance from their own optimum,
-so it measures skill rather than which industry they drew.
+A company's raw score is its cumulative cost — abatement spend + credit purchases − sale
+income + penalties. The **leaderboard** turns that into **points out of 100, highest wins**,
+measuring two decisions against what each was worth at the prices actually on screen:
+
+- **trading gap** — cost above the cheapest way that year's emissions could have been
+  covered, given what the company was endowed with (free allocation + carry). Where there
+  was an auction, "cheapest" is the lower of the clearing price and the market.
+- **investment gap** — value forgone on the retrofit decision, against the same payback rule
+  the bots follow, at the price that was known when the decision was taken.
+
+Both are divided by the company's baseline emission, so the table is size-neutral, then
+combined and mapped through `100 × exp(−gap / pointsScale)`. Measured over 2 000 simulated
+students the behaviour archetypes separate cleanly — `rational` 63 points, `hedger` 48,
+`opportunist` 32, `passive` 1 — so it measures skill rather than which industry they drew.
+Pure-trader bots get no points (no baseline, nothing to abate) and are ranked after the
+emitters on raw P&L. `scoring.investmentWeight` and `scoring.pointsScale` are the two knobs.
 
 ## Run locally
 
@@ -53,7 +67,12 @@ pnpm start      # single server on :3001 serving both
 3. **Start Year 11** — the roster locks, free credits are allocated.
 4. Cap stage: under auctioning students submit a sealed bid (quantity + max price);
    under grandfathering and benchmarking there is nothing to submit — the panel
-   shows the allocation and the gap it leaves.
+   shows the allocation and the gap it leaves. Under **hybrid** it is both at once:
+   the panel shows what the sector was issued free and asks for a bid on the residual,
+   which is zero-defaulted for a sector whose share is 0.
+   Set the per-sector free shares in the lobby ("Free allocation share") — the class
+   baseline box shows the resulting `cap = free + auctioned` split and warns if the
+   shares leave nothing to auction.
 5. **Close cap stage** — the auction clears (auctioning), then expected emissions
    are shown. Realized emissions are drawn at year end, not here.
 6. **Open the market** — students post limit buy/sell orders; the book matches them
@@ -80,6 +99,8 @@ pnpm typecheck       # client, server and sim
 node scripts/bots-smoke.mjs    # auctioning + bots
 node scripts/bench-smoke.mjs   # benchmarking: allocation, tightening, seeded traders
 node scripts/gf-smoke.mjs      # grandfathering: bots quote both sides
+node scripts/hybrid-smoke.mjs  # hybrid: the free/auctioned split, and that it holds as
+                               # the cap tightens. Set GAME_URL to point at another port.
 ```
 
 ## Deploy to Render
@@ -115,7 +136,7 @@ consider the paid starter instance for game day.
 shared/config/    GameConfig — every tunable number in one nested object, plus the
                   deep-merge that turns a partial override into a full config
 shared/           types, constants (the sector tables), event contract, game engine
-  engine/         playerGeneration, emissions, order book, settlement; the three
+  engine/         playerGeneration, emissions, order book, settlement; the four
                   allocation regimes behind one CapMechanism interface; and the
                   abatement MAC curves behind one AbatementModel interface
 server/bots/      four bot archetypes; stepBots() advances them one tick and is
@@ -143,6 +164,7 @@ shipped engine, not a model of it.
 pnpm sim -- --list                                  # the scenario catalog
 pnpm sim -- --scenario depth-sweep --seeds 20       # one sweep, 20 seeds each
 pnpm sim -- --scenario abatement-models --trades    # also record every trade
+pnpm sim -- --scenario hybrid-share-sweep --seeds 30 # where hybrid separates from auctioning
 pnpm sim                                            # everything, 5 seeds
 ```
 

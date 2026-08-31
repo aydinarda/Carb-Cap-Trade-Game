@@ -4,6 +4,7 @@ import { EmissionHistoryChart } from '../../components/game/charts'
 import { CAP_FLOW } from '../../components/game/theme'
 import { AuctionBidPanel } from './AuctionBidPanel'
 import { BenchmarkPanel } from './BenchmarkPanel'
+import { HybridCapPanel } from './HybridCapPanel'
 
 export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
   const historyPanel = (
@@ -20,6 +21,18 @@ export function CapStageScreen({ snap }: { snap: PlayerSnapshot }) {
     return (
       <div className="flex flex-col gap-5">
         <AuctionBidPanel snap={snap} />
+        {historyPanel}
+      </div>
+    )
+  }
+
+  // Hybrid: a share of the sector benchmark free, then an auction for the residual cap.
+  // Both halves happen in the same cap stage, so the panel shows the allocation and asks
+  // for a bid on what it leaves uncovered.
+  if (snap.capMode === 'hybrid') {
+    return (
+      <div className="flex flex-col gap-5">
+        <HybridCapPanel snap={snap} />
         {historyPanel}
       </div>
     )

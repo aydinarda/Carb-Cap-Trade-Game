@@ -12,6 +12,7 @@ export const auctioning: CapMechanism = {
   mode: 'auctioning',
   implemented: true,
   usesAuction: true,
+  freeAllocation: 'none',
   computeFreeCreditLimit() {
     return 0
   },

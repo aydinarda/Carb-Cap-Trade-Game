@@ -37,6 +37,7 @@ export const grandfathering: CapMechanism = {
   mode: 'grandfathering',
   implemented: true,
   usesAuction: false,
+  freeAllocation: 'history',
   computeFreeCreditLimit,
   // Free allocation is the only issuance — there is no primary sale.
   poolFor() {

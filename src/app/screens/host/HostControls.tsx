@@ -46,6 +46,9 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
   const [benchmark, setBenchmark] = useState<Record<string, string>>(() =>
     Object.fromEntries(Object.entries(config.benchmark).map(([k, v]) => [k, String(v)])),
   )
+  const [hybridShare, setHybridShare] = useState<Record<string, string>>(() =>
+    Object.fromEntries(Object.entries(config.hybridFreeShare).map(([k, v]) => [k, String(v)])),
+  )
   const [auctionCapRatio, setAuctionCapRatio] = useState(String(config.auctionCapRatio))
   const [capReduction, setCapReduction] = useState(String(config.capReductionFactor))
   const [abateCap, setAbateCap] = useState(String(config.abatementLifetimeCap))
@@ -57,6 +60,7 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
   // resync several times a second and wiped whatever the instructor was mid-way through
   // typing. The scalars above are primitives and compare fine as they are.
   const benchmarkKey = JSON.stringify(config.benchmark)
+  const hybridShareKey = JSON.stringify(config.hybridFreeShare)
   useEffect(() => {
     setPenalty(String(config.penaltyRate))
     setOpeningRef(String(config.openingReferenceFraction))
@@ -66,6 +70,9 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
     setAbateCap(String(config.abatementLifetimeCap))
     setAbateFee(String(config.abatementFixedCost))
     setBenchmark(Object.fromEntries(Object.entries(config.benchmark).map(([k, v]) => [k, String(v)])))
+    setHybridShare(
+      Object.fromEntries(Object.entries(config.hybridFreeShare).map(([k, v]) => [k, String(v)])),
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     config.penaltyRate,
@@ -76,6 +83,7 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
     config.abatementLifetimeCap,
     config.abatementFixedCost,
     benchmarkKey,
+    hybridShareKey,
   ])
 
   const save = async () => {
@@ -90,6 +98,9 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
       abatementFixedCost: Number(abateFee),
       benchmark: Object.fromEntries(
         Object.entries(benchmark).map(([k, v]) => [k, Number(v)]),
+      ),
+      hybridFreeShare: Object.fromEntries(
+        Object.entries(hybridShare).map(([k, v]) => [k, Number(v)]),
       ),
     })
     setBusy(false)
@@ -211,6 +222,39 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
             )
           })}
         </div>
+      </div>
+      <div className="pt-1 mt-1 border-t border-border">
+        <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-2">
+          Free allocation share (hybrid mode)
+        </div>
+        {/* The whole distributional decision of the hybrid mode, one number per sector.
+            0 sends that sector to the auction for every tonne; 1 hands it the full
+            benchmark. The hint works the share out in credits, because a bare "0.8" does
+            not tell an instructor what the sector actually receives. */}
+        <div className="flex flex-col gap-2">
+          {(Object.keys(hybridShare) as Industry[]).map((industry) => {
+            const share = Number(hybridShare[industry])
+            const benchmarkValue = Number(benchmark[industry])
+            const credits =
+              Number.isFinite(share) && Number.isFinite(benchmarkValue)
+                ? Math.round(share * benchmarkValue * 10) / 10
+                : null
+            return field(
+              industry,
+              hybridShare[industry],
+              (v) => setHybridShare((h) => ({ ...h, [industry]: v })),
+              share === 0
+                ? 'no free credits — buys everything at the auction'
+                : credits !== null
+                  ? `${credits.toLocaleString()} cr free per company, out of the auction pool`
+                  : 'share of the sector benchmark issued free (0–1)',
+            )
+          })}
+        </div>
+        <p className="text-[10px] text-muted-foreground font-mono mt-2">
+          Free credits are deducted from the auction supply, not added to it — the cap stays
+          the same however these are set.
+        </p>
       </div>
       <Button
         variant="outline"

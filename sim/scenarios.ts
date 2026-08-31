@@ -6,7 +6,7 @@ import type { Population, RunSpec } from './runner'
 
 export type { BotType, CapMode, Industry }
 
-const CAP_MODES: CapMode[] = ['grandfathering', 'benchmarking', 'auctioning']
+const CAP_MODES: CapMode[] = ['grandfathering', 'benchmarking', 'auctioning', 'hybrid']
 
 /**
  * An even class: a realistic classroom mix across behaviours and sectors.
@@ -74,7 +74,7 @@ const SHIPPED = {
 export const SCENARIOS: ScenarioDef[] = [
   {
     name: 'baseline',
-    description: 'The three cap regimes on an identical, balanced class, at shipped settings.',
+    description: 'The four cap regimes on an identical, balanced class, at shipped settings.',
     build: () => CAP_MODES.map((capMode) => base({ capMode })),
     params: (s) => ({ capMode: s.capMode }),
   },
@@ -159,7 +159,7 @@ export const SCENARIOS: ScenarioDef[] = [
     name: 'lrf-sweep',
     description:
       'Supply tightening rate, across the EU-realistic window (−2%/yr Phase 4 … −4.3%/yr ' +
-      'from 2024) and beyond it. Run on all three regimes, grandfathering with the LRF ON.',
+      'from 2024) and beyond it. Run on every regime, grandfathering with the LRF ON.',
     build: () =>
       CAP_MODES.flatMap((capMode) =>
         [0.98, 0.97, 0.957, SHIPPED.lrf, 0.94, 0.92, 0.9].map((capReductionFactor) =>
@@ -204,6 +204,52 @@ export const SCENARIOS: ScenarioDef[] = [
         base({ config: { abatement: { fixedCostPerTonneBaseline } } }),
       ),
     params: (s) => ({ retrofitFee: s.config?.abatement?.fixedCostPerTonneBaseline }),
+  },
+  {
+    name: 'hybrid-share-sweep',
+    description:
+      'How much free allocation it takes before hybrid stops behaving like auctioning. ' +
+      'Two arms: a uniform share across all four sectors, and the shipped asymmetric shape ' +
+      'scaled up. Auctioning and benchmarking are included as the two reference walls.',
+    build: () => {
+      const uniform = (share: number) =>
+        Object.fromEntries(INDUSTRY_NAMES.map((i) => [i, share])) as Record<Industry, number>
+      // The shipped shape (Power-weighted), scaled. Clamped at 1: a share above the
+      // benchmark is not a share of it, and the engine rejects it anyway.
+      const shipped = DEFAULT_GAME_CONFIG.allocation.hybridFreeShare
+      const scaled = (k: number) =>
+        Object.fromEntries(
+          INDUSTRY_NAMES.map((i) => [i, Math.min(1, Math.round(shipped[i] * k * 1000) / 1000)]),
+        ) as Record<Industry, number>
+
+      return [
+        // The walls. Hybrid at a uniform 0 IS auctioning by construction, so the auctioning
+        // row is a check on the harness as much as a reference point.
+        base({ capMode: 'auctioning' }),
+        base({ capMode: 'benchmarking' }),
+        ...[0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1].map((share) =>
+          base({ capMode: 'hybrid', config: { allocation: { hybridFreeShare: uniform(share) } } }),
+        ),
+        ...[1, 2, 3, 4, 6].map((k) =>
+          base({ capMode: 'hybrid', config: { allocation: { hybridFreeShare: scaled(k) } } }),
+        ),
+      ]
+    },
+    params: (s) => {
+      const table = s.config?.allocation?.hybridFreeShare as
+        | Record<Industry, number>
+        | undefined
+      const values = table ? INDUSTRY_NAMES.map((i) => table[i] ?? 0) : []
+      const uniform = values.length > 0 && values.every((v) => v === values[0])
+      return {
+        capMode: s.capMode,
+        // The axis for the uniform arm; null on the asymmetric arm, which is read off
+        // `shareMean` instead.
+        share: uniform ? values[0] : null,
+        shareMean: values.length ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 1000) / 1000 : null,
+        sharePower: table?.['Power & Utilities'] ?? null,
+      }
+    },
   },
   {
     name: 'reserve-sweep',

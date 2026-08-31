@@ -17,6 +17,7 @@ import {
   matchOrder,
   meanOfLast,
   openSellRemaining,
+  investmentGap,
   optimalYearCost,
   plannedRecurring,
   plannedRelease,
@@ -206,6 +207,15 @@ export class Session {
     return this.state.capMode !== null && this.mechanism.usesAuction
   }
 
+  /**
+   * What this session's free allocation is derived from — see `CapMechanism.freeAllocation`.
+   * The views gate the sector-benchmark fields on this rather than on the mode name, so
+   * every benchmark-based regime gets them without `views.ts` enumerating modes.
+   */
+  get freeAllocationBasis(): 'none' | 'history' | 'benchmark' {
+    return this.state.capMode === null ? 'none' : this.mechanism.freeAllocation
+  }
+
   // ---- lobby ----
 
   addPlayer(name: string, industry: Industry): { player: Player; token: string } {
@@ -223,6 +233,7 @@ export class Session {
       connected: true,
       score: 0,
       optimalScore: 0,
+      investmentGapTotal: 0,
       bankedCredits: 0,
       abatementInForce: 0,
       abatementCommitted: 0,
@@ -252,6 +263,7 @@ export class Session {
       connected: true,
       score: 0,
       optimalScore: 0,
+      investmentGapTotal: 0,
       bankedCredits: 0,
       abatementInForce: 0,
       abatementCommitted: 0,
@@ -286,6 +298,7 @@ export class Session {
     capReductionFactor?: number
     applyLRFToGrandfathering?: boolean
     benchmark?: Partial<Record<Industry, number>>
+    hybridFreeShare?: Partial<Record<Industry, number>>
     abatement?: Partial<Record<Industry, { a: number; b: number }>>
     reserveEnabled?: boolean
     abatementLifetimeCap?: number
@@ -301,8 +314,9 @@ export class Session {
     // indistinguishable from the knob not mattering. That cost a full calibration round.
     const KNOWN = new Set([
       'penaltyRate', 'openingReferenceFraction', 'freeCreditRatio', 'auctionCapRatio',
-      'capReductionFactor', 'applyLRFToGrandfathering', 'benchmark', 'abatement',
-      'reserveEnabled', 'abatementLifetimeCap', 'abatementFixedCost', 'marketMakerInvFrac',
+      'capReductionFactor', 'applyLRFToGrandfathering', 'benchmark', 'hybridFreeShare',
+      'abatement', 'reserveEnabled', 'abatementLifetimeCap', 'abatementFixedCost',
+      'marketMakerInvFrac',
     ])
     const unknown = Object.keys(settings).filter((k) => !KNOWN.has(k))
     if (unknown.length) {
@@ -404,6 +418,24 @@ export class Session {
           throw new GameError('BAD_SETTING', `benchmark for ${industry} must be non-negative.`)
         }
         this.state.config.allocation.benchmark[industry as Industry] = round1(value)
+      }
+    }
+    if (settings.hybridFreeShare) {
+      for (const [industry, value] of Object.entries(settings.hybridFreeShare)) {
+        if (value === undefined) continue
+        // Bounded at 1: the share multiplies the sector benchmark, so above 1 it would issue
+        // more free credits than the benchmark it is supposed to be a fraction of — and,
+        // because the free allocation is deducted from the auction pool, it would empty the
+        // auction from a field that reads like a percentage.
+        if (!Number.isFinite(value) || value < 0 || value > 1) {
+          throw new GameError(
+            'BAD_SETTING',
+            `hybridFreeShare for ${industry} must be between 0 and 1.`,
+          )
+        }
+        // Finer than 1dp: 0.05 is a meaningful share and would round to 0.1.
+        this.state.config.allocation.hybridFreeShare[industry as Industry] =
+          Math.round(value * 1000) / 1000
       }
     }
     if (settings.abatement) {
@@ -580,17 +612,24 @@ export class Session {
    * The same opening book, for auctioning — added AFTER the auction has cleared so it
    * survives, and ON TOP of whatever the trader won there.
    *
-   * Sized off the auction pool because the free allocation is zero in this mode, and priced
-   * at the clearing price by the settlement that follows, so the trader buys its book rather
-   * than being given one.
+   * Sized off everything issued this year — the auction pool PLUS the free allocation —
+   * and priced at the clearing price by the settlement that follows, so the trader buys its
+   * book rather than being given one.
+   *
+   * The pool alone would be the wrong base under a regime that auctions only the residual
+   * cap: the maker's target inventory is a share of what is in circulation, and half the
+   * circulation would be invisible to it. Under auctioning the free allocation is zero, so
+   * this is the same number it always was.
    */
   private seedTradersAfterAuction(record: YearRecord) {
     const { marketMakerFrac, speculatorFlat, underAuction } = this.state.config.bots.seed
     if (!underAuction || record.year !== this.state.config.emissions.firstGameYear) return
+    const issued = round1(
+      record.regulatorPool + Object.values(record.freeAllocation).reduce((a, b) => a + b, 0),
+    )
     for (const player of this.state.players) {
       if (!isPureTrader(player)) continue
-      const seed =
-        player.botType === 'marketMaker' ? marketMakerFrac * record.regulatorPool : speculatorFlat
+      const seed = player.botType === 'marketMaker' ? marketMakerFrac * issued : speculatorFlat
       if (seed > 0) {
         record.regulatorGranted[player.id] = round1(
           (record.regulatorGranted[player.id] ?? 0) + seed,
@@ -661,6 +700,7 @@ export class Session {
     const sellIncome: Record<string, number> = {}
     const abateCost: Record<string, number> = {}
     const optimal: Record<string, number> = {}
+    const investGap: Record<string, number> = {}
     const { penaltyRate } = this.state.config.market
     // Whatever went into regulatorGranted was sold at this price: the auction
     // clearing price, or the reference price for the trader-bot seed. 0 for free credits.
@@ -682,20 +722,39 @@ export class Session {
       // banked in the record until here, the only place `player.score` moves.
       const abateSpend = round1(record.abatementSpend[player.id] ?? 0)
       abateCost[player.id] = abateSpend
-      // Everything the company starts the year holding — the carry included, so the
-      // benchmark faces the same debt or surplus the player actually faces. Matches
-      // what `creditsHeld` counts, which is what the real cost is measured against.
-      const credits = round1(
-        (record.freeAllocation[player.id] ?? 0) +
-          (record.regulatorGranted[player.id] ?? 0) +
-          (record.carriedIn[player.id] ?? 0),
+      // What the company received without paying for it: the free allocation and the carry.
+      // Deliberately NOT `regulatorGranted` — anything won at the auction was BOUGHT, at
+      // `capPrice`, and counting it here would hand the benchmark for free the one thing
+      // that dominates a player's bill under an auction-bearing mode. See `optimalYearCost`.
+      const endowment = round1(
+        (record.freeAllocation[player.id] ?? 0) + (record.carriedIn[player.id] ?? 0),
       )
       // This year's emissions are already fixed — capacity was bought a year ago — so the
       // benchmark scores the cover decision alone, and the sunk spend passes through both
-      // sides identically. See `optimalYearCost`: the leaderboard measures trading skill.
+      // sides identically. See `optimalYearCost`: this half measures trading skill; the
+      // investment decision taken DURING this year is scored separately below.
+      // `capPrice` is offered as a cover source only where the mechanism actually ran an
+      // auction a student could bid into. Under the free-allocation modes it holds the
+      // trader-bot seed price, which nobody else could buy at.
       optimal[player.id] = optimalYearCost(
-        this.plannedFor(player, record.year), credits, abateSpend, refPrice, penaltyRate,
+        this.plannedFor(player, record.year), endowment, abateSpend, refPrice,
+        this.usesAuction ? capPrice : undefined,
       )
+      // The investment decision, judged against the payback rule at the price that was on
+      // screen while it was being taken — `refPrice` is this year's discovered price, and
+      // the step it is compared to came online for NEXT year. `record.abatement` holds what
+      // was committed when the year opened, so the difference is exactly this year's step.
+      investGap[player.id] = investmentGap({
+        spec: this.state.config.abatement.sectors[player.industry],
+        price: refPrice,
+        unabated: this.unabatedFor(player, record.year),
+        committedBefore: record.abatement[player.id] ?? 0,
+        committedAfter: player.abatementCommitted,
+        actualCost: abateSpend,
+        lifetimeCap: this.abatementLifetimeCap,
+        fixedCost: this.abatementFixedCost(player.id),
+        horizon: this.state.config.abatement.investmentHorizon,
+      })
     }
     const { settlement } = settleYear(record.realized, held, purchaseCost, sellIncome, abateCost, {
       penaltyRate,
@@ -705,6 +764,9 @@ export class Session {
     for (const player of this.state.players) {
       player.score = round1(player.score + (settlement[player.id]?.yearCost ?? 0))
       player.optimalScore = round1(player.optimalScore + (optimal[player.id] ?? 0))
+      player.investmentGapTotal = round1(
+        player.investmentGapTotal + (investGap[player.id] ?? 0),
+      )
       // EU-ETS carry: the year's net position rolls forward — surplus is banked,
       // an uncovered shortfall becomes a make-good debt (on top of the penalty just
       // charged). It adjusts next year's holdings via carriedIn.

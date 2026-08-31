@@ -160,6 +160,10 @@ export function runScenario(spec: RunSpec): RunResult {
       tradedNet: round1(tradedNet(record.trades, p.id)),
       yearCost: record.settlement?.[p.id]?.yearCost ?? 0,
       optimalCost: round1(p.optimalScore - (optimalBefore.get(p.id) ?? 0)),
+      // Cumulative, not per-year: this is what the leaderboard scores, and a per-year
+      // slice of it would say nothing about where a player stands.
+      investmentGapTotal: p.investmentGapTotal,
+      baseline: p.emissions[session.state.config.emissions.baselineYear] ?? 0,
     }))
 
     result.years.push({

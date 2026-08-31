@@ -3,11 +3,13 @@ import {
   abatementCost,
   incrementalFraction,
   installCost,
+  investmentGap,
   optimalAbatement,
   optimalYearCost,
   planInstall,
   unabatedFrom,
 } from '../abatement'
+import { round1 } from '../rng'
 
 describe('abatementCost', () => {
   it('is E·(a·r + b·r²/2), zero at r=0, convex', () => {
@@ -190,7 +192,7 @@ describe('optimalYearCost & fairness', () => {
   })
 })
 
-describe('optimalYearCost — carry and the penalty cap', () => {
+describe('optimalYearCost — carry, and no penalty cap', () => {
   it('settles the residual against the credits it is given', () => {
     // Short by 100: 2400 sunk + 100 bought at 10.
     expect(optimalYearCost(600, 500, 2400, 10)).toBe(3400)
@@ -200,14 +202,86 @@ describe('optimalYearCost — carry and the penalty cap', () => {
     expect(optimalYearCost(600, 400, 2400, 10)).toBe(4400)
   })
 
-  it('never pays more than the fine to cover a shortfall', () => {
-    // Buying at 10 would cost 1000 for the 100 t gap, but the fine is only 5/t.
-    expect(optimalYearCost(600, 500, 2400, 10, 5)).toBe(2900)
-    // When the market is cheaper than the fine, the market price stands.
-    expect(optimalYearCost(600, 500, 2400, 10, 50)).toBe(3400)
+  /**
+   * The shortfall used to settle at `min(price, penaltyRate)`, which credited a perfect
+   * player with covering at the fine while the class paid the market. It does not any more:
+   * an uncovered tonne is fined AND carried as make-good debt, so defaulting costs the fine
+   * plus the tonne later, and buying is always at least as cheap.
+   */
+  it('covers a shortfall at the market price however far above the fine it trades', () => {
+    // 100 t short at a market price of 130 costs 13 000, not 100 × whatever the fine is.
+    expect(optimalYearCost(600, 500, 0, 130)).toBe(13_000)
+    // Same on the cheap side: the market price stands there too.
+    expect(optimalYearCost(600, 500, 0, 10)).toBe(1000)
   })
 
-  it('caps only the buying side — surplus is always sold at the market price', () => {
-    expect(optimalYearCost(600, 800, 2400, 10, 1)).toBe(optimalYearCost(600, 800, 2400, 10))
+  it('prices both sides of the position identically', () => {
+    // Short 100 at 40 costs exactly what long 100 at 40 earns — a single market price,
+    // no asymmetry between buying and selling.
+    expect(optimalYearCost(600, 500, 0, 40)).toBe(-optimalYearCost(600, 700, 0, 40))
+  })
+})
+
+describe('investmentGap', () => {
+  const spec = { model: 'linear', params: { a: 10, b: 75 } } as const
+  const shared = { unabated: 1000, lifetimeCap: 0.5, fixedCost: 1500, horizon: 3 }
+
+  /** What the payback rule would have done at this price, for the assertions below. */
+  const planned = (price: number, committedBefore = 0) =>
+    planInstall({ spec, price, committed: committedBefore, ...shared })
+
+  it('is zero for a company that follows the rule exactly', () => {
+    const price = 60
+    const plan = planned(price)
+    expect(plan.install).toBe(true)
+    const gap = investmentGap({
+      spec, price, committedBefore: 0, committedAfter: plan.target,
+      actualCost: plan.cost, ...shared,
+    })
+    expect(gap).toBe(0)
+  })
+
+  it('charges a company that invests nothing when the rule says invest', () => {
+    const price = 60
+    const plan = planned(price)
+    const gap = investmentGap({
+      spec, price, committedBefore: 0, committedAfter: 0, actualCost: 0, ...shared,
+    })
+    // Exactly the value it passed up: the plan's savings over the horizon, less its cost.
+    expect(gap).toBe(round1(shared.horizon * price * shared.unabated * plan.target - plan.cost))
+    expect(gap).toBeGreaterThan(0)
+  })
+
+  it('charges over-investment too — a step whose fee outruns its savings', () => {
+    // At a price of 1 no retrofit pays back, so the rule sits out and doing nothing is
+    // worth 0. Installing anyway is worth less than nothing, and the gap is that shortfall.
+    const price = 1
+    expect(planned(price).install).toBe(false)
+    const overCost = installCost(shared.unabated, 0, 0.4, spec, shared.fixedCost)
+    const gap = investmentGap({
+      spec, price, committedBefore: 0, committedAfter: 0.4, actualCost: overCost, ...shared,
+    })
+    expect(gap).toBeGreaterThan(0)
+  })
+
+  it('never goes negative — beating the rule scores zero, not a bonus', () => {
+    // A step the myopic rule would not have taken, but which happens to pay off here.
+    const price = 60
+    const plan = planned(price)
+    const biggerCost = installCost(shared.unabated, 0, shared.lifetimeCap, spec, shared.fixedCost)
+    const gap = investmentGap({
+      spec, price, committedBefore: 0, committedAfter: shared.lifetimeCap,
+      actualCost: biggerCost, ...shared,
+    })
+    expect(gap).toBeGreaterThanOrEqual(0)
+    void plan
+  })
+
+  it('is zero once the lifetime cap is spent — there is nothing left to get wrong', () => {
+    const gap = investmentGap({
+      spec, price: 90, committedBefore: shared.lifetimeCap, committedAfter: shared.lifetimeCap,
+      actualCost: 0, ...shared,
+    })
+    expect(gap).toBe(0)
   })
 })
