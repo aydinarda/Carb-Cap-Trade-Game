@@ -1,7 +1,7 @@
 name: Load test (full session)
 
-# Manual only — drives a full 3-mode game (grandfathering → benchmarking →
-# auctioning + 25 bots) with 100 simulated players against the deployed backend.
+# Manual only — drives a full 4-mode game (grandfathering → benchmarking →
+# auctioning → hybrid, + 25 bots) with 100 simulated players against the deployed backend.
 # You can join in a browser with the room code the run prints in its logs.
 on:
   workflow_dispatch:
@@ -24,6 +24,7 @@ on:
           - grandfathering
           - benchmarking
           - auctioning
+          - hybrid
       bots:
         description: Market bots — 'default' keeps grandfathering bot-free, 'on'/'off' forces both ways
         type: choice
@@ -46,7 +47,7 @@ on:
         default: '25'
         required: true
       join_grace:
-        description: Grace window to join in a browser before year 1 (seconds) — applies to each of the 3 modes
+        description: Grace window to join in a browser before year 1 (seconds) — applies to each mode played
         default: '90'
         required: true
       # Calibration knobs. Blank = whatever shared/config/defaults.ts ships, which is what
@@ -70,6 +71,10 @@ on:
         required: false
       benchmark_stringency:
         description: 'benchmark as a fraction of sector average (1.119 ships)'
+        default: ''
+        required: false
+      hybrid_free_share:
+        description: 'hybrid only — per-sector share of the benchmark issued FREE, as "Power:0.45,Heavy:0.21,Manufacturing:0,Transport:0" or one number for all four. Blank = shipped 0.45/0.21/0/0. Free credits come OUT of the auction pool, so raising these shrinks the auction'
         default: ''
         required: false
       # Market-maker target inventory, escalating per round. A maker bids the GAP between its
@@ -121,6 +126,7 @@ jobs:
           AUCTION_CAP_RATIO: ${{ inputs.auction_cap_ratio }}
           CAP_REDUCTION_FACTOR: ${{ inputs.cap_reduction_factor }}
           BENCHMARK_STRINGENCY: ${{ inputs.benchmark_stringency }}
+          HYBRID_FREE_SHARE: ${{ inputs.hybrid_free_share }}
           FREE_CREDIT_RATIO: ${{ inputs.free_credit_ratio }}
           MM_INV_START: ${{ inputs.mm_inv_start }}
           MM_INV_STEP: ${{ inputs.mm_inv_step }}

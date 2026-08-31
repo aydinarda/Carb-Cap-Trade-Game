@@ -37,8 +37,20 @@ export function trade(ctx: BotCtx): boolean {
   return false
 }
 
+/**
+ * The opening book, bought once.
+ *
+ * `initialInventory` is what its name says — a starting position, not an annual order. It
+ * used to be bid at EVERY auction regardless of what the speculator already held, and since
+ * a speculator emits nothing and only sells into a downtick, that was a one-way ratchet:
+ * measured over ten years it bought 15 tonnes a year and never worked them off, ending on
+ * 142. A momentum trader that accumulates whatever the calendar hands it is not trading on
+ * momentum; from year two it builds its position in the market, which is the archetype.
+ */
 export function auction(ctx: BotCtx): boolean {
   const { session, bot } = ctx
+  const record = session.currentYearRecord()
+  if (!record || record.year !== session.state.config.emissions.firstGameYear) return false
   const P = priceCeiling(session)
   const cfg = session.state.config.bots.speculator
   // Anchor to the discovered price (not a static 0.5·P) so the clearing tracks the

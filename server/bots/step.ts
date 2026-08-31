@@ -38,7 +38,7 @@ export function stepBots(
   // Built ONCE and shared. Each view is O(orders) and the order array grows with the bot
   // count, so rebuilding it per bot made the tick quadratic: 8× the bots cost 31× the time,
   // essentially all of it in this one call repeated N times.
-  const market = buildMarketView(record.orders, record.trades)
+  let market = buildMarketView(record.orders, record.trades)
 
   let acted = false
   for (const bot of bots) {
@@ -58,6 +58,39 @@ export function stepBots(
       // A GameError is a legitimate rejection (wrong phase, no shorting); anything else
       // is a bug worth surfacing, but must not take the whole tick down.
       if (!(e instanceof GameError)) console.error('[bot]', e)
+    }
+  }
+
+  /**
+   * Extra market-maker passes within this same tick.
+   *
+   * The maker is the only archetype with a two-sided obligation, and at one pass per tick it
+   * was outnumbered by twenty compliance bots each working one side. Repeating its turn lets
+   * it re-price both legs and take the fills that appeared during the pass just finished.
+   *
+   * The view is REBUILT between passes, which is the expensive thing this file otherwise
+   * avoids — so it is bounded three ways: only makers repeat, only during the trade stage
+   * (there is no book to re-read at an auction), and the loop stops the moment a whole pass
+   * changes nothing, which is what a quiet market does immediately.
+   */
+  const passes = session.state.config.bots.marketMaker.actionsPerTick
+  if (phase === 'trade' && passes > 1) {
+    const makers = bots.filter((b) => b.botType === 'marketMaker')
+    for (let pass = 1; pass < passes && makers.length > 0; pass++) {
+      market = buildMarketView(record.orders, record.trades)
+      let movedThisPass = false
+      for (const bot of makers) {
+        try {
+          const ctx: BotCtx = {
+            session, bot, rng, rt: runtimeFor(bot.id), market, extraPass: true,
+          }
+          movedThisPass = marketMaker.trade(ctx) || movedThisPass
+        } catch (e) {
+          if (!(e instanceof GameError)) console.error('[bot]', e)
+        }
+      }
+      if (!movedThisPass) break
+      acted = true
     }
   }
   return acted

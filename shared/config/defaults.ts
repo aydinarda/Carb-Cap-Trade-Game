@@ -230,6 +230,12 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       skewCapFrac: 0.4,
       invFrac: 0.18,
       quoteSize: 15,
+      // A fifth of the excess per tick: geometric, so most of an overhang clears within a
+      // trade window rather than compounding across years. See `excessShedFrac`.
+      excessShedFrac: 0.2,
+      // Three passes. The maker two-sides a book twenty compliance bots trade into, so one
+      // pass per tick left it permanently behind the market it is supposed to be making.
+      actionsPerTick: 3,
       bandFrac: 0.05,
       recentTrades: 5,
       // A quarter of the simulator's 12-tick window. The maker is silent while the class
@@ -260,10 +266,20 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       // auction and each one sizes it off the entire pool, so four of them took 72% of the
       // cap every year and sat on it — 154k credits by year 20, seven times one year's
       // issuance, while emitters bid the price to the ceiling for want of a seller.
-      // OFF: it stopped the maker bidding at all once its target was met, which left the
-      // offer side of the book to drain. The hoarding it guarded against is now bounded by
-      // marketMakerShareByCount instead.
-      marketMakerIncrementalBid: false,
+      //
+      // `marketMakerIncrementalBid` was turned OFF for a while because bidding the gap
+      // stopped the maker bidding at all once its target was met, and the offer side of the
+      // book drained. That measurement was taken before `marketMaker.excessShedFrac` existed:
+      // a maker at target quoted 15 tonnes a tick, so it never fell BACK below target and
+      // never re-bid. Now that it sheds its excess it does, and the objection no longer
+      // reproduces — measured over 12 seeds on the hybrid population, holdings at year 20 go
+      // from 10 299 (nine times target) to 1 044 (one times target), yearly auction take from
+      // 1 161 to 181, and traded volume falls only 6% (1 374 → 1 285/yr). Price eases 63.8 →
+      // 60.9, which is the maker no longer absorbing supply it could not resell.
+      //
+      // The two belong together: shedding without this refills the inventory every auction,
+      // and this without shedding retires the maker after round one.
+      marketMakerIncrementalBid: true,
       marketMakerShareByCount: true,
       // ON. The fine is NOT a ceiling and the engine never treated it as one: an uncovered
       // tonne is fined AND still carried as make-good debt (see `settleYear`), so the true

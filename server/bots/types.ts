@@ -48,4 +48,12 @@ export interface BotCtx {
    * that itself — there are only one or two of those.
    */
   market: MarketView
+  /**
+   * True on a repeat call within the same tick — see `marketMaker.actionsPerTick`.
+   *
+   * Only the market maker is given extra passes, and only it reads this: anything counting
+   * ticks to pace itself (its quiet window) must not advance on a repeat, or the pacing
+   * would silently run `actionsPerTick` times faster than the number configuring it says.
+   */
+  extraPass?: boolean
 }

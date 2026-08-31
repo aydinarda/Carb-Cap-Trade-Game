@@ -284,8 +284,34 @@ export interface MarketMakerConfig {
   skewCapFrac: number
   /** Target inventory = this × the credits in circulation. */
   invFrac: number
-  /** Resting quote size each side. */
+  /** Resting quote size each side — the floor, before any inventory shedding below. */
   quoteSize: number
+  /**
+   * Share of its EXCESS inventory (holdings above target) the maker adds to its ask each
+   * tick, on top of `quoteSize`.
+   *
+   * Without this the maker cannot work off what it buys, and measured over ten years it did
+   * not: it won ~1 100 tonnes at every auction and offered 15 at a time, so holdings ran
+   * 1 042 → 10 677 while it emitted nothing. Four makers ended up sitting on more than a
+   * year of the entire class's cap, and the end-of-game rule strands a surplus, so that
+   * inventory was value destroyed rather than traded.
+   *
+   * A fraction rather than a fixed size so the shedding is proportional: a maker at target
+   * quotes `quoteSize` and behaves exactly as before, and one holding a large excess offers
+   * enough to clear it over the year instead of over a decade. 0 restores the old behaviour.
+   */
+  excessShedFrac: number
+  /**
+   * How many times the maker acts per bot tick. 1 is one pass, like every other archetype.
+   *
+   * The maker is the only bot with a two-sided obligation — it has to re-price both legs and
+   * take the opportunistic fills that keep the book tight — and at one pass per tick it was
+   * being outnumbered by twenty compliance bots each working one side. Extra passes rebuild
+   * the market view, so this is deliberately the ONLY archetype that gets them: the cost is
+   * `makers × (actionsPerTick − 1)` extra view builds per tick, and only while the maker is
+   * still finding something to do.
+   */
+  actionsPerTick: number
   /**
    * How far either quote may sit from the recent price, as a fraction. The maker buys within
    * `[ref × (1 − bandFrac), ref]` and sells within `[ref, ref × (1 + bandFrac)]`, so it can
@@ -430,6 +456,9 @@ export interface BotsConfig {
      * The market maker's auction bid is a target inventory *level* submitted as an
      * incremental *purchase* every year, with no `− held` term, so its holdings compound
      * without bound. Bid the gap to target instead.
+     *
+     * Only coherent together with `marketMaker.excessShedFrac`: on its own, bidding the gap
+     * retires the maker the first time it reaches target. Off, the maker hoards.
      */
     marketMakerIncrementalBid: boolean
     /**

@@ -8,6 +8,9 @@
  *   1. grandfathering — 1 host + 100 players, a few years played to completion
  *   2. benchmarking   — same + 6 bots (they trade the order book; no auction to bid into)
  *   3. auctioning     — same + 6 bots (2 marketMaker / 2 compliance / 1 noise / 1 speculator)
+ *   4. hybrid         — same + bots: a share of each sector's benchmark free, and the
+ *                       RESIDUAL cap auctioned, so the cap stage has an allocation AND a
+ *                       sealed bid in the same round.
  *
  * Set MODES to play only some of them — `MODES=auctioning` goes straight there instead of
  * sitting through two full games first.
@@ -81,12 +84,38 @@ const SECTOR_AVERAGE = {
 }
 
 /**
+ * Hybrid only: the per-sector share of the benchmark issued FREE.
+ *
+ * Accepts one number for all four sectors, or `Power:0.45,Heavy:0.21,...` with a prefix of
+ * each sector name. Blank leaves the shipped table alone. Raising these SHRINKS the auction
+ * — free credits are deducted from the pool, not added to it — so this is the knob that
+ * moves a hybrid run between behaving like benchmarking and behaving like auctioning.
+ */
+const HYBRID_FREE_SHARE = (() => {
+  const raw = (process.env.HYBRID_FREE_SHARE || '').trim()
+  if (!raw) return null
+  const names = Object.keys(SECTOR_AVERAGE)
+  const flat = Number(raw)
+  if (Number.isFinite(flat)) return Object.fromEntries(names.map((n) => [n, flat]))
+  const table = {}
+  for (const part of raw.split(',')) {
+    const [key, value] = part.split(':').map((x) => x.trim())
+    const match = names.find((n) => n.toLowerCase().startsWith((key || '').toLowerCase()))
+    if (!match || !Number.isFinite(Number(value))) {
+      throw new Error(`bad HYBRID_FREE_SHARE entry "${part}" — use e.g. Power:0.45,Heavy:0.21`)
+    }
+    table[match] = Number(value)
+  }
+  return table
+})()
+
+/**
  * Which cap mechanisms to play, in order. `all` (default) plays the three sequentially.
  * Name one — or a comma-separated subset — to skip straight to it: testing auctioning meant
  * sitting through two full games first, which at 90 s join grace and 3 years each is most of
  * a quarter of an hour before the mode you came for even starts.
  */
-const ALL_MODES = ['grandfathering', 'benchmarking', 'auctioning']
+const ALL_MODES = ['grandfathering', 'benchmarking', 'auctioning', 'hybrid']
 const MODES = (() => {
   const raw = (process.env.MODES || 'all').trim().toLowerCase()
   if (!raw || raw === 'all') return ALL_MODES
@@ -308,15 +337,33 @@ class Player {
     return Math.min(ceiling, mc)
   }
 
-  /** Auctioning cap stage: submit one sealed bid at what a tonne is worth to this company. */
+  /**
+   * Cap-stage auction: one sealed bid at what a tonne is worth to this company.
+   *
+   * The quantity is the RESIDUAL — what this year needs covering less what the company was
+   * already given (free allocation) and what it carried in. Bidding the whole expectation
+   * is only correct where the free allocation is zero: under a regime that issues some of
+   * the cap free and auctions the rest, it has every player bidding for tonnes they already
+   * hold, which oversubscribes the auction and prints a clearing price the class never
+   * actually needed to pay.
+   *
+   * `plannedEmission`, not `expectedEmission`: the former is what the year is actually drawn
+   * around once capacity in force is applied, and is the number the server itself settles
+   * against. The latter is last year's realized.
+   */
   async submitAuctionBid() {
     const y = this.snap?.you
-    const expected = y?.expectedEmission ?? 100
+    const planned = y?.plannedEmission ?? y?.expectedEmission ?? 100
+    const endowment = (y?.freeAllocation ?? 0) + (y?.banked ?? 0)
+    const residual = Math.max(0, planned - endowment)
+    // Nothing to buy — an already-covered company sitting the auction out is the correct
+    // behaviour, and submitting a zero bid would just be noise in `submittedCount`.
+    if (residual < 1) return
     const fair = this.fairValue()
     const res = await emit(
       this.sock,
       'player:submitBid',
-      { qty: round1(expected * rand(0.6, 1.0)), price: round1(fair * rand(0.92, 1.08)) },
+      { qty: round1(residual * rand(0.6, 1.0)), price: round1(fair * rand(0.92, 1.08)) },
       { measure: true },
     )
     this.tally(res)
@@ -360,8 +407,12 @@ class Player {
 
     // Against what is in force THIS year, not against the target: capacity bought now comes
     // online next year, so planning this year's cover around r* buys too little.
-    const inForce = y?.abatementInForce ?? 0
-    const need = expected * (1 - inForce) - held // >0 short, <0 surplus
+    //
+    // Taken from the server rather than recomputed. `expected × (1 − inForce)` double-counts
+    // the cut ALREADY baked into `expectedEmission` (it is last year's realized), so a
+    // company with standing capacity was sizing its cover against an emission lower than the
+    // one it would be settled on. `plannedEmission` is the number the engine draws around.
+    const need = (y?.plannedEmission ?? expected * (1 - (y?.abatementInForce ?? 0))) - held
     if (need > 1) {
       const qty = round1(clamp(need * rand(0.3, 1), 1, need))
       this.tally(await emit(this.sock, 'player:placeOrder',
@@ -434,6 +485,9 @@ async function runSession(capMode, { withBots, joinGrace }) {
       Object.entries(SECTOR_AVERAGE).map(([k, v]) => [k, Math.round(v * BENCHMARK_STRINGENCY * 10) / 10]),
     )
   }
+  // Only under hybrid: the other three mechanisms ignore the table, and pushing it there
+  // would put a setting in the log that demonstrably did nothing.
+  if (HYBRID_FREE_SHARE && capMode === 'hybrid') settings.hybridFreeShare = HYBRID_FREE_SHARE
   if (Object.keys(settings).length) {
     const r = await emit(host, 'host:updateSettings', settings)
     if (!r.ok) throw new Error(`updateSettings failed: ${r.error}`)
@@ -535,7 +589,10 @@ async function runSession(capMode, { withBots, joinGrace }) {
     const r = await emit(host, year === 1 ? 'host:startYear' : 'host:advanceYear', {})
     if (!r.ok) { M.errors++; console.log(`  year ${year} start failed: ${r.error}`); break }
 
-    if (capMode === 'auctioning') {
+    // Whether there is a sealed bid to submit is the MECHANISM's answer, not the mode
+    // name's — two modes run an auction now. `host:startYear` flushes immediately, so the
+    // snapshot is current by the time this reads it.
+    if (hostSnap?.usesAuction ?? capMode === 'auctioning') {
       // Cap stage: players (and the server-driven bots) submit sealed auction bids.
       await Promise.all(players.map((p) => p.submitAuctionBid()))
       await sleep(CAP_WINDOW * 1000)

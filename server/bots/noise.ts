@@ -59,11 +59,25 @@ export function trade(ctx: BotCtx): boolean {
   return syncQuote(session, record, bot.id, ctx.rt, 'buy', qty, price)
 }
 
+/**
+ * A small, sloppy compliance bid — sloppy about PRICE, not about position.
+ *
+ * It used to bid a flat `cfg.size` whatever it already held, while its own `trade()` sized
+ * off `planned − held` two lines away. That inconsistency is not the archetype's carelessness
+ * — a noise trader mis-prices and occasionally takes the wrong side, it does not forget it
+ * owns things — and it shows up plainly under a regime that issues part of the cap free,
+ * where a bot that has just been handed its benchmark still bids as though it had nothing.
+ * The jitter and the personality bias stay: the error belongs in the price.
+ */
 export function auction(ctx: BotCtx): boolean {
   const { session, bot, rng } = ctx
   const P = priceCeiling(session)
   const cfg = session.state.config.bots.noise
   const minPrice = session.state.config.bots.minPrice
+  const residual = session.plannedEmission(bot.id) - session.creditsHeld(bot.id)
+  if (residual <= 0) return false
+  // Still small and still a fixed lot — capped by what it actually needs.
+  const qty = Math.min(cfg.size, residual)
   // Anchored to the discovered price (an allowance's resale value), with noise.
   const ref = referencePrice(session)
   const price = clamp(
@@ -71,5 +85,5 @@ export function auction(ctx: BotCtx): boolean {
     minPrice,
     P,
   )
-  return trySubmitBid(session, bot.id, cfg.size, price) // small auction buy
+  return trySubmitBid(session, bot.id, qty, price) // small auction buy
 }

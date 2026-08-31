@@ -49,12 +49,18 @@ export function trade(ctx: BotCtx): boolean {
   // reference — so quoting from tick one carries the old price into the new year and every
   // other bot then prices off the maker. The class opens the year; the maker joins once
   // there is a market to make.
-  if (ctx.rt.tradeTicksYear !== record.year) {
-    ctx.rt.tradeTicksYear = record.year
-    ctx.rt.tradeTicks = 0
+  //
+  // `extraPass` marks a repeat call inside the SAME tick (see `actionsPerTick`). The counter
+  // must not advance on those, or three passes per tick would burn the quiet window in a
+  // third of the ticks it is meant to last.
+  if (!ctx.extraPass) {
+    if (ctx.rt.tradeTicksYear !== record.year) {
+      ctx.rt.tradeTicksYear = record.year
+      ctx.rt.tradeTicks = 0
+    }
+    ctx.rt.tradeTicks = (ctx.rt.tradeTicks ?? 0) + 1
   }
-  ctx.rt.tradeTicks = (ctx.rt.tradeTicks ?? 0) + 1
-  if (ctx.rt.tradeTicks <= cfg.quietTicks) return false
+  if ((ctx.rt.tradeTicks ?? 0) <= cfg.quietTicks) return false
 
   // The maker prices against liquidity it can actually take: not its own resting quotes
   // (it would chase itself), and not any other market maker's (the engine refuses
@@ -114,8 +120,16 @@ export function trade(ctx: BotCtx): boolean {
   acted = syncQuote(session, record, bot.id, ctx.rt, 'buy', cfg.quoteSize, bid) || acted
   const room = sellCapacity(session, record, bot.id)
   if (room > 0) {
-    acted =
-      syncQuote(session, record, bot.id, ctx.rt, 'sell', Math.min(cfg.quoteSize, room), ask) || acted
+    // The ask carries the inventory the maker is trying to work off, not a fixed lot.
+    //
+    // A maker wins its whole target at the auction in one go and then offers it back 15
+    // tonnes at a time, which is not a rate at which anything can be worked off: measured
+    // over ten years it bought ~1 100 a year and shed almost none, ending on 10 677. Adding
+    // a share of the EXCESS over target makes the offer proportional to the problem, and
+    // leaves a maker sitting at its target quoting exactly what it always did.
+    const excess = Math.max(0, held - target)
+    const askSize = Math.min(round1(cfg.quoteSize + excess * cfg.excessShedFrac), room)
+    acted = syncQuote(session, record, bot.id, ctx.rt, 'sell', askSize, ask) || acted
   }
   return acted
 }
@@ -131,24 +145,24 @@ export function auction(ctx: BotCtx): boolean {
   // Same helper the quote uses. Without `marketMakerShareByCount` every maker sizes off the
   // WHOLE pool, so N makers chase N × invFrac of it — four of them bid 72% of the cap.
   let target = makerTarget(session, cfg.invFrac)
-  // `marketMakerIncrementalBid` subtracts what the maker already holds, which is what made
-  // it stop bidding once its target was met. Kept as a flag so the two behaviours can still
-  // be compared on identical seeds, but it is OFF by default now: a maker that withdraws from
-  // the auction has no book to sell from for the rest of the game.
+  // Bid the GAP to target, not the target again.
+  //
+  // Buying a full target every year is only sustainable for something that consumes what it
+  // buys, and a maker emits nothing: measured, it won ~1 100 tonnes a year and shed ~140, so
+  // holdings ran to nine times target by year 20 and were then stranded worthless by the
+  // end-of-game rule.
+  //
+  // This was OFF for a while, because on its own it retires the maker — bid the gap, hit the
+  // target once, and never bid again. What makes it work now is `excessShedFrac`: the maker
+  // offers its excess back, falls below target, and re-bids for the difference. The two are
+  // one mechanism, and turning either off alone reproduces the failure the other was for.
   if (fixes.marketMakerIncrementalBid) {
     target = Math.max(0, target - session.creditsHeld(bot.id))
   }
   if (target <= 0) return false
-  // Bids its FULL target at a premium over the reference, rather than the gap at or under it.
-  //
-  // The previous rule did the opposite on both counts and the maker stopped participating:
-  // it bid only `target − held`, which is zero once the target is met, and never above the
-  // reference, which loses to any emitter covering itself. Measured, it took 18% of the pool
-  // in year one and 0-2% in every year after, while the offer side of the book thinned out.
-  //
-  // The cost of this is real and is the reason the incremental rule existed: bidding the full
-  // target every year lets inventory compound. `marketMakerShareByCount` divides the target
-  // between the makers, which is what keeps that bounded.
+  // Priced at a premium over the reference: the maker is buying a book to sell from, so it
+  // has to outbid the emitters that only want to cover themselves. Bidding at or under the
+  // reference loses every auction to a firm with a compliance obligation.
   const ref = recentPrice(session, record, cfg.recentTrades)
   const price = clamp(
     disperse(ref * (1 + cfg.auctionPremium), ctx.rt.bias ?? 0, P),
