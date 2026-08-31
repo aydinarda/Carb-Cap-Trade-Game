@@ -228,6 +228,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     abatementLifetimeCap: session.abatementLifetimeCap,
     penaltyRate: state.config.market.penaltyRate,
     usesAuction: session.usesAuction,
+    freeAllocationBasis: session.freeAllocationBasis,
     auctionSupply: session.usesAuction ? (record?.regulatorPool ?? 0) : 0,
     auctionPrice: record?.auctionPrice ?? null,
     // What this player's sector benchmark is worth this year, and the sector average it is

@@ -23,9 +23,21 @@ export function LobbyScreen({ snap }: { snap: PlayerSnapshot }) {
           </div>
           <IndustryBadge industry={snap.you.industry} />
         </div>
+        {/* What the history is FOR, which is not the same in every mode.
+            This used to say "Under grandfathering, this history determines your share of the
+            free credits" to every class, whatever it was playing — wrong for three of the
+            four modes, and the first thing a student reads. What is always true is that the
+            history sets the emission the company starts from; whether it also sets the
+            allocation is the mechanism's answer, not this file's. */}
         <p className="text-xs text-muted-foreground mb-4">
-          Your emissions over the past ten years. Under grandfathering, this history
-          determines your share of the free credits.
+          Your emissions over the past ten years — they set what your company is expected to
+          emit in Year {snap.currentYear}.{' '}
+          {snap.freeAllocationBasis === 'history' &&
+            'They also decide your share of the free credits: the more you have emitted, the more you are given.'}
+          {snap.freeAllocationBasis === 'benchmark' &&
+            'Your free credits do NOT come from it — they are set by your sector’s benchmark, the same for every company in the sector however much it has emitted.'}
+          {snap.freeAllocationBasis === 'none' &&
+            'There are no free credits in this mode: every allowance has to be bought.'}
         </p>
         <EmissionHistoryChart you={snap.you} />
       </div>

@@ -358,6 +358,15 @@ export interface PlayerSnapshot {
    * two of them do now.
    */
   usesAuction: boolean
+  /**
+   * What this mode derives free credits from — see `CapMechanism.freeAllocation`.
+   *
+   * Sent for the same reason as `usesAuction`: screens that explain where a company's
+   * allowances come from were switching on the mode NAME, so a new mode inherited whichever
+   * branch it failed to match. The lobby told every class its ten-year history decided its
+   * free credits, which is true only under grandfathering.
+   */
+  freeAllocationBasis: 'none' | 'history' | 'benchmark'
   /** Total supply on offer at this year's auction (= the residual cap under hybrid). */
   auctionSupply: number
   /** Uniform clearing price, once the auction has closed. */

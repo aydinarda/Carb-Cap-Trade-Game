@@ -206,15 +206,28 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
             <span className="text-sm text-muted-foreground ml-1">tCO₂</span>
           </div>
           {snap.capMode === 'grandfathering' && (
+            // Read from the ratio actually in force, not the 0.8 this used to hardcode:
+            // grandfathering has opened at the full class baseline since the phase A+B
+            // calibration, so the panel was quoting a limit 20% below the one it would issue.
             <div className="text-xs text-muted-foreground mt-1 font-mono">
               → free credit limit ={' '}
-              {(Math.round(snap.classAggregate.totalBaselineEmissions * 0.8 * 10) / 10).toLocaleString()}{' '}
-              (80%)
+              {(
+                Math.round(
+                  snap.classAggregate.totalBaselineEmissions * snap.config.freeCreditRatio * 10,
+                ) / 10
+              ).toLocaleString()}{' '}
+              ({Math.round(snap.config.freeCreditRatio * 100)}%)
             </div>
           )}
           {snap.capMode === 'auctioning' && (
             <div className="text-xs text-muted-foreground mt-1 font-mono">
-              → no free credits; the full baseline is sold at the fixed price
+              → no free credits; ={' '}
+              {(
+                Math.round(
+                  snap.classAggregate.totalBaselineEmissions * snap.config.auctionCapRatio * 10,
+                ) / 10
+              ).toLocaleString()}{' '}
+              ({Math.round(snap.config.auctionCapRatio * 100)}%) goes to the sealed-bid auction
             </div>
           )}
           {snap.capMode === 'benchmarking' && (

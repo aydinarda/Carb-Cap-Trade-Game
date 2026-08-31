@@ -304,7 +304,7 @@ export function AllocationCard({
       </div>
       <p className="text-xs text-muted-foreground mt-1.5">
         {mode === 'grandfathering' &&
-          "Proportional to your share of the class's total emissions over the past ten years (80% of the class baseline is distributed for free)."}
+          "Proportional to your share of the class's total emissions over the past ten years — the more you have emitted, the more you are given. The class total shrinks every year."}
         {mode === 'benchmarking' &&
           'The benchmark set for your sector — every company in it gets the same free credits regardless of its own history. It starts near the sector average and is cut every year, so an average emitter runs short as the game goes on.'}
         {mode === 'auctioning' &&
