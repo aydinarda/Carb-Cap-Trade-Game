@@ -687,6 +687,12 @@ async function runSession(capMode, { withBots, joinGrace }) {
           decisionCost: h?.decisionCost ?? 0,
           roundGap: round1((h?.decisionCost ?? st?.yearCost ?? 0) - (h?.optimalCost ?? 0)),
           roundInvGap: h?.investmentGap ?? 0,
+          // Class-level, repeated on each row so a per-year filter of the CSV carries it.
+          // The cost containment reserve sells into the book as the price climbs, and its
+          // releases are otherwise invisible: they are ordinary trades from a counterparty
+          // that is not a player, and the tape only keeps the last 60 prints of a year.
+          reservePot: hostSnap?.classAggregate?.reservePot ?? 0,
+          reserveReleased: hostSnap?.classAggregate?.reserveReleased ?? 0,
           cumScore: p.score,
           points: b?.points ?? '', tradingGap: b?.tradingGap ?? '',
           investmentGap: b?.investmentGap ?? '',
@@ -699,13 +705,15 @@ async function runSession(capMode, { withBots, joinGrace }) {
           writeFileSync(SCORE_LOG,
             'mode,year,rank,id,name,industry,isBot,botType,free,auctionWon,traded,banked,held,' +
             'realized,netPos,abatementCost,purchaseCost,sellIncome,penalty,shortage,yearCost,' +
-            'optimalCost,decisionCost,roundGap,roundInvGap,cumScore,points,tradingGap,investmentGap\n')
+            'optimalCost,decisionCost,roundGap,roundInvGap,reservePot,reserveReleased,' +
+            'cumScore,points,tradingGap,investmentGap\n')
         }
         appendFileSync(SCORE_LOG, rows.map((r) =>
           [capMode, year, r.rank, r.id, r.name, r.industry, r.isBot ? 1 : 0, r.botType,
            r.free, r.auctionWon, r.traded, r.banked, r.held, r.realized, r.netPos,
            r.abatementCost, r.purchaseCost, r.sellIncome, r.penalty, r.shortage, r.yearCost,
            r.optimalCost, r.decisionCost, r.roundGap, r.roundInvGap,
+           r.reservePot, r.reserveReleased,
            r.cumScore, r.points, r.tradingGap, r.investmentGap].join(',')).join('\n') + '\n')
       }
 
@@ -737,7 +745,10 @@ async function runSession(capMode, { withBots, joinGrace }) {
       ? ` | vwap ${price} (min ${mv.trades?.length ? Math.min(...mv.trades.map((t) => t.price)) : '—'}` +
         ` max ${mv.trades?.length ? Math.max(...mv.trades.map((t) => t.price)) : '—'})`
       : ' | no trades'
+    const pot = hostSnap?.classAggregate?.reservePot ?? 0
+    const rel = hostSnap?.classAggregate?.reserveReleased ?? 0
     console.log(`  year ${year}/${YEARS_PER_MODE} settled` + priceStr +
+      (pot > 0 ? ` | reserve ${round1(rel)}/${round1(pot)}` : '') +
       (lb ? ` | leader ${lb[0]?.name} (${lb[0]?.normalizedScore})` : ''))
     if (year < YEARS_PER_MODE) await sleep(REVIEW_GAP * 1000)
   }

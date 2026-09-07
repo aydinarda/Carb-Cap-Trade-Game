@@ -26,3 +26,6 @@ sim/sweeps/
 
 # per-round score/trade logs from a live or load-test run (SCORE_LOG / TRADE_LOG)
 game-logs/
+
+# local design notes and hand-offs (not part of the app)
+notes/
