@@ -1,7 +1,7 @@
 import { LogOut, ShieldAlert, ShieldCheck, User, WifiOff } from 'lucide-react'
 import type { PlayerSnapshot } from '@shared/types'
 import { useGame } from '../../net/GameContext'
-import { PhaseBadge } from '../../components/game/cards'
+import { AnnouncementsPanel, PhaseBadge } from '../../components/game/cards'
 import { cn, EcoDots, GameTitle } from '../../components/game/theme'
 import { CapStageScreen } from './CapStageScreen'
 import { EmissionsRevealScreen } from './EmissionsRevealScreen'
@@ -90,6 +90,10 @@ export function PlayerRoute() {
             </button>
           </div>
         </header>
+        {/* Above the body, in every phase. A subsidy starting in two rounds changes what a
+            company should bid at the auction, and the cap stage does not render the
+            abatement card these used to live inside. */}
+        <AnnouncementsPanel snap={snap} />
         {body}
       </div>
     </div>

@@ -348,48 +348,6 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
             )}
           </p>
 
-          {/* The announcement, while it still matters. A subsidy the class cannot see is
-              just a cheaper world; seen two rounds ahead it is a decision — retrofit now,
-              or wait and pay less for capacity that then arrives a year later. */}
-          {subsidy && !subsidyLive && snap.currentYear < subsidy.fromYear && (
-            <div className="rounded-lg border border-accent/50 bg-accent/10 px-3 py-2 text-[11px] font-mono text-accent">
-              <span className="font-bold">
-                Announced: {Math.round(subsidy.discount * 100)}% off retrofits
-              </span>{' '}
-              from round {subsidy.fromYear} to {subsidy.toYear} — in{' '}
-              {subsidy.fromYear - snap.currentYear} round
-              {subsidy.fromYear - snap.currentYear === 1 ? '' : 's'}. Investing now costs full
-              price; waiting delays the cut by a year.
-            </div>
-          )}
-          {subsidyLive && (
-            <div className="rounded-lg border border-primary/50 bg-primary/10 px-3 py-2 text-[11px] font-mono text-primary">
-              <span className="font-bold">
-                Subsidy live: {Math.round(subsidy!.discount * 100)}% off retrofits
-              </span>{' '}
-              — {subsidy!.toYear - snap.currentYear + 1} round
-              {subsidy!.toYear - snap.currentYear + 1 === 1 ? '' : 's'} left.
-            </div>
-          )}
-
-          {/* A breakthrough only matters if the company notices it: a firm pinned at its old
-              ceiling has just been handed a decision it could not make last round. */}
-          {snap.techUnlock && snap.currentYear >= snap.techUnlock.fromYear && (
-            <div className="rounded-lg border border-insight/50 bg-insight/10 px-3 py-2 text-[11px] font-mono text-insight">
-              <span className="font-bold">{snap.techUnlock.label}</span> — you may now cut up
-              to {Math.round(snap.techUnlock.lifetimeCap * 100)}% of your emissions,
-              {installed >= snap.techUnlock.lifetimeCap
-                ? ' and you are already at the new ceiling.'
-                : ` ${Math.round((snap.techUnlock.lifetimeCap - installed) * 100)} points more than you have installed.`}
-            </div>
-          )}
-          {snap.techUnlock && snap.currentYear < snap.techUnlock.fromYear && (
-            <div className="rounded-lg border border-accent/50 bg-accent/10 px-3 py-2 text-[11px] font-mono text-accent">
-              <span className="font-bold">Announced: {snap.techUnlock.label}</span> — the
-              abatement budget rises to {Math.round(snap.techUnlock.lifetimeCap * 100)}% from
-              round {snap.techUnlock.fromYear}.
-            </div>
-          )}
 
           {/* Unconditional. The game cannot know which year is the last one — the host ends
               it whenever — so a final-year install is simply wasted, and the only honest

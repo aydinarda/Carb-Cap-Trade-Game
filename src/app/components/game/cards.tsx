@@ -6,6 +6,7 @@ import type {
   LeaderboardRow,
   Phase,
   PlayerSettlement,
+  PlayerSnapshot,
   PublicPlayerInfo,
 } from '@shared/types'
 import { BOT_LABELS, cn, INDUSTRY_META, MODE_LABELS } from './theme'
@@ -522,5 +523,136 @@ export function FlowHint({ steps }: { steps: ReactNode[] }) {
         </li>
       ))}
     </ol>
+  )
+}
+
+/**
+ * Standing regulator announcements, as a strip across the top of the player's screen.
+ *
+ * Announcements used to live inside the abatement card, which is the one place they are
+ * NOT needed everywhere: a subsidy starting in two rounds changes what a company should bid
+ * at the auction, and the cap stage never renders that card. Hoisting them here puts them
+ * in front of the player in every phase.
+ *
+ * **Red means in force or on its way; grey means over.** That is the only thing the colour
+ * says, and it has to stay that narrow: an earlier version greyed a technology breakthrough
+ * once it had been in force for a round, on the reasoning that it was no longer news. But a
+ * breakthrough never expires, and a company still below the raised ceiling has a live option
+ * every round — so grey was hiding one. How RECENT something is belongs in the wording ("in
+ * force from this round" vs "since round 11"), never in the colour.
+ */
+type AnnouncementState = 'pending' | 'active' | 'past'
+
+function announcements(snap: PlayerSnapshot): {
+  key: string
+  title: string
+  detail: string
+  state: AnnouncementState
+}[] {
+  const out: { key: string; title: string; detail: string; state: AnnouncementState }[] = []
+  const year = snap.currentYear
+
+  const s = snap.subsidy
+  if (s) {
+    const pct = Math.round(s.discount * 100)
+    if (year < s.fromYear) {
+      const away = s.fromYear - year
+      out.push({
+        key: 'subsidy',
+        title: `${pct}% off retrofits from round ${s.fromYear}`,
+        detail: `in ${away} round${away === 1 ? '' : 's'} · investing now costs full price, waiting delays the cut by a year`,
+        state: 'pending',
+      })
+    } else if (year <= s.toYear) {
+      const left = s.toYear - year + 1
+      out.push({
+        key: 'subsidy',
+        title: `${pct}% off retrofits — live now`,
+        detail: `${left} round${left === 1 ? '' : 's'} left, through round ${s.toYear}`,
+        state: 'active',
+      })
+    } else {
+      out.push({
+        key: 'subsidy',
+        title: `${pct}% retrofit subsidy ended`,
+        detail: `ran rounds ${s.fromYear}–${s.toYear}`,
+        state: 'past',
+      })
+    }
+  }
+
+  const t = snap.techUnlock
+  if (t) {
+    const pct = Math.round(t.lifetimeCap * 100)
+    if (year < t.fromYear) {
+      out.push({
+        key: 'tech',
+        title: `${t.label}: abatement budget rises to ${pct}%`,
+        detail: `from round ${t.fromYear}`,
+        state: 'pending',
+      })
+    } else {
+      // Permanent, and therefore permanently ACTIVE. Greying it after the round it landed
+      // in was a category error: the panel's grey means "no longer in force", and a company
+      // still below the raised ceiling has a live option every single round. Recency
+      // belongs in the wording, not in the colour.
+      out.push({
+        key: 'tech',
+        title: `${t.label}: you may cut up to ${pct}%`,
+        detail: year === t.fromYear ? 'in force from this round' : `in force since round ${t.fromYear}`,
+        state: 'active',
+      })
+    }
+  }
+
+  return out
+}
+
+export function AnnouncementsPanel({ snap }: { snap: PlayerSnapshot }) {
+  const items = announcements(snap)
+  if (items.length === 0) return null
+  const liveCount = items.filter((i) => i.state !== 'past').length
+
+  return (
+    <div
+      className={cn(
+        'rounded-xl border px-4 py-2.5 mb-4',
+        liveCount > 0 ? 'border-destructive/40 bg-destructive/5' : 'border-border bg-card/50',
+      )}
+    >
+      <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-wider mb-1.5">
+        <AlertTriangle
+          size={11}
+          className={liveCount > 0 ? 'text-destructive' : 'text-muted-foreground'}
+        />
+        <span className={liveCount > 0 ? 'text-destructive' : 'text-muted-foreground'}>
+          Announcements
+        </span>
+        {liveCount > 0 && (
+          <span className="text-destructive/70">· {liveCount} active</span>
+        )}
+      </div>
+      <div className="flex flex-col gap-1">
+        {items.map((i) => (
+          <div key={i.key} className="text-xs font-mono leading-snug">
+            <span
+              className={cn(
+                'font-bold',
+                i.state === 'past' ? 'text-muted-foreground' : 'text-destructive',
+              )}
+            >
+              {i.title}
+            </span>{' '}
+            <span
+              className={cn(
+                i.state === 'past' ? 'text-muted-foreground/70' : 'text-destructive/80',
+              )}
+            >
+              — {i.detail}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
