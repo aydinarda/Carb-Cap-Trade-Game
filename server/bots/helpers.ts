@@ -75,9 +75,12 @@ export function considerInstall(
     price: Math.max(0, price * bias),
     unabated: session.unabatedFor(player, record.year),
     committed: player.abatementCommitted,
-    lifetimeCap: session.abatementLifetimeCap,
+    lifetimeCap: session.lifetimeCapFor(botId, record.year),
     fixedCost: session.abatementFixedCost(botId),
     horizon: cfg.investmentHorizon,
+    // A subsidy the agents cannot see would move half the class's abatement and none of
+    // the market's, and the price the class then trades at would answer no question.
+    costFactor: session.subsidyFactor(record.year),
   })
   if (!plan.install) return false
   try {

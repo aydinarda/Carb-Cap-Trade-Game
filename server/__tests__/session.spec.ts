@@ -886,3 +886,154 @@ describe('SessionStore lifecycle', () => {
     expect(store.sweep(later)).toEqual([])
   })
 })
+
+/**
+ * Green subsidy: a discount on installing abatement capacity, announced ahead of the round
+ * it applies to.
+ *
+ * The lead time is the mechanism rather than a detail — a discount starting immediately is
+ * a cheaper world, while one starting two rounds out is a decision about when to retrofit.
+ * These pin that timing, and that everything pricing a retrofit agrees on the discount:
+ * the charge, the agents' payback rule, and the scoring benchmark.
+ */
+describe('green subsidy', () => {
+  const start = (mode: Parameters<typeof Session.prototype.setCapMode>[0] = 'benchmarking') => {
+    const s = new Session(mode, 5)
+    s.addPlayer('Alice', 'Power & Utilities')
+    s.startYear()
+    return s
+  }
+
+  it('starts after the announced lead, not immediately', () => {
+    const s = start()
+    const w = s.announceSubsidy(2)
+    // Announced in round 11, shipped lead of 2 → rounds 13 and 14.
+    expect(w.announcedIn).toBe(11)
+    expect(w.fromYear).toBe(13)
+    expect(w.toYear).toBe(14)
+    expect(s.subsidyFactor(11)).toBe(1)
+    expect(s.subsidyFactor(12)).toBe(1)
+    expect(s.subsidyFactor(13)).toBe(0.75)
+    expect(s.subsidyFactor(14)).toBe(0.75)
+    // …and lifts on its own.
+    expect(s.subsidyFactor(15)).toBe(1)
+  })
+
+  it('charges the discounted price while it runs, and full price before', () => {
+    const full = start()
+    full.closeCapStage(); full.openTrade()
+    full.setAbatement('P1', 0.3)
+    const fullSpend = full.currentYearRecord()!.abatementSpend.P1
+
+    const cheap = start()
+    // Announce so that it is already live in the round being played: the window is
+    // addressed by year, so a lead-time test and a pricing test stay independent.
+    cheap.announceSubsidy(3)
+    cheap.state.subsidy!.fromYear = cheap.state.currentYear
+    cheap.closeCapStage(); cheap.openTrade()
+    cheap.setAbatement('P1', 0.3)
+    const cheapSpend = cheap.currentYearRecord()!.abatementSpend.P1
+
+    expect(cheapSpend).toBeCloseTo(round1(fullSpend * 0.75), 1)
+    expect(cheapSpend).toBeLessThan(fullSpend)
+  })
+
+  it('is rejected for a nonsensical length, and can be withdrawn', () => {
+    const s = start()
+    expect(() => s.announceSubsidy(0)).toThrow(/between 1 and 20/)
+    expect(() => s.announceSubsidy(99)).toThrow(/between 1 and 20/)
+    s.announceSubsidy(3)
+    expect(s.state.subsidy).not.toBeNull()
+    s.cancelSubsidy()
+    expect(s.state.subsidy).toBeNull()
+    expect(s.subsidyFactor(13)).toBe(1)
+  })
+
+  it('does not charge the scoring benchmark full price for a subsidised round', () => {
+    // The benchmark has to face the same price the company did. If it did not, a company
+    // that correctly waited for the discount would read as having over-invested.
+    const s = start()
+    s.announceSubsidy(3)
+    s.state.subsidy!.fromYear = s.state.currentYear
+    s.closeCapStage(); s.openTrade()
+    s.setAbatement('P1', 0.3)
+    s.closeTrade()
+    const p = s.getPlayer('P1')!
+    // Following the payback rule under the discount must not itself create a gap.
+    expect(p.investmentGapTotal).toBeGreaterThanOrEqual(0)
+    expect(Number.isFinite(p.investmentGapTotal)).toBe(true)
+  })
+})
+
+/**
+ * Technology breakthrough: a higher lifetime abatement budget.
+ *
+ * Modelled per company from the start even though the only trigger today is a class-wide
+ * announcement — the intended next step is a company earning its own unlock, and these pin
+ * that nothing downstream reads a single global ceiling any more.
+ */
+describe('technology breakthrough', () => {
+  const start = () => {
+    const s = new Session('benchmarking', 5)
+    s.addPlayer('Alice', 'Power & Utilities')
+    s.addPlayer('Bob', 'Heavy Materials')
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    return s
+  }
+
+  it('raises the ceiling for the whole class when scope is null', () => {
+    const s = start()
+    expect(s.lifetimeCapFor('P1')).toBe(DEFAULT_GAME_CONFIG.abatement.lifetimeCap)
+    s.announceTech()
+    expect(s.lifetimeCapFor('P1')).toBe(0.7)
+    expect(s.lifetimeCapFor('P2')).toBe(0.7)
+  })
+
+  it('lets a company install past the old cap, and clamps at the new one', () => {
+    const s = start()
+    // The old ceiling really does bind first.
+    s.setAbatement('P1', 0.9)
+    expect(s.getPlayer('P1')!.abatementCommitted).toBe(0.5)
+    s.announceTech()
+    s.setAbatement('P1', 0.9)
+    expect(s.getPlayer('P1')!.abatementCommitted).toBe(0.7)
+  })
+
+  it('applies to only the companies in scope — the per-player path', () => {
+    const s = start()
+    s.announceTech({ scope: ['P1'], label: 'Pilot plant' })
+    expect(s.lifetimeCapFor('P1')).toBe(0.7)
+    expect(s.lifetimeCapFor('P2')).toBe(DEFAULT_GAME_CONFIG.abatement.lifetimeCap)
+    s.setAbatement('P2', 0.9)
+    expect(s.getPlayer('P2')!.abatementCommitted).toBe(0.5)
+  })
+
+  it('composes by maximum, so two unlocks cannot stack past 100%', () => {
+    const s = start()
+    s.announceTech({ cap: 0.6 })
+    s.announceTech({ cap: 0.8 })
+    expect(s.lifetimeCapFor('P1')).toBe(0.8)
+    s.announceTech({ cap: 0.7 })
+    expect(s.lifetimeCapFor('P1')).toBe(0.8) // the deepest still wins, not the latest
+  })
+
+  it('honours a lead time and can be withdrawn', () => {
+    const s = new Session('benchmarking', 5, { abatement: { tech: { leadRounds: 2 } } })
+    s.addPlayer('Alice', 'Power & Utilities')
+    s.startYear()
+    const u = s.announceTech()
+    expect(u.fromYear).toBe(13)
+    expect(s.lifetimeCapFor('P1', 11)).toBe(DEFAULT_GAME_CONFIG.abatement.lifetimeCap)
+    expect(s.lifetimeCapFor('P1', 13)).toBe(0.7)
+    s.cancelTech(u.id)
+    expect(s.lifetimeCapFor('P1', 13)).toBe(DEFAULT_GAME_CONFIG.abatement.lifetimeCap)
+  })
+
+  it('rejects a nonsensical ceiling', () => {
+    const s = start()
+    expect(() => s.announceTech({ cap: 0 })).toThrow(/between 0 and 1/)
+    expect(() => s.announceTech({ cap: 1.5 })).toThrow(/between 0 and 1/)
+  })
+})

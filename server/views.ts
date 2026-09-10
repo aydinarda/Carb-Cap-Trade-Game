@@ -56,6 +56,10 @@ function hostConfigView(config: GameConfig): HostConfigView {
     abatement: { ...config.abatement.sectors },
     abatementLifetimeCap: config.abatement.lifetimeCap,
     abatementFixedCost: config.abatement.fixedCostPerTonneBaseline,
+    subsidyLeadRounds: config.abatement.subsidy.leadRounds,
+    subsidyDiscount: config.abatement.subsidy.discount,
+    techLifetimeCap: config.abatement.tech.lifetimeCap,
+    techLeadRounds: config.abatement.tech.leadRounds,
     reserveEnabled: config.allocation.reserve.enabled,
     reserveSteps: config.allocation.reserve.steps.map((s) => ({ ...s })),
   }
@@ -234,9 +238,17 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     playerCount: state.players.length,
     roster: publicRoster(session),
     abatement: state.config.abatement.sectors[player.industry],
-    abatementLifetimeCap: session.abatementLifetimeCap,
+    // Per company, not per class: a breakthrough may be held by some and not others.
+    abatementLifetimeCap: session.lifetimeCapFor(player.id),
     penaltyRate: state.config.market.penaltyRate,
     usesAuction: session.usesAuction,
+    subsidy: state.subsidy,
+    // The one that applies to this company — the deepest, if it somehow holds several.
+    techUnlock:
+      session
+        .techUnlocksFor(player.id, state.currentYear)
+        .slice()
+        .sort((a, b) => b.lifetimeCap - a.lifetimeCap)[0] ?? null,
     freeAllocationBasis: session.freeAllocationBasis,
     auctionSupply: session.usesAuction ? (record?.regulatorPool ?? 0) : 0,
     auctionPrice: record?.auctionPrice ?? null,
@@ -375,6 +387,8 @@ export function hostSnapshot(session: Session): HostSnapshot {
     classAggregate: classAggregate(session),
     leaderboard: leaderboard(session),
     usesAuction: session.usesAuction,
+    subsidy: state.subsidy,
+    techUnlocks: state.techUnlocks,
     auctionPrice: record?.auctionPrice ?? null,
     prevMarketPrice: session.previousMarketPrice(),
     market: record ? buildMarketView(record.orders, record.trades) : null,

@@ -47,6 +47,8 @@ interface GameContextValue {
     event:
       | 'host:setCapMode'
       | 'host:updateSettings'
+      | 'host:announceSubsidy'
+      | 'host:announceTech'
       | 'host:startYear'
       | 'host:closeCapStage'
       | 'host:openTrade'

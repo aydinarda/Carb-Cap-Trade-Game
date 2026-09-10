@@ -242,9 +242,60 @@ export interface HostConfigView {
   abatementLifetimeCap: number
   /** Retrofit fee per install step, × the company's baseline emission. */
   abatementFixedCost: number
+  /** Green subsidy: how far ahead an announcement lands, and how deep the discount is. */
+  subsidyLeadRounds: number
+  subsidyDiscount: number
+  /** Technology breakthrough: the ceiling it raises the budget to, and its lead time. */
+  techLifetimeCap: number
+  techLeadRounds: number
   /** Cost containment reserve: whether it is armed, and the ladder it would release on. */
   reserveEnabled: boolean
   reserveSteps: { triggerPrice: number; cumulativeFraction: number }[]
+}
+
+/**
+ * A green subsidy the instructor has announced: a window of rounds in which installing
+ * abatement capacity is cheaper.
+ *
+ * Announced ahead of time and visible to every player from the moment it is declared, so a
+ * company can hold off on a retrofit it was about to buy. `announcedIn` is kept for the
+ * host's own record of when the decision was taken.
+ */
+export interface SubsidyWindow {
+  /** Round the announcement was made in. */
+  announcedIn: number
+  /** First round the discount applies to. */
+  fromYear: number
+  /** Last round it applies to, inclusive. */
+  toYear: number
+  /** Share off the install cost, e.g. 0.25. */
+  discount: number
+}
+
+/**
+ * A technology breakthrough: a higher lifetime abatement budget for some or all companies.
+ *
+ * Modelled per COMPANY from the outset even though the only trigger today is a class-wide
+ * announcement by the instructor. The intended next step is letting a company earn the
+ * unlock itself — research it, or buy it — and if the ceiling were a single global number
+ * that would be a new mechanic rather than a new trigger. `scope: null` is the class-wide
+ * case; a list of ids is an unlock those companies hold and nobody else does.
+ *
+ * Unlocks COMPOSE BY MAXIMUM, never by addition: two breakthroughs do not let a company cut
+ * 140% of its emissions.
+ */
+export interface TechUnlock {
+  id: string
+  /** Human-readable, shown to the class — "Carbon capture retrofit", etc. */
+  label: string
+  /** Round the announcement was made in. */
+  announcedIn: number
+  /** First round the higher ceiling applies. */
+  fromYear: number
+  /** The ceiling the lifetime abatement budget is raised TO (0..1). */
+  lifetimeCap: number
+  /** Companies it applies to; null means the whole class. */
+  scope: string[] | null
 }
 
 export interface GameState {
@@ -258,6 +309,10 @@ export interface GameState {
   config: GameConfig
   /** Computed once when leaving the lobby; fixed across years (see OQ-2 in the plan). */
   freeCreditLimit: number | null
+  /** The green subsidy in force or announced, if the instructor has declared one. */
+  subsidy: SubsidyWindow | null
+  /** Technology breakthroughs announced so far. Append-only within a game. */
+  techUnlocks: TechUnlock[]
 }
 
 // ---- Role-scoped views sent over the wire ----
@@ -384,6 +439,10 @@ export interface PlayerSnapshot {
    * two of them do now.
    */
   usesAuction: boolean
+  /** Green subsidy announced or running — see SubsidyWindow. Null when there is none. */
+  subsidy: SubsidyWindow | null
+  /** The breakthrough that applies to THIS company, if any — see TechUnlock. */
+  techUnlock: TechUnlock | null
   /**
    * What this mode derives free credits from — see `CapMechanism.freeAllocation`.
    *
@@ -491,6 +550,10 @@ export interface HostSnapshot {
   leaderboard: LeaderboardRow[]
   /** Whether this mode runs a cap-stage auction — see PlayerSnapshot.usesAuction. */
   usesAuction: boolean
+  /** Green subsidy announced or running. */
+  subsidy: SubsidyWindow | null
+  /** Every breakthrough announced so far. */
+  techUnlocks: TechUnlock[]
   /** This year's clearing price (null before the auction closes). */
   auctionPrice: number | null
   /** Previous settled year's discovered market price (VWAP) — a price signal. */

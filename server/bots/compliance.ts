@@ -124,7 +124,7 @@ export function trade(ctx: BotCtx): boolean {
     const reservation = reservationPrice(
       planned, held, coeff, P,
       session.state.config.bots.fixes.complianceReservation,
-      session.abatementLifetimeCap,
+      session.lifetimeCapFor(bot.id),
     )
     const reservationB = disperse(reservation, ctx.rt.bias ?? 0, P)
     if (mv.bestAsk !== null && mv.bestAsk < reservation) {
@@ -183,7 +183,7 @@ export function auction(ctx: BotCtx): boolean {
   const reservation = reservationPrice(
     planned, held, coeff, P,
     session.state.config.bots.fixes.complianceReservation,
-    session.abatementLifetimeCap,
+    session.lifetimeCapFor(bot.id),
     SOFTEN_AT_CAP,
   )
   // Anchored to the market, with the firm's own valuation deciding WHERE IN THE BAND it sits.

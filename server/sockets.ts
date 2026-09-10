@@ -107,6 +107,16 @@ export function registerSockets(io: IO): Broadcaster {
       hostAction(broadcaster, socket, ack, (s) => s.setCapMode(mode)))
     socket.on('host:updateSettings', (settings, ack) =>
       hostAction(broadcaster, socket, ack, (s) => s.updateSettings(settings)))
+    socket.on('host:announceSubsidy', ({ rounds }, ack) =>
+      hostAction(broadcaster, socket, ack, (s) => {
+        if (!rounds) s.cancelSubsidy()
+        else s.announceSubsidy(Number(rounds))
+      }))
+    socket.on('host:announceTech', ({ cap, label, cancel }, ack) =>
+      hostAction(broadcaster, socket, ack, (s) => {
+        if (cancel) s.cancelTech()
+        else s.announceTech({ cap: cap === undefined ? undefined : Number(cap), label })
+      }))
     socket.on('host:startYear', (_p, ack) =>
       hostAction(broadcaster, socket, ack, (s) => s.startYear()))
     socket.on('host:closeCapStage', (_p, ack) =>

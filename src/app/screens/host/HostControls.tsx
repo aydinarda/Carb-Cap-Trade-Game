@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import type { Industry } from '@shared/constants'
-import type { CapMode, HostConfigView } from '@shared/types'
+import type { CapMode, HostConfigView, SubsidyWindow, TechUnlock } from '@shared/types'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { cn, MODE_LABELS } from '../../components/game/theme'
@@ -264,6 +264,205 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
       >
         Save settings
       </Button>
+    </div>
+  )
+}
+
+/**
+ * Green subsidy: announce a window in which retrofits are cheaper.
+ *
+ * The lead time is the event, not a technicality — see `Session.announceSubsidy`. The panel
+ * therefore states the rounds the discount will actually apply to, rather than just "in 2
+ * rounds", because the instructor is about to say that number out loud to the room.
+ */
+export function SubsidyPanel({
+  subsidy,
+  currentYear,
+}: {
+  subsidy: SubsidyWindow | null
+  currentYear: number
+}) {
+  const { hostAction } = useGame()
+  const [rounds, setRounds] = useState('3')
+  const [busy, setBusy] = useState(false)
+
+  const announce = async () => {
+    setBusy(true)
+    const ok = await hostAction('host:announceSubsidy', { rounds: Number(rounds) })
+    setBusy(false)
+    if (ok) toast.success(`Subsidy announced for ${rounds} round(s)`)
+  }
+  const cancel = async () => {
+    setBusy(true)
+    const ok = await hostAction('host:announceSubsidy', { rounds: 0 })
+    setBusy(false)
+    if (ok) toast.success('Subsidy withdrawn')
+  }
+
+  const live = subsidy && currentYear >= subsidy.fromYear && currentYear <= subsidy.toYear
+  const pending = subsidy && currentYear < subsidy.fromYear
+
+  return (
+    <div className="flex flex-col gap-3">
+      {subsidy ? (
+        <div
+          className={cn(
+            'rounded-lg border px-3 py-2 text-xs font-mono',
+            live
+              ? 'border-primary/50 bg-primary/10 text-primary'
+              : 'border-accent/50 bg-accent/10 text-accent',
+          )}
+        >
+          <div className="font-bold">
+            {live ? 'RUNNING' : 'ANNOUNCED'} · {Math.round(subsidy.discount * 100)}% off retrofits
+          </div>
+          <div className="text-muted-foreground mt-0.5">
+            Rounds {subsidy.fromYear}–{subsidy.toYear}
+            {pending && ` · starts in ${subsidy.fromYear - currentYear}`}
+            {live && ` · ${subsidy.toYear - currentYear + 1} round(s) left`}
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11px] text-muted-foreground font-mono">
+          Announces a discount on abatement investment that starts a couple of rounds from
+          now, so the class has to decide whether to retrofit today or wait for it.
+        </p>
+      )}
+
+      <div className="flex items-end gap-2">
+        <div className="flex flex-col gap-1 w-20">
+          <label className="text-[10px] font-mono uppercase text-muted-foreground">Rounds</label>
+          <Input
+            type="number"
+            min={1}
+            max={20}
+            value={rounds}
+            onChange={(e) => setRounds(e.target.value)}
+            className="font-mono"
+          />
+        </div>
+        <Button onClick={() => void announce()} disabled={busy} className="font-bold flex-1">
+          {subsidy ? 'Re-announce' : 'Announce subsidy'}
+        </Button>
+        {subsidy && (
+          <Button variant="outline" onClick={() => void cancel()} disabled={busy} className="font-mono text-xs">
+            Withdraw
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Technology breakthrough: raise the lifetime abatement budget.
+ *
+ * The cap is the ceiling the budget is raised TO. It is announced to the class rather than
+ * quietly applied, because the point is that a new option has opened — a company that was
+ * pinned at its old ceiling can suddenly cut further, and it has to notice in order to act.
+ */
+export function TechPanel({
+  unlocks,
+  currentYear,
+  defaultCap,
+  leadRounds,
+}: {
+  unlocks: TechUnlock[]
+  currentYear: number
+  defaultCap: number
+  leadRounds: number
+}) {
+  const { hostAction } = useGame()
+  const [cap, setCap] = useState(String(defaultCap))
+  const [label, setLabel] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const announce = async () => {
+    setBusy(true)
+    const ok = await hostAction('host:announceTech', {
+      cap: Number(cap),
+      label: label.trim() || undefined,
+    })
+    setBusy(false)
+    if (ok) toast.success(`Breakthrough announced — budget up to ${Math.round(Number(cap) * 100)}%`)
+  }
+  const withdraw = async () => {
+    setBusy(true)
+    const ok = await hostAction('host:announceTech', { cancel: true })
+    setBusy(false)
+    if (ok) toast.success('Latest breakthrough withdrawn')
+  }
+
+  const latest = unlocks[unlocks.length - 1]
+  const live = latest && currentYear >= latest.fromYear
+
+  return (
+    <div className="flex flex-col gap-3">
+      {latest ? (
+        <div
+          className={cn(
+            'rounded-lg border px-3 py-2 text-xs font-mono',
+            live
+              ? 'border-primary/50 bg-primary/10 text-primary'
+              : 'border-accent/50 bg-accent/10 text-accent',
+          )}
+        >
+          <div className="font-bold">
+            {live ? 'IN FORCE' : 'ANNOUNCED'} · budget up to{' '}
+            {Math.round(latest.lifetimeCap * 100)}%
+          </div>
+          <div className="text-muted-foreground mt-0.5">
+            {latest.label} · from round {latest.fromYear}
+            {unlocks.length > 1 && ` · ${unlocks.length} announced in total`}
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11px] text-muted-foreground font-mono">
+          Raises how much of its own emissions a company may ever cut. Announce one when the
+          class has spent its budget and the market has nothing left to respond with.
+        </p>
+      )}
+
+      <div className="flex items-end gap-2">
+        <div className="flex flex-col gap-1 w-20">
+          <label className="text-[10px] font-mono uppercase text-muted-foreground">New cap</label>
+          <Input
+            type="number"
+            min={0}
+            max={1}
+            step="0.05"
+            value={cap}
+            onChange={(e) => setCap(e.target.value)}
+            className="font-mono"
+          />
+        </div>
+        <div className="flex flex-col gap-1 flex-1">
+          <label className="text-[10px] font-mono uppercase text-muted-foreground">
+            Name (optional)
+          </label>
+          <Input
+            value={label}
+            placeholder="Carbon capture retrofit"
+            onChange={(e) => setLabel(e.target.value)}
+            className="font-mono text-xs"
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button onClick={() => void announce()} disabled={busy} className="font-bold flex-1">
+          Announce breakthrough
+        </Button>
+        {latest && (
+          <Button variant="outline" onClick={() => void withdraw()} disabled={busy} className="font-mono text-xs">
+            Withdraw
+          </Button>
+        )}
+      </div>
+      {leadRounds > 0 && (
+        <p className="text-[10px] font-mono text-muted-foreground">
+          Takes effect {leadRounds} round{leadRounds === 1 ? '' : 's'} after announcing.
+        </p>
+      )}
     </div>
   )
 }

@@ -190,6 +190,14 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     // still exceeds the variable cost of a *small* step (a 10% Power cut is 1.375/t),
     // which is exactly the nibbling it exists to discourage.
     fixedCostPerTonneBaseline: 1.5,
+    // A quarter off, announced two rounds ahead. The size is the instructor's lever and
+    // the lag is what makes it a decision — see `subsidy` in the schema.
+    subsidy: { discount: 0.25, leadRounds: 2 },
+    // Raises the budget to 70% — the ceiling is what killed the ten-round game, where the
+    // class spent its 50% by round four and then had nothing left to decide. Immediate by
+    // default: unlike the subsidy, the point here is to reopen a decision, not to make the
+    // class wait for it.
+    tech: { lifetimeCap: 0.7, leadRounds: 0 },
     // Agents only. Long enough that a genuine retrofit pays back, short enough that they
     // will not buy capacity on a single year's price spike.
     investmentHorizon: 3,

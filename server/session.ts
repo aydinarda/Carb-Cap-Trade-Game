@@ -35,6 +35,7 @@ import type {
   BotType,
   CapMode,
   GameState,
+  TechUnlock,
   Order,
   OrderSide,
   Player,
@@ -105,6 +106,8 @@ export class Session {
       years: {},
       config,
       freeCreditLimit: null,
+      subsidy: null,
+      techUnlocks: [],
     }
   }
 
@@ -205,6 +208,113 @@ export class Session {
   /** Whether this session's mechanism runs a sealed-bid auction at the cap stage. */
   get usesAuction(): boolean {
     return this.state.capMode !== null && this.mechanism.usesAuction
+  }
+
+  /**
+   * Announce a green subsidy: a window in which installing abatement capacity is cheaper.
+   *
+   * Deliberately does NOT start now. `leadRounds` sits between the announcement and the
+   * first discounted round, and that gap is the event: a company about to retrofit has to
+   * decide whether to buy at today's price or wait and pay less for capacity that then
+   * arrives a year later than it wanted it. Starting immediately would just be a cheaper
+   * world, which is a setting, not a decision.
+   *
+   * Allowed in any phase — an instructor should be able to react to what the market is
+   * doing without waiting for the year to turn. Replacing a standing announcement is
+   * allowed too, and is how a subsidy gets cancelled or extended.
+   */
+  announceSubsidy(rounds: number) {
+    if (!Number.isFinite(rounds) || rounds < 1 || rounds > 20) {
+      throw new GameError('BAD_SUBSIDY', 'Subsidy length must be between 1 and 20 rounds.')
+    }
+    const { discount, leadRounds } = this.state.config.abatement.subsidy
+    const fromYear = this.state.currentYear + leadRounds
+    this.state.subsidy = {
+      announcedIn: this.state.currentYear,
+      fromYear,
+      toYear: fromYear + Math.floor(rounds) - 1,
+      discount,
+    }
+    return this.state.subsidy
+  }
+
+  /** Withdraw a standing announcement. A window already running can be cut short this way. */
+  cancelSubsidy() {
+    this.state.subsidy = null
+  }
+
+  /**
+   * Announce a technology breakthrough: a higher lifetime abatement budget.
+   *
+   * `scope` is the extension point. Today the host announces one for the whole class
+   * (`null`), which is the only trigger wired up; the model is per-company so that letting a
+   * company research or buy its own unlock later is a new TRIGGER rather than a new
+   * mechanic — nothing downstream reads a global ceiling any more.
+   */
+  announceTech(args: { cap?: number; label?: string; scope?: string[] | null } = {}) {
+    const cfg = this.state.config.abatement.tech
+    const cap = args.cap ?? cfg.lifetimeCap
+    if (!Number.isFinite(cap) || cap <= 0 || cap > 1) {
+      throw new GameError('BAD_TECH', 'Technology cap must be between 0 and 1.')
+    }
+    const unlock: TechUnlock = {
+      id: nanoid(8),
+      label: args.label?.trim() || 'Technology breakthrough',
+      announcedIn: this.state.currentYear,
+      fromYear: this.state.currentYear + cfg.leadRounds,
+      lifetimeCap: Math.round(cap * 100) / 100,
+      scope: args.scope ?? null,
+    }
+    this.state.techUnlocks.push(unlock)
+    return unlock
+  }
+
+  /** Withdraw a breakthrough by id, or the most recent one. */
+  cancelTech(id?: string) {
+    if (id) this.state.techUnlocks = this.state.techUnlocks.filter((u) => u.id !== id)
+    else this.state.techUnlocks.pop()
+  }
+
+  /** Unlocks in force for one company in a given round. */
+  techUnlocksFor(playerId: string, year: number): TechUnlock[] {
+    return this.state.techUnlocks.filter(
+      (u) => year >= u.fromYear && (u.scope === null || u.scope.includes(playerId)),
+    )
+  }
+
+  /**
+   * How much of its own un-abated emissions this company may EVER cut.
+   *
+   * The config value is the floor; a breakthrough raises it. Composed by MAXIMUM, so two
+   * unlocks do not stack into a budget above 100%. Everything that clamps, prices or scores
+   * an install reads this — a ceiling only some of them knew about would let a player buy
+   * capacity the scorer thinks was impossible.
+   */
+  lifetimeCapFor(playerId: string, year = this.state.currentYear): number {
+    const base = this.state.config.abatement.lifetimeCap
+    const best = this.techUnlocksFor(playerId, year).reduce(
+      (m, u) => Math.max(m, u.lifetimeCap),
+      base,
+    )
+    return Math.max(0, Math.min(1, best))
+  }
+
+  /**
+   * The multiplier on install cost for a given year: below 1 while a subsidy is running.
+   *
+   * Everything that prices a retrofit reads this — `setAbatement` for humans, the agents'
+   * `planInstall`, and the scoring benchmark. They must agree: a discount the benchmark
+   * cannot see would score a company for correctly taking it.
+   */
+  subsidyFactor(year: number): number {
+    const s = this.state.subsidy
+    if (!s || year < s.fromYear || year > s.toYear) return 1
+    return Math.max(0, 1 - s.discount)
+  }
+
+  /** Whether the discount is live in the round being played right now. */
+  get subsidyActive(): boolean {
+    return this.subsidyFactor(this.state.currentYear) < 1
   }
 
   /**
@@ -775,9 +885,11 @@ export class Session {
         committedBefore: record.abatement[player.id] ?? 0,
         committedAfter: player.abatementCommitted,
         actualCost: abateSpend,
-        lifetimeCap: this.abatementLifetimeCap,
+        lifetimeCap: this.lifetimeCapFor(player.id, record.year),
         fixedCost: this.abatementFixedCost(player.id),
         horizon: this.state.config.abatement.investmentHorizon,
+        // The rule is priced at whatever the company itself faced this round.
+        costFactor: this.subsidyFactor(record.year),
       })
     }
     const { settlement } = settleYear(record.realized, held, purchaseCost, sellIncome, abateCost, {
@@ -1035,7 +1147,7 @@ export class Session {
     // Two decimals, not one. `round1` here meant the stored fraction snapped to 10% steps,
     // which was survivable when the range was 0-100% but leaves only three usable choices
     // once the ceiling is 20% — and it silently contradicted the client's 1% slider.
-    const target = Math.round(Math.min(this.abatementLifetimeCap, fraction) * 100) / 100
+    const target = Math.round(Math.min(this.lifetimeCapFor(playerId, record.year), fraction) * 100) / 100
     const from = player.abatementCommitted
     if (target === from) return
     if (target < from) {
@@ -1045,12 +1157,14 @@ export class Session {
       )
     }
     const cfg = this.state.config.abatement
-    const spend = installCost(
-      this.unabatedFor(player, record.year),
-      from,
-      target,
-      cfg.sectors[player.industry],
-      cfg.fixedCostPerTonneBaseline * this.baselineFor(player),
+    const spend = round1(
+      installCost(
+        this.unabatedFor(player, record.year),
+        from,
+        target,
+        cfg.sectors[player.industry],
+        cfg.fixedCostPerTonneBaseline * this.baselineFor(player),
+      ) * this.subsidyFactor(record.year),
     )
     player.abatementCommitted = target
     record.abatementInstalled[playerId] = target

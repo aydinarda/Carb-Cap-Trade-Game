@@ -1,6 +1,7 @@
 import {
   ArrowRight,
   Bot,
+  Sprout,
   Eye,
   EyeOff,
   Flag,
@@ -23,7 +24,7 @@ import { PlayerHistoryDialog } from './PlayerHistoryDialog'
 import { ClassYearChart, IndustryBreakdownChart } from '../../components/game/charts'
 import { cn } from '../../components/game/theme'
 import { useGame } from '../../net/GameContext'
-import { ModePicker, SettingsPanel } from './HostControls'
+import { ModePicker, SettingsPanel, SubsidyPanel, TechPanel } from './HostControls'
 
 /** The single valid next action per phase — keeps the instructor on rails. */
 const NEXT_ACTION: Partial<
@@ -379,6 +380,51 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           </div>
         )}
       </div>
+
+      {/* Event menu
+          ───────────
+          Everything the instructor can DO TO the market, as opposed to the phase controls
+          at the top which move the game along. Kept at the bottom and grouped because
+          these are deliberate interventions, not part of the round loop — an instructor
+          reaches for one after reading the market, and should not trip over it while
+          clicking through the phases.
+
+          Each event gets its own card in this grid. */}
+      {snap.phase !== 'ended' && (
+        <div className="rounded-xl border border-border bg-card/70 p-5">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-4">
+            <Sprout size={12} className="text-primary" />
+            Event menu
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+              <div className="text-xs font-bold text-foreground mb-1">Green subsidy</div>
+              <div className="text-[11px] font-mono text-muted-foreground mb-3">
+                {Math.round(snap.config.subsidyDiscount * 100)}% off retrofits · announced now,
+                starts in {snap.config.subsidyLeadRounds} rounds
+              </div>
+              <SubsidyPanel subsidy={snap.subsidy} currentYear={snap.currentYear} />
+            </div>
+
+            <div className="rounded-lg border border-insight/30 bg-insight/5 p-4">
+              <div className="text-xs font-bold text-foreground mb-1">Deep decarbonisation</div>
+              <div className="text-[11px] font-mono text-muted-foreground mb-3">
+                Lifetime abatement budget up to{' '}
+                {Math.round(snap.config.techLifetimeCap * 100)}% ·{' '}
+                {snap.config.techLeadRounds === 0
+                  ? 'takes effect at once'
+                  : `starts in ${snap.config.techLeadRounds} rounds`}
+              </div>
+              <TechPanel
+                unlocks={snap.techUnlocks}
+                currentYear={snap.currentYear}
+                defaultCap={snap.config.techLifetimeCap}
+                leadRounds={snap.config.techLeadRounds}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       <PlayerHistoryDialog snap={snap} playerId={historyId} onClose={() => setHistoryId(null)} />
     </div>

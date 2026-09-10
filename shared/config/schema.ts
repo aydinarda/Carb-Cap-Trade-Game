@@ -266,6 +266,37 @@ export interface AbatementConfig {
    */
   fixedCostPerTonneBaseline: number
   /**
+   * The green subsidy the instructor can announce: a temporary discount on the cost of
+   * installing abatement capacity.
+   *
+   * `leadRounds` is the announcement lag, and it is the whole point of the event rather
+   * than a technicality. Announcing a discount that starts NOW is just a cheaper world;
+   * announcing one that starts in two rounds creates a decision nobody has had to make so
+   * far — retrofit at today's price, or wait and pay less for the same capacity a year
+   * later than you wanted it. That is the option value a real subsidy programme creates,
+   * and the reason this event was picked first.
+   */
+  subsidy: {
+    /** Share taken off the install cost while it is running (0.25 = a quarter cheaper). */
+    discount: number
+    /** Rounds between the announcement and the first round it applies to. */
+    leadRounds: number
+  }
+  /**
+   * The technology breakthrough event: a higher ceiling on how much of its own emissions a
+   * company may ever cut.
+   *
+   * `lifetimeCap` is what the budget is raised TO, not by — an unlock is a new ceiling, and
+   * ceilings compose by taking the highest rather than by adding, so a company holding two
+   * unlocks is not accidentally allowed to cut 140%.
+   */
+  tech: {
+    /** The ceiling a breakthrough raises the lifetime budget to. */
+    lifetimeCap: number
+    /** Rounds between the announcement and the round it takes effect. 0 = immediately. */
+    leadRounds: number
+  }
+  /**
    * How many years of savings an **agent** requires to cover an install before it will pay
    * the fee. Purely a bot/simulated-student parameter — the engine neither reads it nor
    * enforces any payback on a human, who is free to invest at any price.

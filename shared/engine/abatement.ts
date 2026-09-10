@@ -171,13 +171,22 @@ export function planInstall(args: {
   fixedCost: number
   horizon: number
   minStep?: number
+  /**
+   * Multiplier on the install cost, for a subsidy in force. 1 is the ordinary world.
+   *
+   * The agents have to see the discounted price, not just the humans: a subsidy that only
+   * reached students would move the abatement of half the class and none of the market's,
+   * and the price the class then trades at would be answering a question nobody asked.
+   */
+  costFactor?: number
 }): InstallPlan {
   const { spec, price, unabated, committed, lifetimeCap, fixedCost, horizon } = args
   const minStep = args.minStep ?? 0.05
+  const costFactor = args.costFactor ?? 1
   const ceiling = Math.max(committed, clamp01(lifetimeCap))
   const target = Math.min(ceiling, Math.max(committed, optimalAbatement(spec, price)))
   const step = target - committed
-  const cost = installCost(unabated, committed, target, spec, fixedCost)
+  const cost = round1(installCost(unabated, committed, target, spec, fixedCost) * costFactor)
   const gain = horizon * price * unabated * step
   return { target, cost, gain, install: step >= minStep && gain > cost }
 }
@@ -237,6 +246,8 @@ export function investmentGap(args: {
   fixedCost: number
   horizon: number
   minStep?: number
+  /** Subsidy multiplier in force when the decision was taken — see `planInstall`. */
+  costFactor?: number
 }): number {
   const { spec, price, unabated, committedBefore, committedAfter, actualCost } = args
   const yours = installValue({
@@ -255,6 +266,10 @@ export function investmentGap(args: {
     fixedCost: args.fixedCost,
     horizon: args.horizon,
     minStep: args.minStep,
+    // The benchmark faces the same price the player did. Without this a subsidised round
+    // would score everyone against a rule that was still paying full price, and a company
+    // that correctly took the discount would read as having over-invested.
+    costFactor: args.costFactor,
   })
   // `install: false` means the rule would have sat this year out, and sitting out is worth 0.
   const best = plan.install

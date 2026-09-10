@@ -30,6 +30,19 @@ export interface ClientToServerEvents {
     },
     ack: Ack,
   ) => void
+  /**
+   * Announce a green subsidy starting `abatement.subsidy.leadRounds` rounds from now and
+   * running for `rounds`. `rounds: 0` withdraws a standing announcement.
+   */
+  'host:announceSubsidy': (payload: { rounds: number }, ack: Ack) => void
+  /**
+   * Announce a technology breakthrough, raising the lifetime abatement budget. Omit `cap`
+   * for the configured default. `cancel: true` withdraws the most recent one.
+   */
+  'host:announceTech': (
+    payload: { cap?: number; label?: string; cancel?: boolean },
+    ack: Ack,
+  ) => void
   'host:startYear': (payload: Record<string, never>, ack: Ack) => void
   'host:closeCapStage': (payload: Record<string, never>, ack: Ack) => void
   'host:openTrade': (payload: Record<string, never>, ack: Ack) => void
