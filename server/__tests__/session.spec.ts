@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_GAME_CONFIG, resolveConfig, type DeepPartial, type GameConfig } from '../../shared/config'
 
 const FIRST_GAME_YEAR = DEFAULT_GAME_CONFIG.emissions.firstGameYear
-import { clearAuction, cumulativeCapFactor, round1 } from '../../shared/engine'
+import { clearAuction, cumulativeCapFactor, installCost, round1 } from '../../shared/engine'
 import { GameError, Session, SessionStore } from '../session'
+import { hostSnapshot, playerSnapshot } from '../views'
 
 // Session is fully drivable without sockets; a numeric seed makes emission
 // realization deterministic. Tests assert invariants (computed from state) rather
@@ -1239,6 +1240,175 @@ describe('energy crisis', () => {
     expect(s.currentYearRecord()!.emissionFactor).toBe(1)
     expect(s.emissionFactorFor(11)).toBe(1)
     expect(s.energyCrisisActive).toBe(false)
+  })
+})
+
+/**
+ * Interest-rate cut: cheap credit, pulling the game two ways at once — retrofits get cheaper,
+ * and the demand it creates pushes emissions up.
+ *
+ * Two things need pinning that no other event needs. The first is that its magnitudes never
+ * reach a player: the event's whole design is that the class infers the mechanics from its own
+ * numbers, and a snapshot that leaked them would quietly undo that. The second is composition
+ * — it is the first event to share BOTH the emission level and the install-cost factor with
+ * another event, and the failure mode there is silent (one shock masking the other, or one
+ * unwinding taking the other's step with it).
+ */
+describe('interest-rate cut', () => {
+  const start = () => {
+    const s = new Session('benchmarking', 5)
+    s.addPlayer('Alice', 'Power & Utilities')
+    s.startYear()
+    return s
+  }
+  const nextRound = (s: Session) => {
+    s.closeCapStage()
+    s.openTrade()
+    s.closeTrade()
+    s.advanceYear()
+  }
+
+  it('runs its configured length from the round it is triggered in', () => {
+    const s = start()
+    const cut = s.announceRateCut()
+    expect(cut.announcedIn).toBe(11)
+    expect(cut.fromYear).toBe(11) // no lead, like the energy crisis
+    expect(cut.toYear).toBe(12) // the shipped two rounds
+    expect(cut.investmentDiscount).toBe(0.07)
+    expect(cut.demandIncrease).toBe(0.08)
+  })
+
+  it('takes 7% off the capacity itself', () => {
+    // Measured against the company's OWN base for the round, which the demand arm has already
+    // raised. That is what the discount is a discount on: the price of capacity, not the size
+    // of the problem.
+    const s = start()
+    s.announceRateCut()
+    s.closeCapStage(); s.openTrade()
+    const spec = s.state.config.abatement.sectors['Power & Utilities']
+    const undiscounted = round1(
+      installCost(s.unabatedEmission('P1'), 0, 0.2, spec, s.abatementFixedCost('P1')),
+    )
+    s.setAbatement('P1', 0.2)
+    expect(s.currentYearRecord()!.abatementSpend.P1).toBeCloseTo(round1(undiscounted * 0.93), 1)
+  })
+
+  it('does NOT make the same abatement TARGET 7% cheaper — the base grew too', () => {
+    // The interaction worth knowing before an instructor promises the class a discount. A
+    // company aiming at "20% of my emissions" is buying 8% more tonnes than it would have
+    // been, so reaching that target lands only ~2% cheaper even at 7% off the price. Cheap
+    // credit does not, on its own, make the compliance problem smaller.
+    const full = start()
+    full.closeCapStage(); full.openTrade()
+    full.setAbatement('P1', 0.2)
+    const fullSpend = full.currentYearRecord()!.abatementSpend.P1
+
+    const cut = start()
+    cut.announceRateCut()
+    cut.closeCapStage(); cut.openTrade()
+    cut.setAbatement('P1', 0.2)
+    const cutSpend = cut.currentYearRecord()!.abatementSpend.P1
+
+    expect(cutSpend).toBeLessThan(fullSpend)
+    // Nowhere near the 7% a reader of the discount alone would expect.
+    expect(cutSpend / fullSpend).toBeGreaterThan(0.95)
+    expect(cutSpend / fullSpend).toBeLessThan(1)
+  })
+
+  it('steps emissions up by the demand arm, then back down', () => {
+    const s = start()
+    s.announceRateCut() // rounds 11-12
+    expect(s.emissionFactorFor(11)).toBeCloseTo(1.08, 6)
+    expect(s.emissionFactorFor(12)).toBeCloseTo(1, 6)
+    expect(s.emissionFactorFor(13)).toBeCloseTo(1 / 1.08, 6)
+    const product = [11, 12, 13].reduce((p, y) => p * s.emissionFactorFor(y), 1)
+    expect(product).toBeCloseTo(1, 10)
+  })
+
+  it('composes with an energy crisis instead of masking it', () => {
+    // Different causes — fuel substitution and cheap credit — so a class living through both
+    // emits more than either produces alone. Taking the larger would make the second free.
+    const s = start()
+    s.announceEnergyCrisis(4) // rounds 11-14
+    s.announceRateCut() // rounds 11-12
+    expect(s.emissionFactorFor(11)).toBeCloseTo(1.1 * 1.08, 6)
+
+    nextRound(s) // round 12: both still running, nothing steps
+    expect(s.emissionFactorFor(12)).toBeCloseTo(1, 6)
+
+    // Round 13: the rate cut lifts while the crisis keeps running. Exactly the cut's own step
+    // unwinds; the crisis holds its level untouched.
+    expect(s.emissionFactorFor(13)).toBeCloseTo(1 / 1.08, 6)
+    // Round 15: now the crisis lifts too, and only its step comes off.
+    expect(s.emissionFactorFor(15)).toBeCloseTo(1 / 1.1, 6)
+    // End to end the two windows leave the class exactly on its original trend.
+    const product = [11, 12, 13, 14, 15].reduce((p, y) => p * s.emissionFactorFor(y), 1)
+    expect(product).toBeCloseTo(1, 10)
+  })
+
+  it('compounds its discount with a running subsidy', () => {
+    const s = start()
+    s.announceSubsidy(3)
+    s.state.subsidy!.fromYear = s.state.currentYear
+    s.announceRateCut()
+    // 25% off and 7% off are different programmes; a company faces both.
+    expect(s.installCostFactor(11)).toBeCloseTo(0.75 * 0.93, 6)
+    // …and the subsidy-only view still answers about the subsidy alone.
+    expect(s.subsidyFactor(11)).toBeCloseTo(0.75, 6)
+  })
+
+  it('prices the scoring benchmark at the covert discount too', () => {
+    // The benchmark has to face what the company faced. If it did not, a company that
+    // correctly took a discount it was never told about would read as having over-invested.
+    const s = start()
+    s.announceRateCut()
+    s.closeCapStage(); s.openTrade()
+    s.setAbatement('P1', 0.2)
+    s.closeTrade()
+    const p = s.getPlayer('P1')!
+    expect(p.investmentGapTotal).toBeGreaterThanOrEqual(0)
+    expect(Number.isFinite(p.investmentGapTotal)).toBe(true)
+  })
+
+  it('keeps both magnitudes out of the player snapshot', () => {
+    // The one guarantee the event rests on. `playerSnapshot` rebuilds the notice field by
+    // field rather than spreading, and this is what would catch a future spread.
+    const s = start()
+    s.announceRateCut()
+    const view = playerSnapshot(s, 'P1')
+    expect(view.rateCut).toEqual({ announcedIn: 11, fromYear: 11, toYear: 12 })
+    expect(JSON.stringify(view)).not.toContain('investmentDiscount')
+    expect(JSON.stringify(view)).not.toContain('demandIncrease')
+    // What the class DOES get is the composed price it will actually be charged.
+    expect(view.abatementCostFactor).toBeCloseTo(0.93, 6)
+
+    // The host, by contrast, sees everything.
+    const host = hostSnapshot(s)
+    expect(host.rateCut?.investmentDiscount).toBe(0.07)
+    expect(host.rateCut?.demandIncrease).toBe(0.08)
+  })
+
+  it('unwinds the demand step when ended early', () => {
+    const s = start()
+    s.announceRateCut() // rounds 11-12
+    nextRound(s) // round 11 realized under it; now in round 12
+    s.cancelRateCut()
+    expect(s.state.rateCut!.toYear).toBe(11) // truncated, not deleted
+    expect(s.emissionFactorFor(12)).toBeCloseTo(1 / 1.08, 6)
+    // And the discount is gone from this round's pricing.
+    expect(s.installCostFactor(12)).toBe(1)
+  })
+
+  it('is inert until triggered', () => {
+    const s = start()
+    expect(s.state.rateCut).toBeNull()
+    expect(s.installCostFactor(11)).toBe(1)
+    expect(s.emissionFactorFor(11)).toBe(1)
+    expect(s.rateCutActive).toBe(false)
+    // A crisis must not make the rate-cut getter answer true, or vice versa.
+    s.announceEnergyCrisis(2)
+    expect(s.rateCutActive).toBe(false)
+    expect(s.energyCrisisActive).toBe(true)
   })
 })
 

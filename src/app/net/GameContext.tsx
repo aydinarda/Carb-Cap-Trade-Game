@@ -50,6 +50,7 @@ interface GameContextValue {
       | 'host:announceSubsidy'
       | 'host:announceTech'
       | 'host:announceEnergyCrisis'
+      | 'host:announceRateCut'
       | 'host:startYear'
       | 'host:closeCapStage'
       | 'host:openTrade'

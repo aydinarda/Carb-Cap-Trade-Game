@@ -66,6 +66,11 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     // physically abate (`abatement.perRoundCap` allows a fifth of what is left uncut). A
     // shock the class cannot answer prices at the fine and stops being a market lesson.
     energyCrisis: { magnitude: 0.1 },
+    // Two rounds of cheap credit. The two arms are deliberately close in size and opposite in
+    // sign: 7% off a retrofit against 8% more to cover, so the net effect on a company
+    // depends on whether it answers the shock by investing or by buying — which is the
+    // decision the event exists to force, and the reason neither number is announced.
+    rateCut: { rounds: 2, investmentDiscount: 0.07, demandIncrease: 0.08 },
   },
   allocation: {
     // Grandfathering opens at the class's full baseline rather than 80% of it. The scarcity

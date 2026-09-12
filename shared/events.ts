@@ -49,6 +49,14 @@ export interface ClientToServerEvents {
    * Re-declaring extends a running one; `rounds: 0` lifts it early.
    */
   'host:announceEnergyCrisis': (payload: { rounds: number }, ack: Ack) => void
+  /**
+   * Cut global interest rates for `emissions.rateCut.rounds` rounds: retrofits get cheaper
+   * and demand-driven emissions rise. `cancel: true` ends a running cut early.
+   *
+   * No length parameter — see `Session.announceRateCut`. The class is sent the headline
+   * only; neither magnitude leaves the host snapshot.
+   */
+  'host:announceRateCut': (payload: { cancel?: boolean }, ack: Ack) => void
   'host:startYear': (payload: Record<string, never>, ack: Ack) => void
   'host:closeCapStage': (payload: Record<string, never>, ack: Ack) => void
   'host:openTrade': (payload: Record<string, never>, ack: Ack) => void

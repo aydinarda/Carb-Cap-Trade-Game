@@ -266,6 +266,10 @@ export interface HostConfigView {
   techLeadRounds: number
   /** Energy crisis: how far above trend it pushes emissions while it runs. */
   energyCrisisMagnitude: number
+  /** Rate cut: its length and both arms. Host-only — the class is told none of these. */
+  rateCutRounds: number
+  rateCutInvestmentDiscount: number
+  rateCutDemandIncrease: number
   /** Cost containment reserve: whether it is armed, and the ladder it would release on. */
   reserveEnabled: boolean
   reserveSteps: { triggerPrice: number; cumulativeFraction: number }[]
@@ -345,6 +349,46 @@ export interface EnergyCrisis {
   magnitude: number
 }
 
+/**
+ * A cut in global interest rates the instructor has triggered: cheap credit, for a fixed
+ * window, pulling the game in two directions at once.
+ *
+ *  - **investmentDiscount** — capital is cheaper, so installing abatement capacity costs less.
+ *  - **demandIncrease** — cheap credit means more output, so expected emissions rise.
+ *
+ * **The class is never told either number.** This is the one event whose mechanics stay with
+ * the host: players get the headline (`RateCutNotice`) and nothing else, so what reaches them
+ * is a cheaper retrofit quote and a higher emission forecast with no stated connection
+ * between the two. Working out that both came from the same announcement — and that they
+ * point at opposite responses — is the exercise.
+ *
+ * That is why it does not violate the "no dice" principle the other events are built on: it
+ * is symmetric across the whole class and it changes no company's score directly. What it
+ * withholds is the explanation, not the information — every number a player needs to decide
+ * with is on their own screen, correctly priced.
+ */
+export interface RateCut {
+  /** Round the cut was triggered in. */
+  announcedIn: number
+  /** First round it applies to — the round it was triggered in, or the next one. */
+  fromYear: number
+  /** Last round it applies to, inclusive. */
+  toYear: number
+  /** Share off the cost of installing abatement capacity, e.g. 0.07. HOST ONLY. */
+  investmentDiscount: number
+  /** Share expected emissions rise by while it runs, e.g. 0.08. HOST ONLY. */
+  demandIncrease: number
+}
+
+/**
+ * What the CLASS is told about a rate cut: that it happened and when, and nothing else.
+ *
+ * The magnitudes are omitted at the type level rather than by remembering not to send them,
+ * so a future field added to `RateCut` is withheld by default instead of leaking the first
+ * time someone spreads the object into a player snapshot.
+ */
+export type RateCutNotice = Omit<RateCut, 'investmentDiscount' | 'demandIncrease'>
+
 export interface GameState {
   roomCode: string
   seed: number
@@ -362,6 +406,8 @@ export interface GameState {
   techUnlocks: TechUnlock[]
   /** The energy crisis running or declared, if the instructor has called one. */
   energyCrisis: EnergyCrisis | null
+  /** The interest-rate cut running or triggered, if the instructor has called one. */
+  rateCut: RateCut | null
 }
 
 // ---- Role-scoped views sent over the wire ----
@@ -507,6 +553,21 @@ export interface PlayerSnapshot {
    */
   energyCrisis: EnergyCrisis | null
   /**
+   * The rate cut, stripped of its mechanics — see `RateCutNotice`. The class gets the
+   * headline and works the rest out from its own numbers.
+   */
+  rateCut: RateCutNotice | null
+  /**
+   * The multiplier on what a retrofit costs THIS round: every discount in force, composed.
+   *
+   * Sent as a number rather than as the rules that produce it, for two reasons. The first is
+   * the one `you.abatementFixedCost` already gives — the client must not be able to compute a
+   * different figure from the one the server will charge, and it was previously re-deriving
+   * the subsidy discount on its own. The second is this event: a covert discount cannot be
+   * reconstructed client-side without shipping the class the magnitude it is not told.
+   */
+  abatementCostFactor: number
+  /**
    * What this mode derives free credits from — see `CapMechanism.freeAllocation`.
    *
    * Sent for the same reason as `usesAuction`: screens that explain where a company's
@@ -619,12 +680,15 @@ export interface HostSnapshot {
   techUnlocks: TechUnlock[]
   /** The energy crisis running or just ended. */
   energyCrisis: EnergyCrisis | null
+  /** The rate cut running or just ended, mechanics included — the host sees everything. */
+  rateCut: RateCut | null
   /**
-   * The round a crisis declared right now would open in — this one, or the next if this
+   * The round a shock triggered right now would open in — this one, or the next if this
    * round's emissions are already drawn. Computed by the server rather than inferred from
-   * the phase, so the panel cannot name a round the server would not actually use.
+   * the phase, so a panel cannot name a round the server would not actually use. Shared by
+   * every immediate event, because they all land by the same rule.
    */
-  energyCrisisLandsIn: number
+  shockLandsIn: number
   /** This year's clearing price (null before the auction closes). */
   auctionPrice: number | null
   /** Previous settled year's discovered market price (VWAP) — a price signal. */

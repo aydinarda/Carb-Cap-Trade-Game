@@ -27,6 +27,7 @@ import { useGame } from '../../net/GameContext'
 import {
   EnergyCrisisPanel,
   ModePicker,
+  RateCutPanel,
   SettingsPanel,
   SubsidyPanel,
   TechPanel,
@@ -442,7 +443,31 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                 crisis={snap.energyCrisis}
                 currentYear={snap.currentYear}
                 magnitude={snap.config.energyCrisisMagnitude}
-                landsIn={snap.energyCrisisLandsIn}
+                landsIn={snap.shockLandsIn}
+              />
+            </div>
+
+            {/* Dashed border: the house style for "this one is not what it looks like from
+                the other side of the room". The class never sees these numbers. */}
+            <div className="rounded-lg border border-dashed border-insight/40 bg-insight/5 p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="text-xs font-bold text-foreground">Interest rate cut</div>
+                <span className="text-[9px] font-mono uppercase tracking-wider text-insight border border-insight/40 rounded-full px-1.5">
+                  covert
+                </span>
+              </div>
+              <div className="text-[11px] font-mono text-muted-foreground mb-3">
+                Retrofits −{Math.round(snap.config.rateCutInvestmentDiscount * 100)}% and
+                emissions +{Math.round(snap.config.rateCutDemandIncrease * 100)}% for{' '}
+                {snap.config.rateCutRounds} rounds · players are told neither
+              </div>
+              <RateCutPanel
+                rateCut={snap.rateCut}
+                currentYear={snap.currentYear}
+                rounds={snap.config.rateCutRounds}
+                investmentDiscount={snap.config.rateCutInvestmentDiscount}
+                demandIncrease={snap.config.rateCutDemandIncrease}
+                landsIn={snap.shockLandsIn}
               />
             </div>
           </div>

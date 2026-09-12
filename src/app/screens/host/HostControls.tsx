@@ -5,6 +5,7 @@ import type {
   CapMode,
   EnergyCrisis,
   HostConfigView,
+  RateCut,
   SubsidyWindow,
   TechUnlock,
 } from '@shared/types'
@@ -588,6 +589,114 @@ export function EnergyCrisisPanel({
             ? `Lands in round ${landsIn} — this round, before its emissions are drawn.`
             : `Lands in round ${landsIn}: this round's emissions are already drawn.`}
       </p>
+    </div>
+  )
+}
+
+/**
+ * Interest-rate cut — the covert event, and the only panel here that has to state what the
+ * class is NOT being told.
+ *
+ * The instructor needs three things this card exists to give them: the two magnitudes (which
+ * exist nowhere on a player's screen), the fact that they pull in opposite directions, and an
+ * explicit reminder that the room gets the headline alone. Without the last one an instructor
+ * would reasonably assume the class can see what the other two events announce, and would
+ * explain the mechanics out loud — which is the one action that undoes the event.
+ */
+export function RateCutPanel({
+  rateCut,
+  currentYear,
+  rounds,
+  investmentDiscount,
+  demandIncrease,
+  landsIn,
+}: {
+  rateCut: RateCut | null
+  currentYear: number
+  rounds: number
+  investmentDiscount: number
+  demandIncrease: number
+  /** The round a cut triggered now would open in — from the server, see EnergyCrisisPanel. */
+  landsIn: number
+}) {
+  const { hostAction } = useGame()
+  const [busy, setBusy] = useState(false)
+
+  const investPct = Math.round(investmentDiscount * 100)
+  const demandPct = Math.round(demandIncrease * 100)
+
+  const cut = async () => {
+    setBusy(true)
+    const ok = await hostAction('host:announceRateCut', {})
+    setBusy(false)
+    if (ok) toast.success(`Rates cut — ${rounds} round(s) from round ${landsIn}`)
+  }
+  const end = async () => {
+    setBusy(true)
+    const ok = await hostAction('host:announceRateCut', { cancel: true })
+    setBusy(false)
+    if (ok) toast.success('Rate cut ended — financing and demand back to normal')
+  }
+
+  const live = rateCut !== null && currentYear >= rateCut.fromYear && currentYear <= rateCut.toYear
+  const pending = rateCut !== null && currentYear < rateCut.fromYear
+  const over = rateCut !== null && currentYear > rateCut.toYear
+
+  return (
+    <div className="flex flex-col gap-3">
+      {rateCut ? (
+        <div
+          className={cn(
+            'rounded-lg border px-3 py-2 text-xs font-mono',
+            over
+              ? 'border-border bg-card text-muted-foreground'
+              : 'border-insight/50 bg-insight/10 text-insight',
+          )}
+        >
+          <div className="font-bold">
+            {over ? 'ENDED' : live ? 'RUNNING' : 'TRIGGERED'} · retrofits −
+            {Math.round(rateCut.investmentDiscount * 100)}% · emissions +
+            {Math.round(rateCut.demandIncrease * 100)}%
+          </div>
+          <div className="text-muted-foreground mt-0.5">
+            Rounds {rateCut.fromYear}–{rateCut.toYear}
+            {pending && ' · opens next round'}
+            {live && ` · ${rateCut.toYear - currentYear + 1} round(s) left`}
+            {over && ` · both arms unwound in round ${rateCut.toYear + 1}`}
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11px] text-muted-foreground font-mono">
+          Cheap credit for {rounds} rounds, pulling two ways at once: retrofits cost{' '}
+          {investPct}% less, and the demand it creates puts emissions {demandPct}% above trend.
+          Whether a company comes out ahead depends on which one it answers.
+        </p>
+      )}
+
+      <Button onClick={() => void cut()} disabled={busy} className="font-bold w-full">
+        {live ? 'Extend rate cut' : 'Cut interest rates'}
+      </Button>
+      {(live || pending) && (
+        <Button variant="outline" onClick={() => void end()} disabled={busy} className="font-mono text-xs">
+          End cut early
+        </Button>
+      )}
+
+      {/* The whole point of the event, and the one thing an instructor could accidentally
+          give away. Worth a box rather than a line. */}
+      <div className="rounded-lg border border-dashed border-border px-3 py-2">
+        <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
+          The class is told
+        </div>
+        <p className="text-[11px] font-mono text-foreground">
+          “FED cuts interest rates — global interest rates are expected to fall.”
+        </p>
+        <p className="text-[10px] font-mono text-muted-foreground mt-1">
+          Neither number above reaches a player screen. They see a cheaper retrofit quote and a
+          higher emission forecast, with nothing linking the two — working that out is the
+          exercise, so don't explain it to the room.
+        </p>
+      </div>
     </div>
   )
 }

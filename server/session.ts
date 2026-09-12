@@ -36,6 +36,7 @@ import type {
   CapMode,
   EnergyCrisis,
   GameState,
+  RateCut,
   TechUnlock,
   Order,
   OrderSide,
@@ -60,6 +61,17 @@ function flatTinyHistory(industry: Industry, config: GameConfig): PlayerProfile 
 }
 
 const roomCodeAlphabet = customAlphabet('ABCDEFGHJKMNPQRSTUVWXYZ23456789', 4)
+
+/**
+ * Whether a round falls inside an announced window.
+ *
+ * Shared by every event that runs for a stretch of rounds. Worth one function because the
+ * inclusive-both-ends convention is the kind of thing that gets written four times and
+ * differs on the fourth.
+ */
+function inWindow(w: { fromYear: number; toYear: number } | null, year: number): boolean {
+  return w !== null && year >= w.fromYear && year <= w.toYear
+}
 
 export class GameError extends Error {
   constructor(
@@ -110,6 +122,7 @@ export class Session {
       subsidy: null,
       techUnlocks: [],
       energyCrisis: null,
+      rateCut: null,
     }
   }
 
@@ -399,10 +412,10 @@ export class Session {
     const current = this.state.currentYear
     const first = this.nextShockRound()
     const existing = this.state.energyCrisis
-    const running = existing !== null && existing.fromYear <= first && existing.toYear >= first
+    const running = inWindow(existing, first)
     this.state.energyCrisis = {
       announcedIn: current,
-      fromYear: running ? existing.fromYear : first,
+      fromYear: running ? existing!.fromYear : first,
       toYear: first + Math.floor(rounds) - 1,
       magnitude,
     }
@@ -432,11 +445,26 @@ export class Session {
     this.restampOpenYear()
   }
 
-  /** The level emissions sit at in a round: 1 ordinarily, 1 + magnitude inside a crisis. */
-  private crisisLevel(year: number): number {
-    const c = this.state.energyCrisis
-    if (!c || year < c.fromYear || year > c.toYear) return 1
-    return 1 + c.magnitude
+  /**
+   * The level the class's emissions sit at in a round, against their own trend: the product
+   * of every demand shock running in it. 1 when nothing is.
+   *
+   * **Multiplied, not maxed.** An energy crisis and a rate cut are different causes — fuel
+   * substitution and cheap credit — so a class living through both emits more than either
+   * would produce alone. Taking the larger of the two would silently make the second event
+   * free for as long as the first outweighed it.
+   *
+   * The telescoping in `emissionFactorFor` keeps working term by term, which is what lets the
+   * two overlap safely: when one window closes while the other is still open, the ratio is
+   * exactly that one shock unwinding and the other holds its level untouched.
+   */
+  private emissionLevel(year: number): number {
+    let level = 1
+    const crisis = this.state.energyCrisis
+    if (inWindow(crisis, year)) level *= 1 + crisis!.magnitude
+    const cut = this.state.rateCut
+    if (inWindow(cut, year)) level *= 1 + cut!.demandIncrease
+    return level
   }
 
   /**
@@ -459,7 +487,7 @@ export class Session {
    * no announcement mentioned and one that every later round would inherit.
    */
   emissionFactorFor(year: number): number {
-    return this.crisisLevel(year) / this.crisisLevel(year - 1)
+    return this.emissionLevel(year) / this.emissionLevel(year - 1)
   }
 
   /**
@@ -474,9 +502,91 @@ export class Session {
     record.emissionFactor = this.emissionFactorFor(record.year)
   }
 
-  /** Whether emissions are raised in the round being played right now. */
+  /**
+   * Whether the ENERGY CRISIS specifically is raising emissions right now.
+   *
+   * Asks about its own window rather than about the emission level, which a rate cut also
+   * moves — a getter named for one event must not answer true because a different one is
+   * running.
+   */
   get energyCrisisActive(): boolean {
-    return this.crisisLevel(this.state.currentYear) > 1
+    return inWindow(this.state.energyCrisis, this.state.currentYear)
+  }
+
+  // ---- interest-rate cut ----
+
+  /**
+   * Trigger a cut in global interest rates: cheap credit for `emissions.rateCut.rounds`
+   * rounds, pulling the game two ways at once — retrofits get cheaper, and the demand the
+   * cheap credit creates pushes emissions up.
+   *
+   * Lands by the same rule as the energy crisis (`nextShockRound`) and re-triggering extends
+   * rather than restarting, for the same reason: the demand step is a step, and firing it
+   * twice would compound a shock documented as one.
+   *
+   * Length is NOT a parameter. The other immediate event lets the instructor set it because
+   * the story there is "how long until this is fixed"; here the story is a rate cycle, which
+   * nobody announces the end of, and a single button keeps the event from reading as a dial
+   * the class could be told the setting of.
+   */
+  announceRateCut(): RateCut {
+    const cfg = this.state.config.emissions.rateCut
+    const current = this.state.currentYear
+    const first = this.nextShockRound()
+    const existing = this.state.rateCut
+    const running = inWindow(existing, first)
+    this.state.rateCut = {
+      announcedIn: current,
+      fromYear: running ? existing!.fromYear : first,
+      toYear: first + Math.floor(cfg.rounds) - 1,
+      investmentDiscount: cfg.investmentDiscount,
+      demandIncrease: cfg.demandIncrease,
+    }
+    this.restampOpenYear()
+    return this.state.rateCut
+  }
+
+  /**
+   * End a rate cut early.
+   *
+   * Truncates rather than deleting, exactly as `cancelEnergyCrisis` does and for the same
+   * reason — the demand arm has already stepped the class up through its realized emissions,
+   * so dropping the window would drop the step back down with it. The investment arm needs no
+   * such care: it is priced per install, at the moment of the install, and nothing carries.
+   */
+  cancelRateCut() {
+    const cut = this.state.rateCut
+    if (!cut) return
+    const lastAffected = this.yearRealized(this.state.currentYear)
+      ? this.state.currentYear
+      : this.state.currentYear - 1
+    this.state.rateCut = lastAffected < cut.fromYear ? null : { ...cut, toYear: lastAffected }
+    this.restampOpenYear()
+  }
+
+  /**
+   * The multiplier on what a retrofit costs in a given round — every discount in force,
+   * composed.
+   *
+   * **This, not `subsidyFactor`, is what everything pricing an install must read**:
+   * `setAbatement` for humans, the agents' `planInstall`, the scoring benchmark, and the
+   * number sent to the client for its preview. They have to agree — a discount the benchmark
+   * could not see would score a company for correctly taking it, which is the defect the
+   * subsidy's `costFactor` was added to fix, and a second discount reintroduces it once for
+   * every call site that still asks the old question.
+   *
+   * Multiplied for the same reason `emissionLevel` is: two discounts from different causes
+   * both apply, and 0.75 × 0.93 is what a company genuinely faces.
+   */
+  installCostFactor(year: number): number {
+    const cut = this.state.rateCut
+    const financing = inWindow(cut, year) ? 1 - cut!.investmentDiscount : 1
+    return this.subsidyFactor(year) * Math.max(0, financing)
+  }
+
+  /** Whether cheap credit is in force in the round being played right now. */
+  get rateCutActive(): boolean {
+    return inWindow(this.state.rateCut, this.state.currentYear)
   }
 
   /**
@@ -1060,8 +1170,10 @@ export class Session {
         lifetimeCap: this.roundAbatementCeiling(player.id, record.year),
         fixedCost: this.abatementFixedCost(player.id),
         horizon: this.state.config.abatement.investmentHorizon,
-        // The rule is priced at whatever the company itself faced this round.
-        costFactor: this.subsidyFactor(record.year),
+        // The rule is priced at whatever the company itself faced this round — every
+        // discount in force, announced or not. A covert one the benchmark could not see
+        // would read a company that correctly took it as having over-invested.
+        costFactor: this.installCostFactor(record.year),
       })
     }
     const { settlement } = settleYear(record.realized, held, purchaseCost, sellIncome, abateCost, {
@@ -1336,7 +1448,7 @@ export class Session {
         target,
         cfg.sectors[player.industry],
         cfg.fixedCostPerTonneBaseline * this.baselineFor(player),
-      ) * this.subsidyFactor(record.year),
+      ) * this.installCostFactor(record.year),
     )
     player.abatementCommitted = target
     record.abatementInstalled[playerId] = target

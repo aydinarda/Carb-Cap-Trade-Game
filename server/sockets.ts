@@ -122,6 +122,11 @@ export function registerSockets(io: IO): Broadcaster {
         if (!rounds) s.cancelEnergyCrisis()
         else s.announceEnergyCrisis(Number(rounds))
       }))
+    socket.on('host:announceRateCut', ({ cancel }, ack) =>
+      hostAction(broadcaster, socket, ack, (s) => {
+        if (cancel) s.cancelRateCut()
+        else s.announceRateCut()
+      }))
     socket.on('host:startYear', (_p, ack) =>
       hostAction(broadcaster, socket, ack, (s) => s.startYear()))
     socket.on('host:closeCapStage', (_p, ack) =>

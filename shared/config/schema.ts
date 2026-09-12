@@ -139,6 +139,34 @@ export interface EmissionsConfig {
     /** Share emissions rise by while it runs. 0.1 = ten percent above trend. */
     magnitude: number
   }
+  /**
+   * The interest-rate cut: cheap credit, which makes capital projects cheaper and demand —
+   * and so emissions — higher, for a fixed window.
+   *
+   * **The covert event.** Every other event on the host menu states its mechanics to the
+   * class; this one states only the headline, and the two arms are never linked on a player's
+   * screen. A student sees their retrofit quote come down and their expected emissions go up,
+   * and has to work out that both came from the same announcement. That inference is the
+   * lesson — a macro shock reaches a carbon market through more than one channel at once, and
+   * the channels pull in opposite directions.
+   *
+   * It lives here next to `energyCrisis` because the arm the class feels FIRST is the demand
+   * one, and the two must compose through the same telescoping level (see
+   * `Session.emissionLevel`). Its other arm multiplies into `Session.installCostFactor`
+   * alongside `abatement.subsidy`.
+   *
+   * `rounds` is fixed rather than host-chosen, unlike the energy crisis: a rate cycle is not
+   * something a central bank announces the end of, and leaving the length out of the host's
+   * hands keeps the event a single button rather than a dial.
+   */
+  rateCut: {
+    /** How many rounds it runs, counted from the round it is triggered in. */
+    rounds: number
+    /** Share off the cost of installing abatement capacity. 0.07 = seven percent cheaper. */
+    investmentDiscount: number
+    /** Share expected emissions rise by, from the demand the cheap credit creates. */
+    demandIncrease: number
+  }
 }
 
 export interface ReserveStep {

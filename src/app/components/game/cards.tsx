@@ -585,6 +585,37 @@ function announcements(snap: PlayerSnapshot): {
     }
   }
 
+  // The covert one. Flavour only, by design — no magnitude, no duration, and no mention that
+  // it touched either emissions or the cost of a retrofit. Both of those show up on the
+  // player's own numbers, and connecting them to this headline is the exercise. Resist the
+  // urge to be helpful here: a detail line naming what it does turns the event into the
+  // other two.
+  const r = snap.rateCut
+  if (r) {
+    if (year < r.fromYear) {
+      out.push({
+        key: 'rates',
+        title: 'FED cuts interest rates',
+        detail: 'Global interest rates are expected to fall.',
+        state: 'pending',
+      })
+    } else if (year <= r.toYear) {
+      out.push({
+        key: 'rates',
+        title: 'FED cuts interest rates',
+        detail: 'Global interest rates are expected to fall.',
+        state: 'active',
+      })
+    } else {
+      out.push({
+        key: 'rates',
+        title: 'Interest rates normalise',
+        detail: 'The cutting cycle is over.',
+        state: 'past',
+      })
+    }
+  }
+
   const s = snap.subsidy
   if (s) {
     const pct = Math.round(s.discount * 100)

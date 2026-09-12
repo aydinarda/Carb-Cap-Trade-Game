@@ -76,14 +76,19 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
     abatementCost(unabated, abateFrac, abatementSpec) -
       abatementCost(unabated, installed, abatementSpec),
   )
-  // The subsidy discount, applied to exactly what the server will charge. The preview and
-  // the charge must agree or the panel is lying about the price of a decision.
+  // Every discount in force, as ONE number from the server. This used to re-derive the
+  // subsidy from its window here, which was a second copy of a pricing rule — and a copy that
+  // could not be told about a discount the class is not shown. `abatementCostFactor` is what
+  // `setAbatement` will actually multiply by, so the preview cannot disagree with the charge.
   const subsidy = snap.subsidy
   const subsidyLive =
     subsidy !== null && snap.currentYear >= subsidy.fromYear && snap.currentYear <= subsidy.toYear
-  const subsidyFactor = subsidyLive ? 1 - subsidy!.discount : 1
   const fullCost = stepping ? r1(fixedCost + variableCost) : 0
-  const abateCost = r1(fullCost * subsidyFactor)
+  const abateCost = r1(fullCost * snap.abatementCostFactor)
+  // Whether the total came in under the parts. An ANNOUNCED discount names itself below; an
+  // unannounced one only gets the neutral marker, because a quote that silently fails to add
+  // up reads as a broken panel rather than as something to be curious about.
+  const discounted = stepping && abateCost < fullCost
   const nextTonneCost = r1(marginalCost(abateFrac, abatementSpec))
   // What this year's emissions would be once the pending capacity comes online.
   const nextYearEmission = r1(unabated * (1 - abateFrac))
@@ -355,10 +360,13 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
               <>
                 {fixedCost} retrofit fee + {variableCost} for the extra{' '}
                 {Math.round((abateFrac - installed) * 100)}%
-                {subsidyLive && (
+                {discounted && (
                   <span className="text-primary">
                     {' '}
-                    − {Math.round(subsidy!.discount * 100)}% subsidy (was {fullCost})
+                    {subsidyLive
+                      ? `− ${Math.round(subsidy!.discount * 100)}% subsidy`
+                      : '− cheaper financing'}{' '}
+                    (was {fullCost})
                   </span>
                 )}{' '}
                 · emissions {r1(unabated * (1 - inForce))} → {nextYearEmission} tCO₂

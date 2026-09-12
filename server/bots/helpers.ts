@@ -81,9 +81,11 @@ export function considerInstall(
     lifetimeCap: session.roundAbatementCeiling(botId, record.year),
     fixedCost: session.abatementFixedCost(botId),
     horizon: cfg.investmentHorizon,
-    // A subsidy the agents cannot see would move half the class's abatement and none of
-    // the market's, and the price the class then trades at would answer no question.
-    costFactor: session.subsidyFactor(record.year),
+    // A discount the agents cannot see would move half the class's abatement and none of
+    // the market's, and the price the class then trades at would answer no question. Reads
+    // the COMPOSED factor, so a covert discount reaches them too — a rate cut the bots
+    // ignored would be a rate cut only the humans responded to.
+    costFactor: session.installCostFactor(record.year),
   })
   if (!plan.install) return false
   try {

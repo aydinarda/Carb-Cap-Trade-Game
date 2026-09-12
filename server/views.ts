@@ -61,6 +61,9 @@ function hostConfigView(config: GameConfig): HostConfigView {
     techLifetimeCap: config.abatement.tech.lifetimeCap,
     techLeadRounds: config.abatement.tech.leadRounds,
     energyCrisisMagnitude: config.emissions.energyCrisis.magnitude,
+    rateCutRounds: config.emissions.rateCut.rounds,
+    rateCutInvestmentDiscount: config.emissions.rateCut.investmentDiscount,
+    rateCutDemandIncrease: config.emissions.rateCut.demandIncrease,
     reserveEnabled: config.allocation.reserve.enabled,
     reserveSteps: config.allocation.reserve.steps.map((s) => ({ ...s })),
   }
@@ -251,6 +254,20 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     // Class-wide, so every player gets the same window — that symmetry is the event's whole
     // claim to being a shock rather than a dice roll.
     energyCrisis: state.energyCrisis,
+    // Rebuilt field by field, NOT spread. This is the one place the rate cut's secrecy is
+    // actually enforced: `{ ...state.rateCut }` would put both magnitudes on the wire, where
+    // anyone with a devtools console could read the mechanics the class is meant to infer.
+    // `RateCutNotice` makes the omission a type error rather than a thing to remember.
+    rateCut: state.rateCut
+      ? {
+          announcedIn: state.rateCut.announcedIn,
+          fromYear: state.rateCut.fromYear,
+          toYear: state.rateCut.toYear,
+        }
+      : null,
+    // Every discount in force, composed into the one number the preview may multiply by —
+    // which is also how a covert discount reaches the client without its magnitude doing so.
+    abatementCostFactor: session.installCostFactor(state.currentYear),
     // The one that applies to this company — the deepest, if it somehow holds several.
     techUnlock:
       session
@@ -398,7 +415,9 @@ export function hostSnapshot(session: Session): HostSnapshot {
     subsidy: state.subsidy,
     techUnlocks: state.techUnlocks,
     energyCrisis: state.energyCrisis,
-    energyCrisisLandsIn: session.nextShockRound(),
+    // The host, and only the host, sees the rate cut's two arms.
+    rateCut: state.rateCut,
+    shockLandsIn: session.nextShockRound(),
     auctionPrice: record?.auctionPrice ?? null,
     prevMarketPrice: session.previousMarketPrice(),
     market: record ? buildMarketView(record.orders, record.trades) : null,

@@ -111,6 +111,26 @@ export function validateConfig(config: GameConfig): GameConfig {
   if (!Number.isFinite(crisis) || crisis <= 0 || crisis > 0.5) {
     throw new ConfigError('emissions.energyCrisis.magnitude must be in (0, 0.5].')
   }
+  const rateCut = config.emissions.rateCut
+  if (!Number.isFinite(rateCut.rounds) || rateCut.rounds < 1 || rateCut.rounds > 20) {
+    throw new ConfigError('emissions.rateCut.rounds must be an integer in [1, 20].')
+  }
+  // The discount is bounded BELOW 1 rather than at it: a factor of 1 would make retrofits
+  // free, and free capacity removes the only cost the abatement decision weighs.
+  if (
+    !Number.isFinite(rateCut.investmentDiscount) ||
+    rateCut.investmentDiscount <= 0 ||
+    rateCut.investmentDiscount >= 1
+  ) {
+    throw new ConfigError('emissions.rateCut.investmentDiscount must be in (0, 1).')
+  }
+  if (
+    !Number.isFinite(rateCut.demandIncrease) ||
+    rateCut.demandIncrease <= 0 ||
+    rateCut.demandIncrease > 0.5
+  ) {
+    throw new ConfigError('emissions.rateCut.demandIncrease must be in (0, 0.5].')
+  }
 
   for (const industry of INDUSTRY_NAMES) {
     positive(config.allocation.benchmark[industry], `allocation.benchmark.${industry}`)
