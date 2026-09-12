@@ -134,6 +134,22 @@ export interface YearRecord {
   /** EU-ETS carry banked (+) or owed (−) coming INTO this year, per company. */
   carriedIn: Record<string, number>
   realized: Record<string, number>
+  /**
+   * The multiplier this year's emissions were drawn around, relative to last year's realized
+   * level. 1 in an ordinary year; above 1 in the round an energy crisis opens; below 1 in the
+   * round it lifts. See `Session.emissionFactorFor`.
+   *
+   * **Stamped at year open, not derived on read**, and that is the point rather than a
+   * nicety. `plannedFor` is asked about a year by the scorer, the host history view and the
+   * simulator long after it settled, and the instructor can withdraw or shorten a crisis at
+   * any time. A closed year that recomputed its factor from the live window would answer a
+   * different number than the one its emissions were actually drawn around, and the scoring
+   * benchmark for a round the class has already been charged for would move under it.
+   *
+   * Re-stamped only while the round's emissions are still undrawn — which is exactly what
+   * makes "the crisis starts now" honest without letting it rewrite history.
+   */
+  emissionFactor: number
   /** Continuous order-book market: resting/filled orders and executed trades. */
   orders: Order[]
   trades: Trade[]
@@ -248,6 +264,8 @@ export interface HostConfigView {
   /** Technology breakthrough: the ceiling it raises the budget to, and its lead time. */
   techLifetimeCap: number
   techLeadRounds: number
+  /** Energy crisis: how far above trend it pushes emissions while it runs. */
+  energyCrisisMagnitude: number
   /** Cost containment reserve: whether it is armed, and the ladder it would release on. */
   reserveEnabled: boolean
   reserveSteps: { triggerPrice: number; cumulativeFraction: number }[]
@@ -298,6 +316,35 @@ export interface TechUnlock {
   scope: string[] | null
 }
 
+/**
+ * An energy crisis the instructor has declared: a window in which every company emits more.
+ *
+ * The counterpart to `SubsidyWindow`, and deliberately its opposite in both directions. A
+ * subsidy is announced ahead of the round it applies to, because its lesson is the option
+ * value of waiting. A crisis lands in the round it is declared in, because its lesson is
+ * what a scheme does when demand moves under it and nobody had time to position — the class
+ * discovers it by watching its own gap open, which is how the 2021-22 gas shock reached
+ * every compliance desk in Europe.
+ *
+ * It is symmetric by construction: the same `magnitude` for every company, whatever sector
+ * it drew. That is what keeps it an event rather than a dice roll — it changes the landscape
+ * without choosing a winner.
+ *
+ * `magnitude` is a STEP, not a compounding rate. Emissions rise by it once when the window
+ * opens, hold while it runs, and fall back by the same factor the round after it closes. See
+ * `Session.emissionFactorFor`.
+ */
+export interface EnergyCrisis {
+  /** Round the crisis was declared in. */
+  announcedIn: number
+  /** First round emissions are raised — the round it was declared in, or the next one. */
+  fromYear: number
+  /** Last round it applies to, inclusive. Emissions step back down the round after. */
+  toYear: number
+  /** Share emissions are raised by while it runs, e.g. 0.1. */
+  magnitude: number
+}
+
 export interface GameState {
   roomCode: string
   seed: number
@@ -313,6 +360,8 @@ export interface GameState {
   subsidy: SubsidyWindow | null
   /** Technology breakthroughs announced so far. Append-only within a game. */
   techUnlocks: TechUnlock[]
+  /** The energy crisis running or declared, if the instructor has called one. */
+  energyCrisis: EnergyCrisis | null
 }
 
 // ---- Role-scoped views sent over the wire ----
@@ -449,6 +498,15 @@ export interface PlayerSnapshot {
   /** The breakthrough that applies to THIS company, if any — see TechUnlock. */
   techUnlock: TechUnlock | null
   /**
+   * The energy crisis running or just ended — see EnergyCrisis. Null when there is none.
+   *
+   * Sent whole rather than as a live/not-live flag because the screen has to say how many
+   * rounds are left: `plannedEmission` already carries the raised number, so without the
+   * window a student can see that their emissions jumped and has no way to know whether to
+   * cover it by buying or by waiting it out. That choice is the event.
+   */
+  energyCrisis: EnergyCrisis | null
+  /**
    * What this mode derives free credits from — see `CapMechanism.freeAllocation`.
    *
    * Sent for the same reason as `usesAuction`: screens that explain where a company's
@@ -559,6 +617,14 @@ export interface HostSnapshot {
   subsidy: SubsidyWindow | null
   /** Every breakthrough announced so far. */
   techUnlocks: TechUnlock[]
+  /** The energy crisis running or just ended. */
+  energyCrisis: EnergyCrisis | null
+  /**
+   * The round a crisis declared right now would open in — this one, or the next if this
+   * round's emissions are already drawn. Computed by the server rather than inferred from
+   * the phase, so the panel cannot name a round the server would not actually use.
+   */
+  energyCrisisLandsIn: number
   /** This year's clearing price (null before the auction closes). */
   auctionPrice: number | null
   /** Previous settled year's discovered market price (VWAP) — a price signal. */

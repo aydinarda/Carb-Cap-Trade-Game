@@ -34,6 +34,7 @@ import {
 import type {
   BotType,
   CapMode,
+  EnergyCrisis,
   GameState,
   TechUnlock,
   Order,
@@ -108,6 +109,7 @@ export class Session {
       freeCreditLimit: null,
       subsidy: null,
       techUnlocks: [],
+      energyCrisis: null,
     }
   }
 
@@ -346,6 +348,135 @@ export class Session {
   /** Whether the discount is live in the round being played right now. */
   get subsidyActive(): boolean {
     return this.subsidyFactor(this.state.currentYear) < 1
+  }
+
+  // ---- energy crisis ----
+
+  /**
+   * Whether a year's emissions have already been drawn. The boundary between a round that
+   * an event can still reach and one that is history.
+   */
+  private yearRealized(year: number): boolean {
+    const record = this.state.years[year]
+    return !!record && Object.keys(record.realized).length > 0
+  }
+
+  /**
+   * The round a shock declared right now would land in: this one while its emissions are
+   * still undrawn, the next one once they are.
+   *
+   * Sent to the host panel as a NUMBER rather than as the rule that produces it, for the same
+   * reason `YouView.abatementFixedCost` is — the instructor is about to say the round out
+   * loud, and a client re-deriving it from the phase could disagree with the server that
+   * actually decides it.
+   */
+  nextShockRound(): number {
+    const current = this.state.currentYear
+    return this.yearRealized(current) ? current + 1 : current
+  }
+
+  /**
+   * Declare an energy crisis: gas is short, coal comes back on the grid, and every company
+   * emits `emissions.energyCrisis.magnitude` more for `rounds` rounds.
+   *
+   * Unlike the subsidy this starts NOW, and "now" has an exact meaning here. Emissions are
+   * drawn exactly once per round, at `closeTrade`, so a crisis declared while the round is
+   * still open lands in THIS round — including mid-trade, which is the version worth having:
+   * the class watches its own gap open and has to re-cover it at whatever the book is asking.
+   * Declared after the round has settled, it opens next round instead; a shock cannot
+   * retroactively change an emission the class has already been fined for.
+   *
+   * Re-declaring while one is running EXTENDS it rather than restarting it — the step up has
+   * already been taken and firing it again would compound a shock documented as a step. So
+   * `rounds` always means "this many more rounds from here", whether it is the first
+   * declaration or the third.
+   */
+  announceEnergyCrisis(rounds: number): EnergyCrisis {
+    if (!Number.isFinite(rounds) || rounds < 1 || rounds > 20) {
+      throw new GameError('BAD_CRISIS', 'Crisis length must be between 1 and 20 rounds.')
+    }
+    const { magnitude } = this.state.config.emissions.energyCrisis
+    const current = this.state.currentYear
+    const first = this.nextShockRound()
+    const existing = this.state.energyCrisis
+    const running = existing !== null && existing.fromYear <= first && existing.toYear >= first
+    this.state.energyCrisis = {
+      announcedIn: current,
+      fromYear: running ? existing.fromYear : first,
+      toYear: first + Math.floor(rounds) - 1,
+      magnitude,
+    }
+    this.restampOpenYear()
+    return this.state.energyCrisis
+  }
+
+  /**
+   * Lift a crisis early.
+   *
+   * Deliberately NOT a null assignment. The step up is already in the emission history —
+   * `expectedEmission` reads last year's realized — so deleting the window would delete the
+   * step back DOWN along with it and strand the class ten percent above trend for the rest of
+   * the game, with no announcement ever having said so. Truncating to the last round it
+   * actually reached leaves `emissionFactorFor` to fire the recovery exactly once, on
+   * schedule. A crisis that never took effect is dropped outright, because there is no step
+   * to undo.
+   */
+  cancelEnergyCrisis() {
+    const crisis = this.state.energyCrisis
+    if (!crisis) return
+    const lastAffected = this.yearRealized(this.state.currentYear)
+      ? this.state.currentYear
+      : this.state.currentYear - 1
+    this.state.energyCrisis =
+      lastAffected < crisis.fromYear ? null : { ...crisis, toYear: lastAffected }
+    this.restampOpenYear()
+  }
+
+  /** The level emissions sit at in a round: 1 ordinarily, 1 + magnitude inside a crisis. */
+  private crisisLevel(year: number): number {
+    const c = this.state.energyCrisis
+    if (!c || year < c.fromYear || year > c.toYear) return 1
+    return 1 + c.magnitude
+  }
+
+  /**
+   * The multiplier on this year's expected emission, relative to last year's realized one.
+   *
+   * The INCREMENT between two levels, never the standing level — the same telescoping trick
+   * `incrementalFraction` plays for abatement capacity, and it is here for the identical
+   * reason. Expectations are a random walk off last year's realized emission, so multiplying
+   * by `1 + magnitude` every round of a crisis would compound it: three rounds at 10% would
+   * end 33% above trend instead of 10%, and nothing would ever bring it back.
+   *
+   * As a ratio it produces exactly the three behaviours that ARE the event:
+   *
+   *     opening round    (1 + m) / 1        the step up
+   *     rounds after     (1 + m) / (1 + m)  holds the raised level
+   *     recovery round   1 / (1 + m)        the step back down, onto the original trend
+   *
+   * The recovery DIVIDES rather than subtracting, and the difference is not cosmetic: `×0.9`
+   * undoing a `×1.1` leaves the class permanently 1% below where it would have been, a dent
+   * no announcement mentioned and one that every later round would inherit.
+   */
+  emissionFactorFor(year: number): number {
+    return this.crisisLevel(year) / this.crisisLevel(year - 1)
+  }
+
+  /**
+   * Re-stamp the open round's factor after the window moved under it.
+   *
+   * Only the current round, and only while its emissions are undrawn. A settled year keeps
+   * the stamp its numbers were drawn around — see `YearRecord.emissionFactor`.
+   */
+  private restampOpenYear() {
+    const record = this.currentYearRecord()
+    if (!record || this.yearRealized(record.year)) return
+    record.emissionFactor = this.emissionFactorFor(record.year)
+  }
+
+  /** Whether emissions are raised in the round being played right now. */
+  get energyCrisisActive(): boolean {
+    return this.crisisLevel(this.state.currentYear) > 1
   }
 
   /**
@@ -688,6 +819,10 @@ export class Session {
       regulatorPool: pool,
       carriedIn,
       realized: {},
+      // Fixed for the round the moment it opens, and re-stamped only if the instructor
+      // declares or lifts a crisis before this year's emissions are drawn. Read back by
+      // `plannedFor`, so a settled year can always explain the level it was drawn at.
+      emissionFactor: this.emissionFactorFor(year),
       orders: [],
       trades: [],
       // Not empty, and not reset: capacity is permanent, so the year opens with whatever
@@ -837,6 +972,9 @@ export class Session {
         ]),
       ),
       this.state.config.emissions.volatility,
+      // The energy crisis, taken from the record rather than recomputed, so the draw is
+      // centred on exactly the number `plannedFor` has been telling the class all round.
+      record.emissionFactor,
     )
     for (const player of this.state.players) {
       player.emissions[record.year] = record.realized[player.id]
@@ -1231,7 +1369,16 @@ export class Session {
 
   plannedFor(player: Player, year: number): number {
     const expected = expectedEmission(player, year)
-    return round1(expected * (1 - incrementalFraction(player.abatementInForce, player.abatementEmbedded)))
+    // The year's own stamp wherever there is one, so a settled round reports the level it was
+    // actually drawn at however the crisis window has moved since. The live computation is
+    // the fallback for a year that has not opened yet — including the call `openYear` itself
+    // makes while sizing the reserve, before the record it is building has been stored.
+    const factor = this.state.years[year]?.emissionFactor ?? this.emissionFactorFor(year)
+    return round1(
+      expected *
+        (1 - incrementalFraction(player.abatementInForce, player.abatementEmbedded)) *
+        factor,
+    )
   }
 
   /**

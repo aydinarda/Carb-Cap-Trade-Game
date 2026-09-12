@@ -24,7 +24,13 @@ import { PlayerHistoryDialog } from './PlayerHistoryDialog'
 import { ClassYearChart, IndustryBreakdownChart } from '../../components/game/charts'
 import { cn } from '../../components/game/theme'
 import { useGame } from '../../net/GameContext'
-import { ModePicker, SettingsPanel, SubsidyPanel, TechPanel } from './HostControls'
+import {
+  EnergyCrisisPanel,
+  ModePicker,
+  SettingsPanel,
+  SubsidyPanel,
+  TechPanel,
+} from './HostControls'
 
 /** The single valid next action per phase — keeps the instructor on rails. */
 const NEXT_ACTION: Partial<
@@ -420,6 +426,23 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                 currentYear={snap.currentYear}
                 defaultCap={snap.config.techLifetimeCap}
                 leadRounds={snap.config.techLeadRounds}
+              />
+            </div>
+
+            {/* The only event here with no lead time, and styled as the odd one out on
+                purpose — the other two are offers the class gets to plan around, this one
+                is done TO them. */}
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+              <div className="text-xs font-bold text-foreground mb-1">Energy crisis</div>
+              <div className="text-[11px] font-mono text-muted-foreground mb-3">
+                Emissions +{Math.round(snap.config.energyCrisisMagnitude * 100)}% class-wide ·
+                takes effect at once, steps back down when it lifts
+              </div>
+              <EnergyCrisisPanel
+                crisis={snap.energyCrisis}
+                currentYear={snap.currentYear}
+                magnitude={snap.config.energyCrisisMagnitude}
+                landsIn={snap.energyCrisisLandsIn}
               />
             </div>
           </div>

@@ -117,6 +117,11 @@ export function registerSockets(io: IO): Broadcaster {
         if (cancel) s.cancelTech()
         else s.announceTech({ cap: cap === undefined ? undefined : Number(cap), label })
       }))
+    socket.on('host:announceEnergyCrisis', ({ rounds }, ack) =>
+      hostAction(broadcaster, socket, ack, (s) => {
+        if (!rounds) s.cancelEnergyCrisis()
+        else s.announceEnergyCrisis(Number(rounds))
+      }))
     socket.on('host:startYear', (_p, ack) =>
       hostAction(broadcaster, socket, ack, (s) => s.startYear()))
     socket.on('host:closeCapStage', (_p, ack) =>

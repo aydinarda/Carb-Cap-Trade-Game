@@ -552,6 +552,39 @@ function announcements(snap: PlayerSnapshot): {
   const out: { key: string; title: string; detail: string; state: AnnouncementState }[] = []
   const year = snap.currentYear
 
+  // First in the list, and deliberately so: it is the only announcement here that has ALREADY
+  // moved a number the player is looking at. `plannedEmission` jumps the moment a crisis is
+  // declared, so without this line the screen shows a company emitting more for no stated
+  // reason — which reads as a bug rather than as an event. The other two describe options
+  // that open later; this one explains what just happened.
+  const c = snap.energyCrisis
+  if (c) {
+    const pct = Math.round(c.magnitude * 100)
+    if (year < c.fromYear) {
+      out.push({
+        key: 'crisis',
+        title: 'Energy crisis: oil and gas are short across Europe',
+        detail: `Coal mines are reopening — expect emissions ${pct}% above trend from round ${c.fromYear}.`,
+        state: 'pending',
+      })
+    } else if (year <= c.toYear) {
+      const left = c.toYear - year + 1
+      out.push({
+        key: 'crisis',
+        title: 'Energy crisis: oil and gas are short across Europe',
+        detail: `Coal is back on the grid and your emissions are ${pct}% above trend. Expected to be resolved in ${left} round${left === 1 ? '' : 's'}, after round ${c.toYear}.`,
+        state: 'active',
+      })
+    } else {
+      out.push({
+        key: 'crisis',
+        title: 'Energy crisis over — emissions back to trend',
+        detail: `Gas supply is restored and the coal plants are off again. Ran rounds ${c.fromYear}–${c.toYear}.`,
+        state: 'past',
+      })
+    }
+  }
+
   const s = snap.subsidy
   if (s) {
     const pct = Math.round(s.discount * 100)

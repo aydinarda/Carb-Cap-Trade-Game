@@ -120,6 +120,25 @@ export interface EmissionsConfig {
   }
   /** Flat per-year history level given to pure-trader bots (they barely emit). */
   traderHistoryLevel: number
+  /**
+   * The energy crisis event: a demand shock that raises what every company emits, for a
+   * window the instructor sets when declaring it.
+   *
+   * Deliberately CLASS-WIDE and symmetric, and that is what keeps it a shock rather than a
+   * dice roll — it moves the landscape everyone trades in without picking a winner. It is
+   * also the one event that lands IMMEDIATELY, which is the opposite of `abatement.subsidy`
+   * on purpose: a subsidy announced ahead of time is an option to be timed, while a crisis
+   * nobody could position for is precisely the thing a cap-and-trade scheme claims to
+   * absorb. The class finds out by watching what its own gap does.
+   *
+   * `magnitude` is a STEP, never a rate. Emissions rise by it once when the window opens,
+   * hold there while it runs, and fall back by the same factor when it lifts — see
+   * `Session.emissionFactorFor` for why a standing multiplier would compound instead.
+   */
+  energyCrisis: {
+    /** Share emissions rise by while it runs. 0.1 = ten percent above trend. */
+    magnitude: number
+  }
 }
 
 export interface ReserveStep {

@@ -60,6 +60,12 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       trendNoise: 0.03,
     },
     traderHistoryLevel: 0.1,
+    // Ten percent above trend. Chosen against the shipped allocation, which issues the class
+    // almost exactly what it needs in year one: 10% is enough to turn a balanced round short
+    // and make the price move, and small enough that the gap stays inside what the class can
+    // physically abate (`abatement.perRoundCap` allows a fifth of what is left uncut). A
+    // shock the class cannot answer prices at the fine and stops being a market lesson.
+    energyCrisis: { magnitude: 0.1 },
   },
   allocation: {
     // Grandfathering opens at the class's full baseline rather than 80% of it. The scarcity

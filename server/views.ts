@@ -60,6 +60,7 @@ function hostConfigView(config: GameConfig): HostConfigView {
     subsidyDiscount: config.abatement.subsidy.discount,
     techLifetimeCap: config.abatement.tech.lifetimeCap,
     techLeadRounds: config.abatement.tech.leadRounds,
+    energyCrisisMagnitude: config.emissions.energyCrisis.magnitude,
     reserveEnabled: config.allocation.reserve.enabled,
     reserveSteps: config.allocation.reserve.steps.map((s) => ({ ...s })),
   }
@@ -247,6 +248,9 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     penaltyRate: state.config.market.penaltyRate,
     usesAuction: session.usesAuction,
     subsidy: state.subsidy,
+    // Class-wide, so every player gets the same window — that symmetry is the event's whole
+    // claim to being a shock rather than a dice roll.
+    energyCrisis: state.energyCrisis,
     // The one that applies to this company — the deepest, if it somehow holds several.
     techUnlock:
       session
@@ -393,6 +397,8 @@ export function hostSnapshot(session: Session): HostSnapshot {
     usesAuction: session.usesAuction,
     subsidy: state.subsidy,
     techUnlocks: state.techUnlocks,
+    energyCrisis: state.energyCrisis,
+    energyCrisisLandsIn: session.nextShockRound(),
     auctionPrice: record?.auctionPrice ?? null,
     prevMarketPrice: session.previousMarketPrice(),
     market: record ? buildMarketView(record.orders, record.trades) : null,

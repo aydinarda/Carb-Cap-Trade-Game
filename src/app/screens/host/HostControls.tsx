@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import type { Industry } from '@shared/constants'
-import type { CapMode, HostConfigView, SubsidyWindow, TechUnlock } from '@shared/types'
+import type {
+  CapMode,
+  EnergyCrisis,
+  HostConfigView,
+  SubsidyWindow,
+  TechUnlock,
+} from '@shared/types'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { cn, MODE_LABELS } from '../../components/game/theme'
@@ -463,6 +469,125 @@ export function TechPanel({
           Takes effect {leadRounds} round{leadRounds === 1 ? '' : 's'} after announcing.
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * Energy crisis: gas is short, coal comes back, and the whole class emits more.
+ *
+ * The one event with no lead time, so the panel's job is different from the other two. They
+ * tell the instructor what they are about to promise the room; this one tells them **which
+ * round the shock will land in**, because that is the only part they cannot read off the
+ * button. Emissions are drawn once, at the end of a round, so declaring it during cap,
+ * reveal or trade hits the round on screen — and declaring it on the year-summary screen,
+ * where the numbers are already settled, cannot, so it opens next round instead.
+ *
+ * Landing it mid-trade is the sharpest version and worth saying out loud: the class watches
+ * its own gap open and has to re-cover it at whatever the book is asking.
+ */
+export function EnergyCrisisPanel({
+  crisis,
+  currentYear,
+  magnitude,
+  landsIn,
+}: {
+  crisis: EnergyCrisis | null
+  currentYear: number
+  magnitude: number
+  /**
+   * The round a crisis declared now would open in, straight from the server — this round
+   * while its emissions are undrawn, the next once they are. Not re-derived from the phase
+   * here: the server owns that rule and the instructor is about to read this number out.
+   */
+  landsIn: number
+}) {
+  const { hostAction } = useGame()
+  const [rounds, setRounds] = useState('3')
+  const [busy, setBusy] = useState(false)
+
+  const pct = Math.round(magnitude * 100)
+  const immediate = landsIn === currentYear
+
+  const declare = async () => {
+    setBusy(true)
+    const ok = await hostAction('host:announceEnergyCrisis', { rounds: Number(rounds) })
+    setBusy(false)
+    if (ok) toast.success(`Energy crisis — emissions +${pct}% from round ${landsIn}`)
+  }
+  const lift = async () => {
+    setBusy(true)
+    const ok = await hostAction('host:announceEnergyCrisis', { rounds: 0 })
+    setBusy(false)
+    if (ok) toast.success('Energy crisis lifted — emissions return to trend')
+  }
+
+  const live = crisis !== null && currentYear >= crisis.fromYear && currentYear <= crisis.toYear
+  const pending = crisis !== null && currentYear < crisis.fromYear
+  const over = crisis !== null && currentYear > crisis.toYear
+
+  return (
+    <div className="flex flex-col gap-3">
+      {crisis ? (
+        <div
+          className={cn(
+            'rounded-lg border px-3 py-2 text-xs font-mono',
+            over
+              ? 'border-border bg-card text-muted-foreground'
+              : 'border-destructive/50 bg-destructive/10 text-destructive',
+          )}
+        >
+          <div className="font-bold">
+            {over ? 'RESOLVED' : live ? 'RUNNING' : 'DECLARED'} · emissions{' '}
+            {over ? 'back to trend' : `+${Math.round(crisis.magnitude * 100)}%`}
+          </div>
+          <div className="text-muted-foreground mt-0.5">
+            Rounds {crisis.fromYear}–{crisis.toYear}
+            {pending && ` · opens next round`}
+            {live && ` · ${crisis.toYear - currentYear + 1} round(s) left`}
+            {over && ` · emissions stepped back down in round ${crisis.toYear + 1}`}
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11px] text-muted-foreground font-mono">
+          Coal returns to the grid and every company emits {pct}% more. No lead time and no
+          warning — the class finds out by watching its own gap open, which is the lesson.
+        </p>
+      )}
+
+      <div className="flex items-end gap-2">
+        <div className="flex flex-col gap-1 w-20">
+          <label className="text-[10px] font-mono uppercase text-muted-foreground">Rounds</label>
+          <Input
+            type="number"
+            min={1}
+            max={20}
+            value={rounds}
+            onChange={(e) => setRounds(e.target.value)}
+            className="font-mono"
+          />
+        </div>
+        <Button
+          onClick={() => void declare()}
+          disabled={busy}
+          variant="destructive"
+          className="font-bold flex-1"
+        >
+          {live ? 'Extend crisis' : 'Declare crisis'}
+        </Button>
+        {(live || pending) && (
+          <Button variant="outline" onClick={() => void lift()} disabled={busy} className="font-mono text-xs">
+            Lift early
+          </Button>
+        )}
+      </div>
+      <p className="text-[10px] font-mono text-muted-foreground">
+        {live
+          ? `Extending runs it ${rounds || 0} more round(s) from round ${landsIn} — the step up has already been taken and is not repeated.`
+          : immediate
+            ? `Lands in round ${landsIn} — this round, before its emissions are drawn.`
+            : `Lands in round ${landsIn}: this round's emissions are already drawn.`}
+      </p>
     </div>
   )
 }

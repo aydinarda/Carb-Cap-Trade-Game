@@ -1076,6 +1076,173 @@ describe('green subsidy', () => {
 })
 
 /**
+ * Energy crisis: gas is short, coal comes back, and the whole class emits more for a window
+ * the instructor sets.
+ *
+ * The event that most easily goes wrong in a way nobody notices. Expectations are a random
+ * walk off last year's REALIZED emission, so a naive standing multiplier compounds — three
+ * rounds at 10% would leave the class 33% above trend and never come back down. These pin the
+ * step-up/hold/step-down shape, that the step down actually happens (including when the
+ * instructor lifts it early), and that a round which has already settled can never have the
+ * level it was drawn at rewritten underneath it.
+ */
+describe('energy crisis', () => {
+  const start = () => {
+    const s = new Session('benchmarking', 5)
+    s.addPlayer('Alice', 'Power & Utilities')
+    s.startYear()
+    return s
+  }
+  /** Play the open round out and move to the next one. */
+  const nextRound = (s: Session) => {
+    s.closeCapStage()
+    s.openTrade()
+    s.closeTrade()
+    s.advanceYear()
+  }
+
+  it('steps up once, holds, then steps back onto the original trend', () => {
+    const s = start()
+    const w = s.announceEnergyCrisis(3)
+    expect(w.announcedIn).toBe(11)
+    // No lead: it lands in the round it was declared in.
+    expect(w.fromYear).toBe(11)
+    expect(w.toYear).toBe(13)
+
+    expect(s.emissionFactorFor(11)).toBeCloseTo(1.1, 6) // the step up
+    expect(s.emissionFactorFor(12)).toBeCloseTo(1, 6) // holds — NOT another 10%
+    expect(s.emissionFactorFor(13)).toBeCloseTo(1, 6)
+    expect(s.emissionFactorFor(14)).toBeCloseTo(1 / 1.1, 6) // the step back down
+
+    // The window multiplies out to exactly 1: the class ends on the trend it would have been
+    // on. `×0.9` undoing a `×1.1` would leave it permanently 1% short of that.
+    const product = [11, 12, 13, 14].reduce((p, y) => p * s.emissionFactorFor(y), 1)
+    expect(product).toBeCloseTo(1, 10)
+  })
+
+  it('holds the class 10% above trend for the window, never 21% or 33%', () => {
+    const plain = start()
+    const crisis = start()
+    crisis.announceEnergyCrisis(3) // rounds 11-13
+
+    const ratios: number[] = []
+    for (let round = 0; round < 4; round++) {
+      ratios.push(crisis.plannedEmission('P1') / plain.plannedEmission('P1'))
+      nextRound(plain)
+      nextRound(crisis)
+    }
+    // Rounds 11-13 raised by the same single step; round 14 back on trend.
+    expect(ratios[0]).toBeCloseTo(1.1, 3)
+    expect(ratios[1]).toBeCloseTo(1.1, 3)
+    expect(ratios[2]).toBeCloseTo(1.1, 3)
+    expect(ratios[3]).toBeCloseTo(1, 3)
+  })
+
+  it('draws emissions around exactly the number the class was shown', () => {
+    // `plannedEmission` is documented as the mean the draw is centred on, and every cover
+    // decision is taken against it. A shock the draw could see and the screen could not would
+    // charge the class for tonnes nobody was told about.
+    const plain = start()
+    const crisis = start()
+    crisis.announceEnergyCrisis(1)
+    expect(crisis.plannedEmission('P1')).toBeCloseTo(plain.plannedEmission('P1') * 1.1, 1)
+
+    for (const s of [plain, crisis]) {
+      s.closeCapStage()
+      s.openTrade()
+      s.closeTrade()
+    }
+    // Same seed, same call order, so the standard normal drawn is identical and the two
+    // realizations differ by exactly the shock.
+    const shocked = crisis.state.years[11].realized.P1
+    const trend = plain.state.years[11].realized.P1
+    expect(shocked / trend).toBeCloseTo(1.1, 3)
+  })
+
+  it('lands in the round on screen, or the next one once that round has settled', () => {
+    const during = start()
+    during.closeCapStage()
+    during.openTrade() // mid-trade: emissions are still undrawn
+    expect(during.announceEnergyCrisis(2).fromYear).toBe(11)
+    expect(during.currentYearRecord()!.emissionFactor).toBeCloseTo(1.1, 6)
+
+    const after = start()
+    after.closeCapStage()
+    after.openTrade()
+    after.closeTrade() // year 11 is settled; the class has been charged for it
+    expect(after.announceEnergyCrisis(2).fromYear).toBe(12)
+    expect(after.state.years[11].emissionFactor).toBe(1)
+  })
+
+  it('steps back down when lifted early rather than stranding the class', () => {
+    // The defect this guards: nulling the window would delete the step DOWN along with it and
+    // leave the class 10% above trend for the rest of the game, with nothing ever saying so.
+    const s = start()
+    s.announceEnergyCrisis(5) // rounds 11-15
+    nextRound(s) // year 11 realized under the crisis; now in year 12
+    expect(s.emissionFactorFor(12)).toBeCloseTo(1, 6)
+
+    s.cancelEnergyCrisis()
+    expect(s.state.energyCrisis!.toYear).toBe(11) // truncated, not deleted
+    expect(s.emissionFactorFor(12)).toBeCloseTo(1 / 1.1, 6)
+    expect(s.currentYearRecord()!.emissionFactor).toBeCloseTo(1 / 1.1, 6)
+  })
+
+  it('drops a crisis outright when it never took effect', () => {
+    const s = start()
+    s.closeCapStage()
+    s.openTrade()
+    s.closeTrade() // year 11 settled, so a crisis declared now opens in year 12
+    s.announceEnergyCrisis(3)
+    expect(s.state.energyCrisis!.fromYear).toBe(12)
+    s.cancelEnergyCrisis()
+    // Nothing stepped up, so there is nothing to step back down from.
+    expect(s.state.energyCrisis).toBeNull()
+    expect(s.emissionFactorFor(12)).toBe(1)
+  })
+
+  it('never rewrites the level a settled round was drawn at', () => {
+    const s = start()
+    s.announceEnergyCrisis(4)
+    s.closeCapStage()
+    s.openTrade()
+    s.closeTrade()
+    const stamped = s.state.years[11].emissionFactor
+    expect(stamped).toBeCloseTo(1.1, 6)
+    // Withdrawing afterwards must not move the number year 11 was scored against.
+    s.cancelEnergyCrisis()
+    expect(s.state.years[11].emissionFactor).toBe(stamped)
+  })
+
+  it('extends a running crisis instead of firing the step up a second time', () => {
+    const s = start()
+    s.announceEnergyCrisis(2) // rounds 11-12
+    nextRound(s) // now in round 12, still inside the window
+    const again = s.announceEnergyCrisis(3) // three more rounds from here
+    expect(again.fromYear).toBe(11) // unchanged — the step was already taken
+    expect(again.toYear).toBe(14)
+    expect(s.emissionFactorFor(12)).toBeCloseTo(1, 6) // holding, not stepping again
+    expect(s.emissionFactorFor(15)).toBeCloseTo(1 / 1.1, 6)
+  })
+
+  it('is rejected for a nonsensical length', () => {
+    const s = start()
+    expect(() => s.announceEnergyCrisis(0)).toThrow(/between 1 and 20/)
+    expect(() => s.announceEnergyCrisis(99)).toThrow(/between 1 and 20/)
+    expect(s.state.energyCrisis).toBeNull()
+  })
+
+  it('leaves an ordinary session at a factor of exactly 1', () => {
+    // The whole event must be inert when nobody declares one — `golden.spec.ts` pins the
+    // engine's literal output and would move if this drifted.
+    const s = start()
+    expect(s.currentYearRecord()!.emissionFactor).toBe(1)
+    expect(s.emissionFactorFor(11)).toBe(1)
+    expect(s.energyCrisisActive).toBe(false)
+  })
+})
+
+/**
  * Technology breakthrough: a higher lifetime abatement budget.
  *
  * Modelled per company from the start even though the only trigger today is a class-wide

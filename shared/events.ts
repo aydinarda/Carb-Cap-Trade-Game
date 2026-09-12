@@ -43,6 +43,12 @@ export interface ClientToServerEvents {
     payload: { cap?: number; label?: string; cancel?: boolean },
     ack: Ack,
   ) => void
+  /**
+   * Declare an energy crisis: emissions rise by `emissions.energyCrisis.magnitude` for
+   * `rounds` rounds, starting in the round it is declared in rather than after a lead.
+   * Re-declaring extends a running one; `rounds: 0` lifts it early.
+   */
+  'host:announceEnergyCrisis': (payload: { rounds: number }, ack: Ack) => void
   'host:startYear': (payload: Record<string, never>, ack: Ack) => void
   'host:closeCapStage': (payload: Record<string, never>, ack: Ack) => void
   'host:openTrade': (payload: Record<string, never>, ack: Ack) => void

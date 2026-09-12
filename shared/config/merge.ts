@@ -102,6 +102,15 @@ export function validateConfig(config: GameConfig): GameConfig {
     throw new ConfigError('emissions.historyYears must be >= 2.')
   }
   positive(config.emissions.volatility, 'emissions.volatility')
+  // Bounded well under 1: the magnitude is a one-off step on the class's emission level, and
+  // anything near a doubling puts the shortfall past what the abatement budget can answer —
+  // at which point the price pins to the fine and the event teaches nothing it was picked
+  // for. Negative is rejected outright; a shock that CUTS emissions is the recession event,
+  // which is a different window with a different announcement.
+  const crisis = config.emissions.energyCrisis.magnitude
+  if (!Number.isFinite(crisis) || crisis <= 0 || crisis > 0.5) {
+    throw new ConfigError('emissions.energyCrisis.magnitude must be in (0, 0.5].')
+  }
 
   for (const industry of INDUSTRY_NAMES) {
     positive(config.allocation.benchmark[industry], `allocation.benchmark.${industry}`)
