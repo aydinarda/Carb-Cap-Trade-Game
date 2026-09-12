@@ -22,10 +22,14 @@ function grandfathering(seed = 1, override?: DeepPartial<GameConfig>) {
  * below are about what happens at the EXTREMES of the carry — a full surplus and a full
  * shortfall — and driving one player's realized emissions to ~0 is the cleanest way to get
  * there. The fee is zeroed so the carry arithmetic is not muddied by an investment charge.
+ *
+ * `perRoundCap` has to come off as well as `lifetimeCap`: the step limit is multiplicative,
+ * so at the shipped 20% a single year reaches 20% and no amount of raising the lifetime
+ * budget gets a company to zero emissions in one move.
  */
 function unlimitedAbatement(seed = 1) {
   return grandfathering(seed, {
-    abatement: { lifetimeCap: 1, fixedCostPerTonneBaseline: 0 },
+    abatement: { lifetimeCap: 1, perRoundCap: 1, fixedCostPerTonneBaseline: 0 },
   })
 }
 
@@ -192,9 +196,16 @@ describe('closeTrade cost-ledger wiring (auctioning)', () => {
 
 describe('lifetime abatement budget', () => {
   const CAP = DEFAULT_GAME_CONFIG.abatement.lifetimeCap
+  /**
+   * The per-round step limit is switched OFF throughout this block. Both ceilings bind
+   * `setAbatement`, so leaving the shipped 20% on would make every test here measure the
+   * step limit while claiming to measure the lifetime budget — and the block would keep
+   * passing if the lifetime cap were deleted outright. The step limit has its own block.
+   */
+  const NO_STEP = { abatement: { perRoundCap: 1 } }
 
   it('clamps a request above the budget instead of honouring it', () => {
-    const s = grandfathering()
+    const s = grandfathering(1, NO_STEP)
     s.startYear()
     s.closeCapStage()
     s.openTrade()
@@ -214,7 +225,7 @@ describe('lifetime abatement budget', () => {
 
   it('binds under every cap mechanism, not just one', () => {
     for (const mode of ['grandfathering', 'benchmarking', 'auctioning'] as const) {
-      const s = new Session(mode, 1)
+      const s = new Session(mode, 1, NO_STEP)
       s.addPlayer('Alice', 'Power & Utilities')
       s.startYear()
       s.closeCapStage()
@@ -227,7 +238,7 @@ describe('lifetime abatement budget', () => {
   it('is a LIFETIME budget: repeated installs cannot exceed it in total', () => {
     // The property the rename exists to protect. Under the old per-year ceiling, three
     // years at 0.45 each would have been legal.
-    const s = grandfathering(1, { abatement: { lifetimeCap: 0.45 } })
+    const s = grandfathering(1, { abatement: { lifetimeCap: 0.45, perRoundCap: 1 } })
     s.startYear()
     s.closeCapStage()
     s.openTrade()
@@ -244,7 +255,7 @@ describe('lifetime abatement budget', () => {
   })
 
   it('is configurable, and lowering it mid-game binds future installs only', () => {
-    const s = grandfathering(1, { abatement: { lifetimeCap: 0.45 } })
+    const s = grandfathering(1, { abatement: { lifetimeCap: 0.45, perRoundCap: 1 } })
     s.startYear()
     s.closeCapStage()
     s.openTrade()
@@ -263,14 +274,113 @@ describe('lifetime abatement budget', () => {
   })
 })
 
+/**
+ * The per-round step limit — the second, independent ceiling.
+ *
+ * It exists because one ceiling was doing two jobs and doing the second one badly: measured
+ * on the shipped parameters, the class went 0% → 6% → 40% and 70% of companies were welded
+ * to the lifetime cap from round 3 to round 10, which left the back seven rounds with no
+ * abatement decision in them at all. This block pins the properties that make the two
+ * ceilings independent: the step composes as a PRODUCT, it cannot be walked around inside a
+ * single round, and the lifetime budget still stops the path where it always did.
+ */
+describe('per-round abatement step limit', () => {
+  /** Drive `s` to the start of the next year's trade stage. */
+  const nextYear = (s: Session) => {
+    s.closeTrade()
+    s.advanceYear()
+    s.closeCapStage()
+    s.openTrade()
+  }
+  const open = (override?: DeepPartial<GameConfig>) => {
+    const s = grandfathering(3, override)
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    return s
+  }
+
+  it('caps the first round at the step limit, however much is asked for', () => {
+    const s = open()
+    s.setAbatement('P1', 1)
+    expect(s.getPlayer('P1')!.abatementCommitted).toBe(0.2)
+    // The lifetime budget is untouched and still reads as the whole 50%.
+    expect(s.lifetimeCapFor('P1')).toBe(0.5)
+  })
+
+  it('composes MULTIPLICATIVELY across rounds: 20% / 36% / 48.8% / 50%', () => {
+    // The property the user specified: year1 × year2 × … of *retained* emissions, never a
+    // flat 20 points a year. 0.8³ = 0.512 is still above the 0.5 floor; 0.8⁴ = 0.410 is not,
+    // so the lifetime cap is what stops round 4 — not the step limit.
+    const s = open()
+    const path: number[] = []
+    for (let i = 0; i < 4; i++) {
+      s.setAbatement('P1', 1)
+      path.push(s.getPlayer('P1')!.abatementCommitted)
+      if (i < 3) nextYear(s)
+    }
+    expect(path).toEqual([0.2, 0.36, 0.49, 0.5])
+  })
+
+  it('cannot be ratcheted inside a single round by stepping repeatedly', () => {
+    // The bug the round-opening anchor exists to prevent: measure against the LIVE committed
+    // level and 20% → 36% → 48.8% all happen in round one.
+    const s = open()
+    for (let i = 0; i < 10; i++) s.setAbatement('P1', 1)
+    expect(s.getPlayer('P1')!.abatementCommitted).toBe(0.2)
+  })
+
+  it('never lets the step limit carry a company past the lifetime budget', () => {
+    // 40% a round would reach 64% in two rounds unchecked; the lifetime cap holds it at 50%.
+    const s = open({ abatement: { perRoundCap: 0.4 } })
+    s.setAbatement('P1', 1)
+    expect(s.getPlayer('P1')!.abatementCommitted).toBe(0.4)
+    nextYear(s)
+    s.setAbatement('P1', 1)
+    expect(s.getPlayer('P1')!.abatementCommitted).toBe(0.5)
+  })
+
+  it('is disabled by perRoundCap: 1, recovering the single-ceiling behaviour', () => {
+    const s = open({ abatement: { perRoundCap: 1 } })
+    s.setAbatement('P1', 1)
+    expect(s.getPlayer('P1')!.abatementCommitted).toBe(0.5)
+  })
+
+  it('rises with a breakthrough only as fast as the step limit allows', () => {
+    // A tech unlock raises the DESTINATION, not the pace — otherwise announcing one would
+    // hand the whole extra budget over in the round it lands.
+    const s = open()
+    s.setAbatement('P1', 1)
+    nextYear(s)
+    s.announceTech() // lifetime cap 0.5 → 0.7
+    expect(s.lifetimeCapFor('P1')).toBe(0.7)
+    s.setAbatement('P1', 1)
+    expect(s.getPlayer('P1')!.abatementCommitted).toBe(0.36)
+  })
+
+  it('rejects a nonsensical step limit rather than silently freezing the game', () => {
+    // 0 would clamp every company to its opening level forever, which reads as a config
+    // that disabled abatement — and would do it without a word.
+    expect(() => grandfathering(1, { abatement: { perRoundCap: 0 } })).toThrow(/perRoundCap/)
+    expect(() => grandfathering(1, { abatement: { perRoundCap: 1.5 } })).toThrow(/perRoundCap/)
+  })
+})
+
 describe('abatement as permanent installed capacity', () => {
   const FREE = { abatement: { fixedCostPerTonneBaseline: 0 } }
+  /**
+   * This block is about the LAG (capacity bites next year) and the FEE (one per step), and
+   * every test in it reaches 30-50% inside a single year to show them. The shipped 20%
+   * per-round step limit would cap those moves and quietly turn each test into a test of
+   * the pace instead, so it is switched off here. `perRoundCap` has its own block.
+   */
+  const NO_STEP = { abatement: { perRoundCap: 1 } }
 
   it('takes effect from the NEXT year, never the year it is bought', () => {
     // The lag, proved by identity: a session that installs in year 11 must realize exactly
     // what a same-seed session that installed nothing does. Same seed, same draws.
-    const invests = grandfathering(7)
-    const idle = grandfathering(7)
+    const invests = grandfathering(7, NO_STEP)
+    const idle = grandfathering(7, NO_STEP)
     for (const s of [invests, idle]) {
       s.startYear()
       s.closeCapStage()
@@ -352,7 +462,7 @@ describe('abatement as permanent installed capacity', () => {
   })
 
   it('refuses to go down — a retrofit cannot be un-installed', () => {
-    const s = grandfathering(2)
+    const s = grandfathering(2, NO_STEP)
     s.startYear()
     s.closeCapStage()
     s.openTrade()
@@ -368,7 +478,7 @@ describe('abatement as permanent installed capacity', () => {
     // retrofit fee than 50% in one move. Zero volatility so the two runs share a base.
     const cfg: DeepPartial<GameConfig> = {
       emissions: { volatility: 0 },
-      abatement: { lifetimeCap: 0.5 },
+      abatement: { lifetimeCap: 0.5, perRoundCap: 1 },
     }
     const spendOf = (s: Session) =>
       Object.values(s.state.years).reduce((sum, y) => sum + (y.abatementSpend.P1 ?? 0), 0)
@@ -974,7 +1084,9 @@ describe('green subsidy', () => {
  */
 describe('technology breakthrough', () => {
   const start = () => {
-    const s = new Session('benchmarking', 5)
+    // Step limit off: this block asserts where the LIFETIME ceiling lands (0.5 -> 0.7), and
+    // at the shipped 20% per round every install here would clamp to 0.2 and prove nothing.
+    const s = new Session('benchmarking', 5, { abatement: { perRoundCap: 1 } })
     s.addPlayer('Alice', 'Power & Utilities')
     s.addPlayer('Bob', 'Heavy Materials')
     s.startYear()

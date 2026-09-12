@@ -180,11 +180,11 @@ describe('golden — grandfathering', () => {
         "abatementCommitted": {
           "P1": 0.35,
           "P2": 0,
-          "P3": 0.3,
+          "P3": 0.28,
         },
         "abatementSpend": {
           "P1": 6888.7,
-          "P3": 14220.1,
+          "P3": 12698.8,
         },
         "auctionPrice": null,
         "banked": {
@@ -205,7 +205,7 @@ describe('golden — grandfathering', () => {
         "optimalScore": {
           "P1": 155.7,
           "P2": -1182,
-          "P3": 14382.5,
+          "P3": 12861.2,
         },
         "primaryPrice": 60,
         "realized": {
@@ -218,7 +218,7 @@ describe('golden — grandfathering', () => {
         "score": {
           "P1": 11695.7,
           "P2": 0,
-          "P3": 21294.5,
+          "P3": 19773.2,
         },
         "settlement": {
           "P1": {
@@ -238,12 +238,12 @@ describe('golden — grandfathering', () => {
             "yearCost": 0,
           },
           "P3": {
-            "abatementCost": 14220.1,
+            "abatementCost": 12698.8,
             "penaltyCost": 0,
             "purchaseCost": 480,
             "sellIncome": 0,
             "shortage": 0,
-            "yearCost": 14700.1,
+            "yearCost": 13178.8,
           },
         },
       }
@@ -358,11 +358,11 @@ describe('golden — benchmarking', () => {
         "abatementCommitted": {
           "P1": 0.35,
           "P2": 0,
-          "P3": 0.3,
+          "P3": 0.28,
         },
         "abatementSpend": {
           "P1": 6888.7,
-          "P3": 14220.1,
+          "P3": 12698.8,
         },
         "auctionPrice": null,
         "banked": {
@@ -383,7 +383,7 @@ describe('golden — benchmarking', () => {
         "optimalScore": {
           "P1": 3719.7,
           "P2": -15156,
-          "P3": 23136.5,
+          "P3": 21615.2,
         },
         "primaryPrice": 60,
         "realized": {
@@ -396,7 +396,7 @@ describe('golden — benchmarking', () => {
         "score": {
           "P1": 13665.7,
           "P2": 0,
-          "P3": 26344.5,
+          "P3": 24823.2,
         },
         "settlement": {
           "P1": {
@@ -416,12 +416,12 @@ describe('golden — benchmarking', () => {
             "yearCost": 0,
           },
           "P3": {
-            "abatementCost": 14220.1,
+            "abatementCost": 12698.8,
             "penaltyCost": 4280,
             "purchaseCost": 480,
             "sellIncome": 0,
             "shortage": 42.8,
-            "yearCost": 18980.1,
+            "yearCost": 17458.8,
           },
         },
       }
@@ -540,11 +540,11 @@ describe('golden — auctioning', () => {
         "abatementCommitted": {
           "P1": 0.35,
           "P2": 0,
-          "P3": 0.3,
+          "P3": 0.28,
         },
         "abatementSpend": {
           "P1": 6888.7,
-          "P3": 14220.1,
+          "P3": 12698.8,
         },
         "auctionPrice": 55,
         "banked": {
@@ -565,7 +565,7 @@ describe('golden — auctioning', () => {
         "optimalScore": {
           "P1": 126177.7,
           "P2": 20207.5,
-          "P3": 120606.5,
+          "P3": 119085.2,
         },
         "primaryPrice": 55,
         "realized": {
@@ -582,7 +582,7 @@ describe('golden — auctioning', () => {
         "score": {
           "P1": 163515.7,
           "P2": 21270,
-          "P3": 151774.5,
+          "P3": 150253.2,
         },
         "settlement": {
           "P1": {
@@ -602,12 +602,12 @@ describe('golden — auctioning', () => {
             "yearCost": 7770,
           },
           "P3": {
-            "abatementCost": 14220.1,
+            "abatementCost": 12698.8,
             "penaltyCost": 40190,
             "purchaseCost": 38980,
             "sellIncome": 0,
             "shortage": 401.9,
-            "yearCost": 93390.1,
+            "yearCost": 91868.8,
           },
         },
       }
@@ -735,11 +735,11 @@ describe('golden — hybrid', () => {
         "abatementCommitted": {
           "P1": 0.35,
           "P2": 0,
-          "P3": 0.3,
+          "P3": 0.28,
         },
         "abatementSpend": {
           "P1": 6888.7,
-          "P3": 14220.1,
+          "P3": 12698.8,
         },
         "auctionPrice": 55,
         "banked": {
@@ -760,7 +760,7 @@ describe('golden — hybrid', () => {
         "optimalScore": {
           "P1": 69803.7,
           "P2": 32774.5,
-          "P3": 104446,
+          "P3": 102924.7,
         },
         "primaryPrice": 55,
         "realized": {
@@ -777,7 +777,7 @@ describe('golden — hybrid', () => {
         "score": {
           "P1": 110555.7,
           "P2": 56650,
-          "P3": 121698,
+          "P3": 120176.7,
         },
         "settlement": {
           "P1": {
@@ -797,12 +797,12 @@ describe('golden — hybrid', () => {
             "yearCost": 37770,
           },
           "P3": {
-            "abatementCost": 14220.1,
+            "abatementCost": 12698.8,
             "penaltyCost": 25680,
             "purchaseCost": 31357,
             "sellIncome": 0,
             "shortage": 256.8,
-            "yearCost": 71257.1,
+            "yearCost": 69735.8,
           },
         },
       }

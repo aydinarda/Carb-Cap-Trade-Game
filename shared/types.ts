@@ -419,6 +419,11 @@ export interface PlayerSnapshot {
    *  a lifetime budget rather than a per-year limit. The server clamps to the same number,
    *  so this is a UI affordance, not the enforcement. */
   abatementLifetimeCap: number
+  /** Where the slider may reach THIS round — the lifetime budget and the per-round step
+   *  limit, whichever binds first. Always ≤ `abatementLifetimeCap`, and the server clamps
+   *  to the same number. Sent alongside the lifetime cap so the screen can say that the
+   *  rest of the budget is still available later rather than gone. */
+  abatementRoundCeiling: number
   /**
    * Cost per tCO2 left uncovered at settlement.
    *

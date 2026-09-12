@@ -31,7 +31,13 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   // A plant cannot switch itself off, and this is a budget for the WHOLE game, not per
   // year. The server clamps to this too — the fallback covers a client running ahead of a
   // backend that does not send the field yet.
-  const maxAbate = snap.abatementLifetimeCap ?? 1
+  const lifetimeCap = snap.abatementLifetimeCap ?? 1
+  // The slider stops at THIS round's ceiling, which is the lower of the lifetime budget and
+  // the per-round step limit. Falls back to the lifetime cap so an older backend that does
+  // not send the field still yields a working slider rather than a dead one.
+  const maxAbate = snap.abatementRoundCeiling ?? lifetimeCap
+  // Only worth telling the player about when the pace, not the budget, is what stops them.
+  const pacedByRound = maxAbate < lifetimeCap - 0.0001
   const market = snap.market
   const marketPrice = market?.lastPrice ?? market?.vwap ?? null
   const auctionPrice = snap.auctionPrice
@@ -103,8 +109,12 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
           abatementCost(unabated, installed, abatementSpec),
       )
     : null
+  // Naming WHICH ceiling blocked it is the difference between "buy credits, you are out of
+  // options" and "buy credits this year, then build more next year" — two different plans.
   const abateBlockedReason = short && !abateEnough
-    ? `not enough headroom — capped at ${Math.round(maxAbate * 100)}%`
+    ? pacedByRound
+      ? `not enough headroom — ${Math.round(maxAbate * 100)}% is this round's limit`
+      : `not enough headroom — capped at ${Math.round(maxAbate * 100)}%`
     : undefined
 
   // The market's recent prints, oldest first — the sparkline beside the price.
@@ -286,13 +296,23 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
               <Leaf size={12} className="text-primary" />
               Cut emissions (abatement)
             </h2>
-            {/* The ceiling is a LIFETIME budget, not a per-year allowance — capacity is
-                permanent, so what is spent is spent. Saying "per year" here would describe a
-                model the engine stopped using: `setAbatement` clamps to this one number for
-                the whole game. Read live from the snapshot so a host who changes it is
-                never contradicted by the label. */}
+            {/* TWO ceilings, and the label has to distinguish them or the screen lies. The
+                lifetime cap is a budget for the whole game — capacity is permanent, so what
+                is spent is spent. The round ceiling limits only the PACE. A player who reads
+                "max 20%" as the lifetime budget will plan the rest of the game around a
+                constraint that does not exist, so when the round ceiling is what binds, say
+                so and name the budget it is a step toward. Both read live from the snapshot
+                so a host who changes either is never contradicted by the label. */}
             <span className="text-[10px] font-mono text-muted-foreground/80 text-right">
-              max {Math.round(maxAbate * 100)}% · whole game
+              {pacedByRound ? (
+                <>
+                  max {Math.round(maxAbate * 100)}% · this round
+                  <br />
+                  {Math.round(lifetimeCap * 100)}% whole game
+                </>
+              ) : (
+                <>max {Math.round(maxAbate * 100)}% · whole game</>
+              )}
               {installed > 0 && (
                 <>
                   <br />

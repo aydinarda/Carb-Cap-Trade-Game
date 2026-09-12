@@ -114,6 +114,13 @@ export function validateConfig(config: GameConfig): GameConfig {
   if (!Number.isFinite(cap) || cap < 0 || cap > 1) {
     throw new ConfigError('abatement.lifetimeCap must be in [0, 1].')
   }
+  // Zero is rejected rather than treated as "no abatement": a config meaning that says so
+  // with `lifetimeCap: 0`, and a stray 0 here would silently freeze every company at its
+  // opening level for the whole game.
+  const step = config.abatement.perRoundCap
+  if (!Number.isFinite(step) || step <= 0 || step > 1) {
+    throw new ConfigError('abatement.perRoundCap must be in (0, 1].')
+  }
   positive(config.abatement.fixedCostPerTonneBaseline, 'abatement.fixedCostPerTonneBaseline')
   const horizon = config.abatement.investmentHorizon
   if (!Number.isFinite(horizon) || horizon <= 0) {

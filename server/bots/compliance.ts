@@ -121,6 +121,13 @@ export function trade(ctx: BotCtx): boolean {
   if (need > cfg.minTradeSize) {
     // Short after abating: bid at what the shortfall is actually worth to us, which
     // rises toward the penalty the further we are from covering it.
+    //
+    // LIFETIME cap here, not `roundAbatementCeiling`, and the difference matters. This is a
+    // willingness-to-pay, and the alternative to buying a credit is cutting the tonne
+    // yourself — eventually, not necessarily this round. Pricing off the round ceiling would
+    // read every early-round firm as unable to cut, hence value the marginal tonne at the
+    // fine, and hand the opening rounds the flat near-penalty price the per-round cap was
+    // introduced to break.
     const reservation = reservationPrice(
       planned, held, coeff, P,
       session.state.config.bots.fixes.complianceReservation,

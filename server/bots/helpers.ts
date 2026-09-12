@@ -75,7 +75,10 @@ export function considerInstall(
     price: Math.max(0, price * bias),
     unabated: session.unabatedFor(player, record.year),
     committed: player.abatementCommitted,
-    lifetimeCap: session.lifetimeCapFor(botId, record.year),
+    // This round's ceiling, so the bot prices the step it can actually take. Planning
+    // against the lifetime cap made it size — and pay a retrofit fee for — a jump
+    // `setAbatement` would then silently clamp.
+    lifetimeCap: session.roundAbatementCeiling(botId, record.year),
     fixedCost: session.abatementFixedCost(botId),
     horizon: cfg.investmentHorizon,
     // A subsidy the agents cannot see would move half the class's abatement and none of

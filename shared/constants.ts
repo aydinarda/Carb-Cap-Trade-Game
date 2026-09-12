@@ -61,6 +61,28 @@ export const DEFAULT_BENCHMARK = Object.fromEntries(
  * company's emissions is `a + b·f` per tonne (rising — cheap cuts first). The
  * optimal cut is where MAC meets the carbon price: r* = (price − a)/b. Sectors
  * differ (some decarbonise cheaply, some not), and the host can tune these.
+ *
+ * TOTAL cost is already quadratic in tonnes abated: substituting u = E·f gives
+ * `a·u + (b/2E)·u²`, i.e. the textbook `y·u²` form plus a linear term, with
+ * y = b/2E. The intercept is the only departure from the pure specification.
+ *
+ * DROPPING THE INTERCEPT WAS TRIED AND REVERTED. Measured over 16-20 seeds:
+ *
+ *  - It buys nothing environmentally. Across every `b` from 0.85× to 1.3× the class
+ *    still installed 0.38 capacity and still cut ~41% of emissions. The class is
+ *    pinned by `abatement.lifetimeCap`, not by what abatement costs, so a dearer
+ *    curve moves the price level and nothing else.
+ *  - It breaks cross-mode calibration. The free-allocation modes operate near f≈0.14
+ *    and the auction modes near f≈0.38. The intercept was carrying the low-f region
+ *    while the slope carried the high-f one — two jobs, two parameters. With a single
+ *    coefficient the two families want opposite multipliers: grandfathering and
+ *    benchmarking need ≥1.3× to hold their price, auctioning needs 0.76×.
+ *  - It hits the sectors unevenly. Heavy Materials has the largest intercept, so
+ *    removing it raised its MAC at the cap most (115 → 155 at 1.0×), and the dearest
+ *    sector is what sets the peak price.
+ *
+ * For reference if it is ever revisited: the intercept-free equivalent that holds the
+ * cost of abating to the 50% cap constant is `b' = 4a + b` — 115 / 180 / 200 / 310.
  */
 export const DEFAULT_ABATEMENT: Record<Industry, { a: number; b: number }> = {
   'Power & Utilities': { a: 10, b: 75 }, // cheap (renewables) → cuts a lot

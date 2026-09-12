@@ -240,6 +240,10 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     abatement: state.config.abatement.sectors[player.industry],
     // Per company, not per class: a breakthrough may be held by some and not others.
     abatementLifetimeCap: session.lifetimeCapFor(player.id),
+    // What the slider may reach THIS round. Sent alongside the lifetime cap rather than
+    // instead of it: the player needs to see both to understand that the budget is still
+    // there and only the pace is limited.
+    abatementRoundCeiling: session.roundAbatementCeiling(player.id),
     penaltyRate: state.config.market.penaltyRate,
     usesAuction: session.usesAuction,
     subsidy: state.subsidy,

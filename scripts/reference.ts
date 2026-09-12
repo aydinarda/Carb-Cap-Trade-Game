@@ -152,6 +152,17 @@ if (want('formulas')) {
   console.log(`  total(E, r)   = E × (a·r + b·r²/2)         cost of cutting a fraction r`)
   console.log(`  r*(P)         = (P − a)/b                  clamped to [0, ${C.abatement.lifetimeCap}]`)
   console.log(`  install f→t   = fee + E × (∫₀ᵗ − ∫₀ᶠ)      fee = ${C.abatement.fixedCostPerTonneBaseline} × baseline, EVERY step`)
+  console.log(`\n  TWO ceilings, and they bind independently:`)
+  console.log(`    lifetime      ${C.abatement.lifetimeCap}   the most a company may EVER cut`)
+  console.log(`    per round     ${C.abatement.perRoundCap}   the most it may cut in one round, of what is still uncut`)
+  console.log(`  ceiling(round) = 1 − (1 − opening) × (1 − perRoundCap),  capped by the lifetime cap`)
+  const path: string[] = []
+  let held = 0
+  for (let i = 0; i < 5; i++) {
+    held = Math.min(C.abatement.lifetimeCap, 1 - (1 - held) * (1 - C.abatement.perRoundCap))
+    path.push(`${Math.round(held * 1000) / 10}%`)
+  }
+  console.log(`  fastest legal path: ${path.join(' → ')}`)
   console.log(`\n  Capacity bought in year y cuts emissions from year y+1. It is permanent and`)
   console.log(`  cannot be sold or reversed. Stepping costs one extra fee per step, so 10% then`)
   console.log(`  40% is dearer than 50% in one move by exactly one fee — the variable halves are`)

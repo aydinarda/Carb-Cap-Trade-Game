@@ -300,6 +300,37 @@ export class Session {
   }
 
   /**
+   * How far this company may commit THIS round — the lifetime budget and the per-round step
+   * limit, whichever binds first.
+   *
+   * The step limit is multiplicative on what is still uncut, so consecutive rounds compose as
+   * a product: `1 − (1 − opening)·(1 − perRoundCap)`. That is the whole reason the two
+   * ceilings are separate numbers — one shapes how fast the class may decarbonise, the other
+   * how far it may ever get, and before this existed the second was doing both jobs badly
+   * (the class hit the lifetime cap in round 3 and the remaining seven rounds had no
+   * abatement decision left in them).
+   *
+   * ANCHORED TO THE ROUND'S OPENING LEVEL. `record.abatement` is written once in `openYear`
+   * and never moves during the round, which is exactly what makes the cap bind: measuring
+   * against the live `abatementCommitted` would let a company step to 20%, be re-measured
+   * there, step to 36%, and walk the whole budget inside one round.
+   *
+   * Never returns less than what the company has already committed — a mid-game tightening
+   * binds future installs only, and `setAbatement` rejects going down.
+   */
+  roundAbatementCeiling(playerId: string, year = this.state.currentYear): number {
+    const lifetime = this.lifetimeCapFor(playerId, year)
+    const step = this.state.config.abatement.perRoundCap
+    if (!(step > 0) || step >= 1) return lifetime
+    const record = this.state.years[year]
+    const player = this.getPlayer(playerId)
+    const opening = record?.abatement[playerId] ?? player?.abatementInForce ?? 0
+    const stepCeiling = 1 - (1 - opening) * (1 - step)
+    const committed = player?.abatementCommitted ?? 0
+    return Math.max(committed, Math.min(lifetime, stepCeiling))
+  }
+
+  /**
    * The multiplier on install cost for a given year: below 1 while a subsidy is running.
    *
    * Everything that prices a retrofit reads this — `setAbatement` for humans, the agents'
@@ -885,7 +916,10 @@ export class Session {
         committedBefore: record.abatement[player.id] ?? 0,
         committedAfter: player.abatementCommitted,
         actualCost: abateSpend,
-        lifetimeCap: this.lifetimeCapFor(player.id, record.year),
+        // The ceiling the company actually faced this round, not the lifetime one. Scoring
+        // the step against a target the rules forbade would charge every player for the
+        // per-round limit — an investment gap nobody could have closed.
+        lifetimeCap: this.roundAbatementCeiling(player.id, record.year),
         fixedCost: this.abatementFixedCost(player.id),
         horizon: this.state.config.abatement.investmentHorizon,
         // The rule is priced at whatever the company itself faced this round.
@@ -1147,7 +1181,7 @@ export class Session {
     // Two decimals, not one. `round1` here meant the stored fraction snapped to 10% steps,
     // which was survivable when the range was 0-100% but leaves only three usable choices
     // once the ceiling is 20% — and it silently contradicted the client's 1% slider.
-    const target = Math.round(Math.min(this.lifetimeCapFor(playerId, record.year), fraction) * 100) / 100
+    const target = Math.round(Math.min(this.roundAbatementCeiling(playerId, record.year), fraction) * 100) / 100
     const from = player.abatementCommitted
     if (target === from) return
     if (target < from) {

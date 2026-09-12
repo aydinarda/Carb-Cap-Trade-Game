@@ -41,8 +41,15 @@ describe('DEFAULT_GAME_CONFIG reproduces the shipped constants', () => {
     expect(c.emissions.firstGameYear).toBe(11)
     expect(c.session.maxPlayers).toBe(0) // 0 = no cap; the broadcast cost is the real ceiling
     expect(c.bots.maxStep).toBe(40)
-    expect(c.bots.marketMaker.invFrac).toBe(0.18)
+    // 8%, not 18%. A maker carries no surrender obligation, so what it wins at the auction
+    // leaves circulation until it chooses to offer it back — measured, four makers took 18%
+    // of the round-1 pool and still held ~6 000 tonnes in round 10.
+    expect(c.bots.marketMaker.invFrac).toBe(0.08)
+    // Deliberately still 0.18, and NOT the same dial. This one seeds the opening book under
+    // the free-allocation modes, which have no auction for a maker to crowd out.
     expect(c.bots.seed.marketMakerFrac).toBe(0.18)
+    expect(c.abatement.lifetimeCap).toBe(0.5)
+    expect(c.abatement.perRoundCap).toBe(0.2)
   })
 
   it('derives the sector tables from constants rather than restating them', () => {

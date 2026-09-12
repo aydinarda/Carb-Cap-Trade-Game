@@ -185,6 +185,10 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     // A plant cannot switch itself off: 50% of its un-abated emissions is the most a company
     // can ever cut, across the whole game. Applies to every cap mechanism.
     lifetimeCap: 0.5,
+    // ...and no more than a fifth of what is still uncut in any single round. The two
+    // ceilings multiply out to 20% / 36% / 48.8% / 50%, so the lifetime budget takes four
+    // rounds to spend instead of arriving whole in round three. See `perRoundCap`.
+    perRoundCap: 0.2,
     // 4–10% of what a full lifetime install costs per tonne of baseline (14.4–38.8 by
     // sector), so a second step costs a few percent more rather than a fortune — but it
     // still exceeds the variable cost of a *small* step (a 10% Power cut is 1.375/t),
@@ -236,7 +240,13 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       spreadFrac: 0.06,
       skew: 0.04,
       skewCapFrac: 0.4,
-      invFrac: 0.18,
+      // The makers hold no emission permit obligation of their own, so every tonne they win
+      // at the auction leaves circulation until they choose to offer it back — and measured,
+      // they choose slowly: four makers took 18% of the round-1 pool and were still sitting
+      // on ~6 000 tonnes in round 10, shedding ~250 a year, while the class ran 1-4% short
+      // every round. Sizing the book at 8% leaves the other 10 points of the pool to be won
+      // by companies that actually have to surrender it.
+      invFrac: 0.08,
       quoteSize: 15,
       // A fifth of the excess per tick: geometric, so most of an overhang clears within a
       // trade window rather than compounding across years. See `excessShedFrac`.

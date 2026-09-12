@@ -255,6 +255,33 @@ export interface AbatementConfig {
    */
   lifetimeCap: number
   /**
+   * The most a company may cut **in one round**, as a share of the emissions it still has
+   * left to cut. Composes MULTIPLICATIVELY with itself, so the two ceilings are independent
+   * dials: the per-round one shapes the PATH, the lifetime one caps the DESTINATION.
+   *
+   * Retention after n rounds is `(1 − perRoundCap)^n`, and the lifetime cap stops it there.
+   * At 0.2 and a lifetime cap of 0.5 the fastest legal path is
+   *
+   *     round 1 → 20%   round 2 → 36%   round 3 → 48.8%   round 4 → 50% (lifetime binds)
+   *
+   * because `0.8³ = 0.512` is still above the 0.5 floor and `0.8⁴ = 0.410` is not.
+   *
+   * WHY IT EXISTS. Measured on the shipped parameters without it, the class went 0% → 6% →
+   * 40% and 70% of companies sat welded to the lifetime cap from round 3 to round 10. Once
+   * a company is at the cap it cannot cut another tonne, so its willingness to pay for the
+   * marginal credit is the fine rather than its own MAC — which is why the price flattened
+   * at 83-95 for eight straight rounds and why loosening supply could not move it. Rounds
+   * 4-10 were mechanically the same round repeated. Spreading the budget over rounds is
+   * what gives the back half of the game a decision to make.
+   *
+   * Anchored to the level the ROUND OPENED at, never to the running committed level:
+   * anchoring to the latter lets a company ratchet inside a single round (commit 20%, be
+   * re-measured at 20%, commit 36%, …) and the cap would not bind at all.
+   *
+   * Set to 1 to disable and recover the old single-ceiling behaviour.
+   */
+  perRoundCap: number
+  /**
    * Retrofit fee charged **on every install step**, multiplied by the company's
    * baseline-year emission. Paying it again for each step is what makes going in small
    * bites dearer than going once: 10% then 40% costs `2·fee + ∫₀^0.5`, where 50% in one
