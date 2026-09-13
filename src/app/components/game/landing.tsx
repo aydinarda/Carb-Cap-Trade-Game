@@ -157,10 +157,33 @@ export function LandingCard({ children }: { children: ReactNode }) {
   )
 }
 
-/** A small mono caption above a field or a group of them. */
-export function FieldLabel({ children }: { children: ReactNode }) {
+/**
+ * A small mono caption above a field or a group of them.
+ *
+ * `accent` promotes it from a caption to a section heading: brighter, larger, and marked with
+ * a rule down its left. Reserved for the ONE choice a form is really asking for — a landing
+ * form that highlights every label has highlighted nothing. On the join screen that is the
+ * industry, which decides how much the company emits and therefore how the whole game feels;
+ * the room code and the name are just details needed to get in.
+ *
+ * Kept as a variant of this component rather than a second one so the two stay in step: the
+ * house style for an emphasised mono label is `text-sm text-primary font-mono font-bold`, and
+ * a copy would be free to drift from it. DM Mono ships 400 and 500 only, so `font-bold`
+ * synthesises — which is what every other emphasised mono label here already does.
+ */
+export function FieldLabel({ children, accent }: { children: ReactNode; accent?: boolean }) {
+  if (!accent) {
+    return (
+      <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+        {children}
+      </span>
+    )
+  }
   return (
-    <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+    <span className="inline-flex items-center gap-2.5 text-sm font-mono font-bold uppercase tracking-wider text-primary">
+      {/* Decorative, so it is hidden from assistive tech — the emphasis is already carried by
+          the heading's position and wording, never by the colour alone. */}
+      <span aria-hidden className="h-4 w-0.5 rounded-full bg-primary" />
       {children}
     </span>
   )

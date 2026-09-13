@@ -65,7 +65,7 @@ export function JoinScreen() {
       >
         <LandingCard>
           <div className="flex flex-col gap-3">
-            <FieldLabel>Pick your industry</FieldLabel>
+            <FieldLabel accent>Pick your industry</FieldLabel>
             {/* Four tiles rather than a select: the choice decides how much this company
                 emits and therefore how the whole game feels, so it deserves to be the
                 largest thing on the form rather than a collapsed dropdown. */}
