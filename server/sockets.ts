@@ -1,6 +1,7 @@
 import type { Ack, SocketAuth } from '../shared/events'
 import { Broadcaster, type AppSocket, type IO } from './broadcaster'
 import { HOST_KEY, SEED } from './config'
+import { agents } from './rl/manager'
 import { GameError, Session, SessionStore } from './session'
 
 export const store = new SessionStore()
@@ -148,6 +149,10 @@ export function registerSockets(io: IO): Broadcaster {
       }))
     socket.on('host:removeBot', ({ playerId }, ack) =>
       hostAction(broadcaster, socket, ack, (s) => s.removeBot(playerId)))
+    socket.on('host:addAgents', ({ model, count, industry }, ack) =>
+      hostAction(broadcaster, socket, ack, (s) => {
+        agents.add(s, String(model), Number(count) || 1, industry)
+      }))
 
     socket.on('player:join', ({ roomCode, name, industry }, ack) => {
       try {

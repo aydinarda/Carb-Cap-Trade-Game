@@ -1,5 +1,6 @@
 import { AlertTriangle, Bot, ChevronRight, Gavel, Leaf, Trophy } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { announcements } from '@shared/announcements'
 import type { Industry } from '@shared/constants'
 import type {
   CapMode,
@@ -529,6 +530,10 @@ export function FlowHint({ steps }: { steps: ReactNode[] }) {
 /**
  * Standing regulator announcements, as a strip across the top of the player's screen.
  *
+ * What they SAY is defined in `shared/announcements.ts`, which the RL agent reads as well; this
+ * component is only how they look. Keeping the wording out of here is what guarantees the agent
+ * is told exactly what the class is told.
+ *
  * Announcements used to live inside the abatement card, which is the one place they are
  * NOT needed everywhere: a subsidy starting in two rounds changes what a company should bid
  * at the auction, and the cap stage never renders that card. Hoisting them here puts them
@@ -541,136 +546,6 @@ export function FlowHint({ steps }: { steps: ReactNode[] }) {
  * every round — so grey was hiding one. How RECENT something is belongs in the wording ("in
  * force from this round" vs "since round 11"), never in the colour.
  */
-type AnnouncementState = 'pending' | 'active' | 'past'
-
-function announcements(snap: PlayerSnapshot): {
-  key: string
-  title: string
-  detail: string
-  state: AnnouncementState
-}[] {
-  const out: { key: string; title: string; detail: string; state: AnnouncementState }[] = []
-  const year = snap.currentYear
-
-  // First in the list, and deliberately so: it is the only announcement here that has ALREADY
-  // moved a number the player is looking at. `plannedEmission` jumps the moment a crisis is
-  // declared, so without this line the screen shows a company emitting more for no stated
-  // reason — which reads as a bug rather than as an event. The other two describe options
-  // that open later; this one explains what just happened.
-  const c = snap.energyCrisis
-  if (c) {
-    const pct = Math.round(c.magnitude * 100)
-    if (year < c.fromYear) {
-      out.push({
-        key: 'crisis',
-        title: 'Energy crisis: oil and gas are short across Europe',
-        detail: `Coal mines are reopening — expect emissions ${pct}% above trend from round ${c.fromYear}.`,
-        state: 'pending',
-      })
-    } else if (year <= c.toYear) {
-      const left = c.toYear - year + 1
-      out.push({
-        key: 'crisis',
-        title: 'Energy crisis: oil and gas are short across Europe',
-        detail: `Coal is back on the grid and your emissions are ${pct}% above trend. Expected to be resolved in ${left} round${left === 1 ? '' : 's'}, after round ${c.toYear}.`,
-        state: 'active',
-      })
-    } else {
-      out.push({
-        key: 'crisis',
-        title: 'Energy crisis over — emissions back to trend',
-        detail: `Gas supply is restored and the coal plants are off again. Ran rounds ${c.fromYear}–${c.toYear}.`,
-        state: 'past',
-      })
-    }
-  }
-
-  // The covert one. Flavour only, by design — no magnitude, no duration, and no mention that
-  // it touched either emissions or the cost of a retrofit. Both of those show up on the
-  // player's own numbers, and connecting them to this headline is the exercise. Resist the
-  // urge to be helpful here: a detail line naming what it does turns the event into the
-  // other two.
-  const r = snap.rateCut
-  if (r) {
-    if (year < r.fromYear) {
-      out.push({
-        key: 'rates',
-        title: 'FED cuts interest rates',
-        detail: 'Global interest rates are expected to fall.',
-        state: 'pending',
-      })
-    } else if (year <= r.toYear) {
-      out.push({
-        key: 'rates',
-        title: 'FED cuts interest rates',
-        detail: 'Global interest rates are expected to fall.',
-        state: 'active',
-      })
-    } else {
-      out.push({
-        key: 'rates',
-        title: 'Interest rates normalise',
-        detail: 'The cutting cycle is over.',
-        state: 'past',
-      })
-    }
-  }
-
-  const s = snap.subsidy
-  if (s) {
-    const pct = Math.round(s.discount * 100)
-    if (year < s.fromYear) {
-      const away = s.fromYear - year
-      out.push({
-        key: 'subsidy',
-        title: `${pct}% off retrofits from round ${s.fromYear}`,
-        detail: `in ${away} round${away === 1 ? '' : 's'} · investing now costs full price, waiting delays the cut by a year`,
-        state: 'pending',
-      })
-    } else if (year <= s.toYear) {
-      const left = s.toYear - year + 1
-      out.push({
-        key: 'subsidy',
-        title: `${pct}% off retrofits — live now`,
-        detail: `${left} round${left === 1 ? '' : 's'} left, through round ${s.toYear}`,
-        state: 'active',
-      })
-    } else {
-      out.push({
-        key: 'subsidy',
-        title: `${pct}% retrofit subsidy ended`,
-        detail: `ran rounds ${s.fromYear}–${s.toYear}`,
-        state: 'past',
-      })
-    }
-  }
-
-  const t = snap.techUnlock
-  if (t) {
-    const pct = Math.round(t.lifetimeCap * 100)
-    if (year < t.fromYear) {
-      out.push({
-        key: 'tech',
-        title: `${t.label}: abatement budget rises to ${pct}%`,
-        detail: `from round ${t.fromYear}`,
-        state: 'pending',
-      })
-    } else {
-      // Permanent, and therefore permanently ACTIVE. Greying it after the round it landed
-      // in was a category error: the panel's grey means "no longer in force", and a company
-      // still below the raised ceiling has a live option every single round. Recency
-      // belongs in the wording, not in the colour.
-      out.push({
-        key: 'tech',
-        title: `${t.label}: you may cut up to ${pct}%`,
-        detail: year === t.fromYear ? 'in force from this round' : `in force since round ${t.fromYear}`,
-        state: 'active',
-      })
-    }
-  }
-
-  return out
-}
 
 export function AnnouncementsPanel({ snap }: { snap: PlayerSnapshot }) {
   const items = announcements(snap)

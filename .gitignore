@@ -29,3 +29,7 @@ game-logs/
 
 # local design notes and hand-offs (not part of the app)
 notes/
+
+# RL agent training — local only. Anchored to the root: the trained agents the host can add
+# live in server/rl/ and must be committed.
+/rl/

@@ -68,6 +68,12 @@ export interface ClientToServerEvents {
   'host:addBots': (payload: { botType: BotType; count: number }, ack: Ack) => void
   /** Lobby only: remove one bot by id. */
   'host:removeBot': (payload: { playerId: string }, ack: Ack) => void
+  /**
+   * Lobby only: add `count` companies played by a trained RL model (server/rl/), in the mode it
+   * was trained for. Industry is random unless given. They are removed like students, with
+   * `host:kickPlayer`.
+   */
+  'host:addAgents': (payload: { model: string; count: number; industry?: Industry }, ack: Ack) => void
   'player:join': (
     payload: { roomCode: string; name: string; industry: Industry },
     ack: Ack<{ playerId: string; token: string; profile: PlayerProfile }>,

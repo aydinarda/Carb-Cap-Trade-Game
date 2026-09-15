@@ -21,7 +21,7 @@ const CAP_MODES: CapMode[] = ['grandfathering', 'benchmarking', 'auctioning', 'h
  * `bots.compliance.coverTarget` gave the emitters a buffer to sell from — the two changes
  * belong together.
  */
-const BALANCED: Population = {
+export const BALANCED: Population = {
   humans: 25,
   behaviourMix: { rational: 0.4, passive: 0.25, hedger: 0.2, opportunist: 0.15 },
   sectorMix: {

@@ -7,6 +7,7 @@ import { Server } from 'socket.io'
 import type { ClientToServerEvents, ServerToClientEvents } from '../shared/events'
 import { BotManager } from './bots/BotManager'
 import { PORT } from './config'
+import { agents } from './rl/manager'
 import { registerSockets, store } from './sockets'
 
 const app = express()
@@ -25,6 +26,8 @@ const broadcaster = registerSockets(io)
 
 // Backend bots (auctioning mode) run on a slow global tick.
 new BotManager(store, broadcaster).start()
+// Host-added RL agents keep their own clock: a decision every couple of seconds, as trained.
+agents.start(store, broadcaster)
 
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true })

@@ -19,6 +19,7 @@ import type {
   PlayerSnapshot,
   PublicPlayerInfo,
 } from '../shared/types'
+import { listModels } from './rl/models'
 import type { Session } from './session'
 
 function round1(value: number): number {
@@ -422,6 +423,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
     prevMarketPrice: session.previousMarketPrice(),
     market: record ? buildMarketView(record.orders, record.trades) : null,
     playerHistory: buildPlayerHistory(session),
+    rlModels: state.phase === 'lobby' ? listModels() : [],
     players: state.players.map((p) => ({
       id: p.id,
       name: p.name,
@@ -429,6 +431,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
       connected: p.connected,
       isBot: p.isBot,
       botType: p.botType,
+      agentModel: p.agentModel,
       score: p.score,
       baselineEmission: p.emissions[state.config.emissions.baselineYear] ?? 0,
       windowSum: round1(windowSum(p, state.currentYear, state.config.emissions.historyWindow)),

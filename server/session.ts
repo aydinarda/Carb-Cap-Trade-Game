@@ -1557,7 +1557,8 @@ export class SessionStore {
       const { endedGraceMs, idleTtlMs } = session.state.config.session
       const finished = session.endedAt !== null && now - session.endedAt > endedGraceMs
       const abandoned =
-        !session.state.players.some((p) => p.connected && !p.isBot) &&
+        // An RL agent never disconnects, so it cannot be what keeps an abandoned room alive.
+        !session.state.players.some((p) => p.connected && !p.isBot && !p.agentModel) &&
         now - session.lastActivity > idleTtlMs
       if (finished || abandoned) {
         this.byCode.delete(code)

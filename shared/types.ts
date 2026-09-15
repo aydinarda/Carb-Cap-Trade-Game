@@ -74,6 +74,11 @@ export interface Player extends PlayerProfile {
   isBot?: boolean
   /** Which archetype this bot plays (only set when isBot). */
   botType?: BotType
+  /**
+   * The trained RL model playing this company, when the host added it as an agent (server/rl/).
+   * Not a bot: it joins and plays as a student, which is what it was trained as.
+   */
+  agentModel?: string
 }
 
 export type OrderSide = 'buy' | 'sell'
@@ -620,7 +625,22 @@ export interface ClassAggregate {
   reserveReleased: number
 }
 
+/** A trained RL agent the host can add in the lobby — see server/rl/models.ts. */
+export interface RlModelInfo {
+  id: string
+  label: string
+  /** The regime it was trained under; it sits out rounds played under any other. Null if unreadable. */
+  mode: CapMode | null
+  /** Which checkpoint of its training run: 'best' or 'final'. */
+  checkpoint: string | null
+  stepsTrained: number | null
+  /** Why this server cannot run it; null when it can. */
+  error: string | null
+}
+
 export interface HostPlayerRow extends PublicPlayerInfo {
+  /** Set when an RL agent plays this company — the model's id. */
+  agentModel?: string
   baselineEmission: number
   windowSum: number
   score: number
@@ -697,6 +717,8 @@ export interface HostSnapshot {
   market: MarketView | null
   /** Full year-by-year history per player (host-only). */
   playerHistory: Record<string, PlayerHistoryYear[]>
+  /** RL agents this server can add. Lobby only, since agents can only join there; empty after. */
+  rlModels: RlModelInfo[]
 }
 
 export type Snapshot = PlayerSnapshot | HostSnapshot
