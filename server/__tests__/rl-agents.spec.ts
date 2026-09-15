@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { RlModelInfo } from '../../shared/types'
-import { RlAgentManager } from '../rl/manager'
-import { listModels, modelFromFile, Policy } from '../rl/models'
-import { featuresFor } from '../rl/observe'
+import { RlAgentManager, type ModelSource } from '../rl/manager'
+import { getModel, listModels, modelFromFile, Policy, type LoadedModel } from '../rl/models'
+import { featuresFor, type RlMode } from '../rl/observe'
 import { Session } from '../session'
 import { hostSnapshot } from '../views'
 
@@ -118,5 +118,103 @@ describe('RL agents in a game', () => {
     s.kickPlayer(agent.id)
     manager.tick(1)
     expect(manager.statsFor(s)).toEqual([])
+  })
+})
+
+/** A valid model that always holds: zero weights, so its actions are all 0. */
+function zeroModel(id: string, mode: RlMode): LoadedModel {
+  const features = featuresFor(mode).map((f) => f.name)
+  const n = features.length
+  return modelFromFile(
+    {
+      format: 1,
+      id,
+      label: id,
+      mode,
+      features,
+      env: { round_seconds: 30, agent_every_seconds: 2 },
+      source: { which: 'final', steps_trained: 0 },
+      normalizer: { mean: f64(new Array(n).fill(0)), var: f64(new Array(n).fill(1)), clip: 10, epsilon: 0 },
+      layers: [{ in: n, out: 4, activation: 'linear', weight: f32(new Array(n * 4).fill(0)), bias: f32([0, 0, 0, 0]) }],
+      check: { obs: [new Array(n).fill(0)], action: [[0, 0, 0, 0]] },
+    },
+    id,
+  )
+}
+
+/** Exactly these models, so a model added to server/rl/models later cannot change the outcome. */
+function sourceOf(...models: LoadedModel[]): ModelSource {
+  const byId = new Map(models.map((m) => [m.info.id, m]))
+  return { getModel: (id) => byId.get(id), listModels: () => models.map((m) => m.info) }
+}
+
+describe('RL agents follow the room mode', () => {
+  it('in the lobby, switching the mode removes the agents trained for another one', () => {
+    const manager = new RlAgentManager()
+    const s = new Session('hybrid', 4)
+    s.addPlayer('Alice', 'Transport')
+    manager.add(s, usableHybrid().id, 2)
+
+    s.setCapMode('benchmarking')
+    expect(manager.reconcile(s)).toEqual({ removed: 2, reseated: 0 })
+    expect(s.state.players.map((p) => p.name)).toEqual(['Alice'])
+    expect(manager.statsFor(s)).toEqual([])
+  })
+
+  it('between years the company stays: re-seated on a model for the new mode, idle without one', () => {
+    const home = getModel(usableHybrid().id)!
+    const bench = zeroModel('bench-zero', 'benchmarking')
+    expect(bench.info.error).toBeNull()
+    const manager = new RlAgentManager(sourceOf(home, bench))
+    const s = new Session('hybrid', 6)
+    s.addBot('compliance')
+    s.addBot('compliance')
+    s.addBot('marketMaker')
+    const [agent] = manager.add(s, home.info.id)
+
+    let now = 0
+    const run = (ms: number) => {
+      const end = now + ms
+      while (now < end) {
+        now += 250
+        manager.tick(now)
+      }
+    }
+    const playRound = () => {
+      run(1_000)
+      s.closeCapStage()
+      s.openTrade()
+      run(31_000)
+      s.closeTrade()
+      run(500)
+    }
+    const stats = () => manager.statsFor(s)[0].stats
+
+    s.startYear()
+    playRound()
+    expect(stats()).toMatchObject({ bids: 1, trades: 15, abatements: 1 })
+    // The year summary is where the mode can change, so the host is sent the models there too.
+    expect(hostSnapshot(s).rlModels.length).toBeGreaterThan(0)
+
+    s.setCapMode('benchmarking')
+    expect(manager.reconcile(s)).toEqual({ removed: 0, reseated: 1 })
+    expect(agent.agentModel).toBe('bench-zero')
+    s.advanceYear()
+    playRound()
+    // Benchmarking runs no auction: no new bid, but a full trade window and an abatement decision.
+    expect(stats()).toMatchObject({ bids: 1, trades: 30, abatements: 2, errors: 0 })
+
+    s.setCapMode('auctioning')
+    expect(manager.reconcile(s)).toEqual({ removed: 0, reseated: 0 })
+    s.advanceYear()
+    playRound()
+    expect(stats()).toMatchObject({ bids: 1, trades: 30, abatements: 2 })
+
+    s.setCapMode('hybrid')
+    expect(manager.reconcile(s)).toEqual({ removed: 0, reseated: 1 })
+    expect(agent.agentModel).toBe(home.info.id)
+    s.advanceYear()
+    playRound()
+    expect(stats()).toMatchObject({ bids: 2, trades: 45, abatements: 3, errors: 0 })
   })
 })

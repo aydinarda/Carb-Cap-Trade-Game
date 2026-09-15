@@ -717,7 +717,11 @@ export interface HostSnapshot {
   market: MarketView | null
   /** Full year-by-year history per player (host-only). */
   playerHistory: Record<string, PlayerHistoryYear[]>
-  /** RL agents this server can add. Lobby only, since agents can only join there; empty after. */
+  /**
+   * RL models on this server, sent while the mode can change (lobby and year summary): the lobby
+   * adds agents from it, and the mode picker warns which modes would leave agents without a model.
+   * Empty in every other phase.
+   */
   rlModels: RlModelInfo[]
 }
 

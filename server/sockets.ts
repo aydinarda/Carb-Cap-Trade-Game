@@ -105,7 +105,11 @@ export function registerSockets(io: IO): Broadcaster {
     })
 
     socket.on('host:setCapMode', ({ mode }, ack) =>
-      hostAction(broadcaster, socket, ack, (s) => s.setCapMode(mode)))
+      hostAction(broadcaster, socket, ack, (s) => {
+        s.setCapMode(mode)
+        // RL agents follow the room: removed in the lobby, re-seated on another model between years.
+        agents.reconcile(s)
+      }))
     socket.on('host:updateSettings', (settings, ack) =>
       hostAction(broadcaster, socket, ack, (s) => s.updateSettings(settings)))
     socket.on('host:announceSubsidy', ({ rounds }, ack) =>

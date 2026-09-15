@@ -256,7 +256,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                 <div className="text-xs text-accent font-mono uppercase tracking-wider mb-3">
                   Cap mechanism for Year {snap.currentYear + 1}
                 </div>
-                <ModePicker capMode={snap.capMode} compact />
+                <ModePicker capMode={snap.capMode} compact room={snap} />
               </div>
               <div className="rounded-xl border border-border bg-card/70 p-5">
                 <div className="text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">

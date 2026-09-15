@@ -1,10 +1,10 @@
 import { INDUSTRY_NAMES, type Industry } from '../../shared/constants'
-import type { Player } from '../../shared/types'
+import type { CapMode, Player, RlModelInfo } from '../../shared/types'
 import { GameError, type Session, type SessionStore } from '../session'
 import { playerSnapshot } from '../views'
 import { apply, decode } from './act'
 import { createMemory, remember, type Memory } from './memory'
-import { getModel, type Policy } from './models'
+import { getModel, listModels, type LoadedModel, type Policy } from './models'
 import { observe, type RlMode, type StepKind } from './observe'
 
 /**
@@ -17,6 +17,11 @@ import { observe, type RlMode, type StepKind } from './observe'
  * stage, a buy/sell decision every `agent_every_seconds` once the market opens, and the abatement
  * decision straight after the last of them. A host who closes the market before then skips that
  * round's abatement decision, like a student who never reached the slider.
+ *
+ * A policy only understands the mode it was trained in, and the host can change the mode under
+ * it (see `reconcile`): in the lobby the agent is removed; once the game has started the company
+ * cannot leave, so another model trained for the new mode takes over, and the agent's own model
+ * returns when the room does. With no model for the mode, the company sits the rounds out.
  *
  * Mirrors rl/live-agent.ts, which plays the same way over a socket from outside the server.
  */
@@ -33,6 +38,14 @@ export interface AgentBroadcast {
   schedule(session: Session): void
 }
 
+/** Where the manager finds models: `server/rl/models/` on the server; tests hand it their own. */
+export interface ModelSource {
+  getModel(id: string): LoadedModel | undefined
+  listModels(): RlModelInfo[]
+}
+
+const DISK: ModelSource = { getModel, listModels }
+
 /** Decisions taken, for tests and diagnostics. */
 export interface AgentStats {
   bids: number
@@ -45,6 +58,8 @@ export interface AgentStats {
 
 interface Agent {
   player: Player
+  /** The model the host added. It plays again whenever the room is back in its mode. */
+  homeModelId: string
   mode: RlMode
   policy: Policy
   everyMs: number
@@ -57,11 +72,18 @@ interface Agent {
   stats: AgentStats
 }
 
+interface Room {
+  session: Session
+  agents: Agent[]
+}
+
 export class RlAgentManager {
-  private rooms = new Map<string, { session: Session; agents: Agent[] }>()
+  private rooms = new Map<string, Room>()
   private timer?: NodeJS.Timeout
   private store?: SessionStore
   private broadcast?: AgentBroadcast
+
+  constructor(private readonly source: ModelSource = DISK) {}
 
   start(store: SessionStore, broadcast: AgentBroadcast) {
     this.store = store
@@ -81,7 +103,7 @@ export class RlAgentManager {
     if (session.state.phase !== 'lobby') {
       throw new GameError('NOT_LOBBY', 'Agents can only be added in the lobby.')
     }
-    const model = getModel(modelId)
+    const model = this.source.getModel(modelId)
     if (!model) throw new GameError('NO_MODEL', 'Unknown agent model.')
     const { info, policy } = model
     if (!policy) throw new GameError('BAD_MODEL', `${info.label} cannot run on this server: ${info.error}`)
@@ -105,29 +127,59 @@ export class RlAgentManager {
       // Random by default, as in training: one policy was trained across all four sectors.
       const sector = industry ?? INDUSTRY_NAMES[Math.floor(Math.random() * INDUSTRY_NAMES.length)]
       const { player } = session.addPlayer(`RL ${info.label} ${sameModel + 1}`, sector)
-      player.agentModel = info.id
-      room.agents.push({
+      const agent = {
         player,
-        mode: info.mode as RlMode,
-        policy,
-        everyMs: model.everyMs,
-        decisionsPerWindow: model.decisionsPerWindow,
+        homeModelId: info.id,
         memory: createMemory(),
         capSeen: null,
         bidYear: null,
         window: null,
         settledYear: null,
         stats: { bids: 0, trades: 0, abatements: 0, refused: 0, errors: 0 },
-      })
+      } as Agent
+      this.seat(agent, model)
+      room.agents.push(agent)
       added.push(player)
     }
     return added
   }
 
-  /** The agents still in a room, with what they have done. */
+  /**
+   * Brings a room's agents in line with its mode, after the host changed it.
+   *
+   * In the lobby an agent trained for another mode is removed. Once the game has started the
+   * company cannot leave, so it is re-seated on a model trained for the new mode (its own model,
+   * when the room is back in that mode) and keeps its memory; with none, it sits out until the
+   * mode comes back. Idempotent: the socket handler calls it straight after the switch, and every
+   * tick calls it again in case the mode changed some other way.
+   */
+  reconcile(session: Session): { removed: number; reseated: number } {
+    const result = { removed: 0, reseated: 0 }
+    const room = this.roomOf(session)
+    const mode = session.state.capMode
+    if (!room || mode === null || session.state.phase === 'ended') return result
+
+    for (const agent of [...room.agents]) {
+      if (session.state.phase === 'lobby') {
+        if (agent.mode === mode) continue
+        session.kickPlayer(agent.player.id)
+        room.agents.splice(room.agents.indexOf(agent), 1)
+        result.removed += 1
+        continue
+      }
+      const wanted = this.modelFor(mode, agent.homeModelId)
+      if (wanted && wanted.info.id !== agent.player.agentModel) {
+        this.seat(agent, wanted)
+        result.reseated += 1
+      }
+    }
+    return result
+  }
+
+  /** The agents still in a room, with the model playing each and what they have done. */
   statsFor(session: Session): { playerId: string; model: string | undefined; stats: AgentStats }[] {
-    const room = this.rooms.get(session.state.roomCode)
-    if (!room || room.session !== session) return []
+    const room = this.roomOf(session)
+    if (!room) return []
     return room.agents
       .filter((a) => session.state.players.includes(a.player))
       .map((a) => ({ playerId: a.player.id, model: a.player.agentModel, stats: { ...a.stats } }))
@@ -137,30 +189,55 @@ export class RlAgentManager {
   tick(now: number) {
     for (const [code, room] of this.rooms) {
       const { session } = room
-      const swept = this.store !== undefined && this.store.get(code) !== session
-      // A kicked agent is no longer in the player list; it stops playing with nothing to clean up.
-      room.agents = room.agents.filter((a) => session.state.players.includes(a.player))
-      if (swept || room.agents.length === 0) {
+      if (this.store !== undefined && this.store.get(code) !== session) {
         this.rooms.delete(code)
         continue
       }
-      let acted = false
+      // A kicked agent is no longer in the player list; it stops playing with nothing to clean up.
+      room.agents = room.agents.filter((a) => session.state.players.includes(a.player))
+      const { removed, reseated } = this.reconcile(session)
+      let changed = removed > 0 || reseated > 0
       for (const agent of room.agents) {
         try {
-          acted = this.step(session, agent, now) || acted
+          changed = this.step(session, agent, now) || changed
         } catch (error) {
           agent.stats.errors += 1
           console.error(`RL agent ${agent.player.name} in ${code}:`, error)
         }
       }
-      if (acted) this.broadcast?.schedule(session)
-      if (session.state.phase === 'ended') this.rooms.delete(code)
+      if (changed) this.broadcast?.schedule(session)
+      if (room.agents.length === 0 || session.state.phase === 'ended') this.rooms.delete(code)
     }
+  }
+
+  private roomOf(session: Session): Room | undefined {
+    const room = this.rooms.get(session.state.roomCode)
+    return room && room.session === session ? room : undefined
+  }
+
+  /** The agent's own model when it fits the mode, otherwise the first runnable model that does. */
+  private modelFor(mode: CapMode, homeModelId: string): LoadedModel | null {
+    const home = this.source.getModel(homeModelId)
+    if (home?.policy && home.info.mode === mode) return home
+    for (const info of this.source.listModels()) {
+      if (info.mode !== mode || info.error !== null) continue
+      const model = this.source.getModel(info.id)
+      if (model?.policy) return model
+    }
+    return null
+  }
+
+  private seat(agent: Agent, model: LoadedModel) {
+    agent.mode = model.info.mode as RlMode
+    agent.policy = model.policy as Policy
+    agent.everyMs = model.everyMs
+    agent.decisionsPerWindow = model.decisionsPerWindow
+    agent.player.agentModel = model.info.id
   }
 
   private step(session: Session, agent: Agent, now: number): boolean {
     const { phase, currentYear: year, capMode } = session.state
-    // A round under another regime is sat out: the policy has never seen one.
+    // A round under a mode no model was found for is sat out: the policy has never seen one.
     if (phase === 'lobby' || phase === 'ended' || capMode !== agent.mode) return false
 
     if (phase === 'cap') {

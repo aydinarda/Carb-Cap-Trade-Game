@@ -159,7 +159,7 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
           <div className="text-xs text-muted-foreground font-mono uppercase tracking-wider mb-3">
             Cap mechanism
           </div>
-          <ModePicker capMode={snap.capMode} />
+          <ModePicker capMode={snap.capMode} room={snap} />
         </div>
 
         {/* Game settings */}

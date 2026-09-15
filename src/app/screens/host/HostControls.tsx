@@ -5,6 +5,7 @@ import type {
   CapMode,
   EnergyCrisis,
   HostConfigView,
+  HostSnapshot,
   RateCut,
   SubsidyWindow,
   TechUnlock,
@@ -14,31 +15,83 @@ import { Input } from '../../components/ui/input'
 import { cn, MODE_LABELS } from '../../components/game/theme'
 import { useGame } from '../../net/GameContext'
 
+/** What the mode picker needs to know about the room's RL agents. */
+type PickerRoom = Pick<HostSnapshot, 'phase' | 'players' | 'rlModels'>
+
+const agentCount = (n: number) => `${n} RL agent${n === 1 ? '' : 's'}`
+
+/**
+ * What switching to `target` would do to the room's RL agents, or null when nothing. The same rule
+ * as `RlAgentManager.reconcile` on the server: the lobby removes agents trained for another mode;
+ * between years the company stays but needs a model trained for the new mode, or it sits out.
+ */
+function agentSwitchNotice(room: PickerRoom | undefined, target: CapMode): string | null {
+  const agents = room?.players.filter((p) => p.agentModel) ?? []
+  if (!room || agents.length === 0) return null
+  // A server a version behind sends no model list.
+  const models = room.rlModels ?? []
+  if (room.phase === 'lobby') {
+    const removed = agents.filter((p) => models.find((m) => m.id === p.agentModel)?.mode !== target).length
+    return removed > 0 ? `removes ${agentCount(removed)}` : null
+  }
+  if (models.some((m) => m.mode === target && m.error === null)) return null
+  return `${agentCount(agents.length)} ${agents.length === 1 ? 'sits' : 'sit'} out: no model for this mode`
+}
+
+/** Agents already sitting out the selected mode, because no model was found for it. */
+function idleAgentsNotice(room: PickerRoom | undefined, capMode: CapMode | null): string | null {
+  const models = room?.rlModels ?? []
+  if (!room || room.phase === 'lobby' || capMode === null || models.length === 0) return null
+  const idle = room.players.filter(
+    (p) => p.agentModel && models.find((m) => m.id === p.agentModel)?.mode !== capMode,
+  ).length
+  return idle > 0
+    ? `${agentCount(idle)} ${idle === 1 ? 'is' : 'are'} sitting out: no model trained for ${MODE_LABELS[capMode].label}.`
+    : null
+}
+
 /** Cap-mechanism picker — usable in the lobby and between years (yearSummary). */
-export function ModePicker({ capMode, compact }: { capMode: CapMode | null; compact?: boolean }) {
+export function ModePicker({
+  capMode,
+  compact,
+  room,
+}: {
+  capMode: CapMode | null
+  compact?: boolean
+  /** Pass the host snapshot so each mode can say what switching does to the RL agents. */
+  room?: PickerRoom
+}) {
   const { hostAction } = useGame()
   const mode = capMode ? MODE_LABELS[capMode] : null
+  const idle = idleAgentsNotice(room, capMode)
   return (
     <div>
       <div className="flex flex-col gap-2">
-        {(Object.keys(MODE_LABELS) as CapMode[]).map((m) => (
-          <button
-            key={m}
-            onClick={() => void hostAction('host:setCapMode', { mode: m })}
-            className={cn(
-              'text-left rounded-lg border px-3 py-2 text-sm transition-colors',
-              capMode === m
-                ? 'border-primary/60 bg-primary/10 text-foreground'
-                : 'border-border text-muted-foreground hover:border-primary/30',
-            )}
-          >
-            <span className="font-bold">{MODE_LABELS[m].label}</span>
-            {!MODE_LABELS[m].implemented && (
-              <span className="ml-2 text-[10px] font-mono uppercase text-accent">pending</span>
-            )}
-          </button>
-        ))}
+        {(Object.keys(MODE_LABELS) as CapMode[]).map((m) => {
+          const notice = capMode === m ? null : agentSwitchNotice(room, m)
+          return (
+            <button
+              key={m}
+              onClick={() => void hostAction('host:setCapMode', { mode: m })}
+              className={cn(
+                'text-left rounded-lg border px-3 py-2 text-sm transition-colors',
+                capMode === m
+                  ? 'border-primary/60 bg-primary/10 text-foreground'
+                  : 'border-border text-muted-foreground hover:border-primary/30',
+              )}
+            >
+              <span className="font-bold">{MODE_LABELS[m].label}</span>
+              {!MODE_LABELS[m].implemented && (
+                <span className="ml-2 text-[10px] font-mono uppercase text-accent">pending</span>
+              )}
+              {notice && (
+                <span className="block text-[10px] font-mono text-destructive mt-0.5">{notice}</span>
+              )}
+            </button>
+          )
+        })}
       </div>
+      {idle && <p className="text-[11px] font-mono text-destructive mt-2">{idle}</p>}
       {mode && !compact && <p className="text-xs text-muted-foreground mt-3">{mode.desc}</p>}
     </div>
   )

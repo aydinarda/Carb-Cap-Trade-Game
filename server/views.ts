@@ -423,7 +423,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
     prevMarketPrice: session.previousMarketPrice(),
     market: record ? buildMarketView(record.orders, record.trades) : null,
     playerHistory: buildPlayerHistory(session),
-    rlModels: state.phase === 'lobby' ? listModels() : [],
+    rlModels: state.phase === 'lobby' || state.phase === 'yearSummary' ? listModels() : [],
     players: state.players.map((p) => ({
       id: p.id,
       name: p.name,
