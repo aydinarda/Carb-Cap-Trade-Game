@@ -10,6 +10,7 @@ import {
   windowSum,
 } from '../shared/engine'
 import type {
+  BorrowView,
   ClassAggregate,
   HostConfigView,
   HostSnapshot,
@@ -40,10 +41,29 @@ function sectorAverages(config: GameConfig): Record<Industry, number> {
   ) as Record<Industry, number>
 }
 
+/** A company's borrowing this year; null when the session has it off or the company cannot borrow. */
+function borrowView(
+  session: Session,
+  player: Session['state']['players'][number],
+  record: Session['state']['years'][number] | null | undefined,
+): BorrowView | null {
+  if (!session.borrowingEnabled || !record || isPureTrader(player)) return null
+  const settled = record.borrowed !== undefined
+  const room = settled ? null : session.borrowRooms()[player.id]
+  return {
+    basis: session.borrowBasis,
+    optIn: session.borrowOptedIn(player.id),
+    room: room === undefined || room === null || room === Infinity ? null : room,
+    borrowed: settled ? (record.borrowed?.[player.id] ?? 0) : null,
+  }
+}
+
 /** The slice of the config the host panel renders. See HostConfigView for why it is narrow. */
 function hostConfigView(config: GameConfig): HostConfigView {
   return {
     penaltyRate: config.market.penaltyRate,
+    borrowingEnabled: config.market.borrowing.enabled,
+    borrowLimitFrac: config.market.borrowing.limitFrac,
     openingReferenceFraction: config.market.openingReferenceFraction,
     freeCreditRatio: config.allocation.freeCreditRatio,
     applyLRFToGrandfathering: config.allocation.applyLRFToGrandfathering,
@@ -305,6 +325,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
       score: player.score,
       freeAllocation: record?.freeAllocation[player.id] ?? null,
       auctionBid: record?.auctionBid[player.id] ?? null,
+      borrow: borrowView(session, player, record),
       auctionAward:
         record && record.auctionPrice !== null
           ? (record.regulatorGranted[player.id] ?? 0)

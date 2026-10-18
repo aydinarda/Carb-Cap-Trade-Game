@@ -1,6 +1,7 @@
 import type { GameConfig } from './config/schema'
 import type { Industry } from './constants'
 import type { AbatementSpec } from './engine/abatementModels'
+import type { AuctionBid } from './engine/auction'
 
 export type CapMode = 'grandfathering' | 'benchmarking' | 'auctioning' | 'hybrid'
 
@@ -168,8 +169,15 @@ export interface YearRecord {
   abatementInstalled: Record<string, number>
   /** Money charged for those installs — fee(s) plus the variable cost of the new slice. */
   abatementSpend: Record<string, number>
-  /** Auctioning mode: each company's sealed bid at the cap stage. */
-  auctionBid: Record<string, { qty: number; price: number }>
+  /**
+   * Borrowing (when enabled): companies that turned the option OFF this year. The option starts
+   * out selected every year, so an absent id is opted in.
+   */
+  borrowOptOut?: Record<string, true>
+  /** Borrowing (when enabled): tonnes of each shortfall covered from next year's share, unfined. */
+  borrowed?: Record<string, number>
+  /** Auctioning mode: each company's sealed bid at the cap stage (one step, or a sweep). */
+  auctionBid: Record<string, AuctionBid>
   /** Auctioning mode: uniform clearing price after the auction closes. */
   auctionPrice: number | null
   /**
@@ -229,6 +237,10 @@ export interface YearRecord {
 export interface HostConfigView {
   /** Cost per tCO2 of emissions left uncovered at settlement. */
   penaltyRate: number
+  /** Companies may cover a shortfall from next year's share, unfined. */
+  borrowingEnabled: boolean
+  /** Most a company may borrow, as a fraction of next year's share; null = no limit. */
+  borrowLimitFrac: number | null
   /** Year-1 reference price as a fraction of the penalty, before anything has traded. */
   openingReferenceFraction: number
   /** Grandfathering free credits = this × Σbaseline. */
@@ -426,6 +438,18 @@ export interface PublicPlayerInfo {
   botType?: BotType
 }
 
+/** A company's borrowing this year, as its screen shows it. */
+export interface BorrowView {
+  /** What the room is measured against: next year's auction share, or next year's free allocation. */
+  basis: 'auction' | 'free'
+  /** Whether the option is selected this year (it starts out selected). */
+  optIn: boolean
+  /** Most it may borrow this year, in tonnes; null = no limit. */
+  room: number | null
+  /** Tonnes borrowed when this year settled; null until then. */
+  borrowed: number | null
+}
+
 /** What a player knows about themself in the current year. */
 export interface YouView {
   id: string
@@ -434,8 +458,10 @@ export interface YouView {
   emissions: Record<number, number>
   score: number
   freeAllocation: number | null
-  /** Auctioning mode: this company's submitted bid. */
-  auctionBid: { qty: number; price: number } | null
+  /** Auctioning mode: this company's submitted bid (one step, or a sweep in `steps`). */
+  auctionBid: AuctionBid | null
+  /** Borrowing from next year's share — null when the session has it switched off. */
+  borrow: BorrowView | null
   /** Auctioning mode: credits won at the auction. */
   auctionAward: number | null
   /**

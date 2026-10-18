@@ -51,7 +51,8 @@ export { computeNetPositions } from './trade'
 export { windowSum, computeFreeCreditLimit } from './grandfathering'
 export { benchmarkFor } from './benchmarking'
 export { hybridFreeFor } from './hybrid'
-export { clearAuction } from './auction'
+export { bidSteps, clearAuction, MAX_SWEEP_STEPS } from './auction'
+export type { AuctionBid, AuctionStep } from './auction'
 export {
   matchOrder,
   cancelOrder,

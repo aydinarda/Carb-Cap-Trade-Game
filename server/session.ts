@@ -7,6 +7,7 @@ import {
   cancelOrder,
   CAP_MECHANISMS,
   clearAuction,
+  MAX_SWEEP_STEPS,
   computeNetPositions,
   createRng,
   expectedEmission,
@@ -159,6 +160,73 @@ export class Session {
     )
   }
 
+  // ---- borrowing ----
+
+  /** Whether this session lets companies borrow from next year's share at all. */
+  get borrowingEnabled(): boolean {
+    return this.state.config.market.borrowing.enabled && this.state.capMode !== null
+  }
+
+  /**
+   * What a company's borrowing is measured against — `'auction'` (its slice of next year's
+   * auction supply) under a regime that runs an auction, `'free'` (its next free allocation)
+   * otherwise.
+   */
+  get borrowBasis(): 'auction' | 'free' {
+    return this.usesAuction ? 'auction' : 'free'
+  }
+
+  /**
+   * Each company's share of NEXT year: its baseline slice of next year's auction supply, or
+   * its next free allocation. Pure-trader bots emit nothing and have no share.
+   */
+  nextYearShares(): Record<string, number> {
+    const { config, players } = this.state
+    const next = this.state.currentYear + 1
+    if (this.borrowBasis === 'auction') {
+      const pool = this.mechanism.poolFor(players, next, config, this.totalBaseline())
+      const baseline = (p: Player) => (isPureTrader(p) ? 0 : (p.emissions[config.emissions.baselineYear] ?? 0))
+      const total = players.reduce((a, p) => a + baseline(p), 0)
+      return Object.fromEntries(players.map((p) => [p.id, total > 0 ? round1((pool * baseline(p)) / total) : 0]))
+    }
+    const allocation = this.mechanism.allocate(players, next, this.state.freeCreditLimit ?? 0, config)
+    return Object.fromEntries(players.map((p) => [p.id, isPureTrader(p) ? 0 : round1(allocation[p.id] ?? 0)]))
+  }
+
+  /** The most each company may borrow this year: the limit × its share (Infinity with no limit). */
+  borrowRooms(): Record<string, number> {
+    const { limitFrac } = this.state.config.market.borrowing
+    const shares = this.nextYearShares()
+    return Object.fromEntries(
+      this.state.players.map((p) => [
+        p.id,
+        !this.borrowingEnabled || isPureTrader(p) ? 0 : limitFrac === null ? Infinity : round1(limitFrac * (shares[p.id] ?? 0)),
+      ]),
+    )
+  }
+
+  /** Whether the company has borrowing selected this year — it starts out selected. */
+  borrowOptedIn(playerId: string): boolean {
+    return !this.currentYearRecord()?.borrowOptOut?.[playerId]
+  }
+
+  /**
+   * Select or clear "cover a shortfall from next year's share" for this year. Open until the
+   * year settles; the option is selected again when the next year opens.
+   */
+  setBorrowOptIn(playerId: string, on: boolean) {
+    this.requirePhase('cap', 'reveal', 'trade')
+    if (!this.borrowingEnabled) {
+      throw new GameError('WRONG_MODE', 'Borrowing is switched off in this session.')
+    }
+    const record = this.currentYearRecord()!
+    if (on) {
+      if (record.borrowOptOut) delete record.borrowOptOut[playerId]
+    } else {
+      record.borrowOptOut = { ...record.borrowOptOut, [playerId]: true }
+    }
+  }
+
   /**
    * Credits a player holds: free + cap-stage (auction) + carry banked from prior
    * years (or minus a make-good debt) + net traded in the market.
@@ -195,6 +263,23 @@ export class Session {
       if (y.auctionPrice) return y.auctionPrice
     }
     return null
+  }
+
+  /**
+   * The discovered price of each of the last `n` completed rounds, most recent first: the
+   * closing price (volume-weighted last `market.referenceTrades` prints), else the last trade,
+   * else the auction price. Null for a round that traded nothing or does not exist yet.
+   */
+  recentRoundPrices(n: number): (number | null)[] {
+    const k = this.state.config.market.referenceTrades
+    const completed = Object.values(this.state.years)
+      .filter((y) => y.year !== this.state.currentYear && Object.keys(y.realized).length > 0)
+      .sort((a, b) => b.year - a.year)
+    return Array.from({ length: n }, (_, i) => {
+      const y = completed[i]
+      if (!y) return null
+      return vwapOfLast(y.trades, k) ?? buildMarketView(y.orders, y.trades).lastPrice ?? (y.auctionPrice || null)
+    })
   }
 
   /**
@@ -688,6 +773,8 @@ export class Session {
     abatementLifetimeCap?: number
     abatementFixedCost?: number
     marketMakerInvFrac?: number
+    borrowingEnabled?: boolean
+    borrowLimitFrac?: number | null
   }) {
     this.requirePhase('lobby', 'yearSummary')
     // Reject anything this method does not implement.
@@ -700,7 +787,7 @@ export class Session {
       'penaltyRate', 'openingReferenceFraction', 'freeCreditRatio', 'auctionCapRatio',
       'capReductionFactor', 'applyLRFToGrandfathering', 'benchmark', 'hybridFreeShare',
       'abatement', 'reserveEnabled', 'abatementLifetimeCap', 'abatementFixedCost',
-      'marketMakerInvFrac',
+      'marketMakerInvFrac', 'borrowingEnabled', 'borrowLimitFrac',
     ])
     const unknown = Object.keys(settings).filter((k) => !KNOWN.has(k))
     if (unknown.length) {
@@ -725,6 +812,20 @@ export class Session {
         throw new GameError('BAD_SETTING', 'abatementFixedCost must be a non-negative number.')
       }
       this.state.config.abatement.fixedCostPerTonneBaseline = settings.abatementFixedCost
+    }
+    if (settings.borrowingEnabled !== undefined) {
+      if (typeof settings.borrowingEnabled !== 'boolean') {
+        throw new GameError('BAD_SETTING', 'borrowingEnabled must be true or false.')
+      }
+      this.state.config.market.borrowing.enabled = settings.borrowingEnabled
+    }
+    if (settings.borrowLimitFrac !== undefined) {
+      const v = settings.borrowLimitFrac
+      // null = no limit; otherwise a share of next year's share, 0 … 10.
+      if (v !== null && (!Number.isFinite(v) || v < 0 || v > 10)) {
+        throw new GameError('BAD_SETTING', 'borrowLimitFrac must be between 0 and 10, or empty for no limit.')
+      }
+      this.state.config.market.borrowing.limitFrac = v === null ? null : Math.round(v * 1000) / 1000
     }
     if (settings.penaltyRate !== undefined) {
       if (!Number.isFinite(settings.penaltyRate) || settings.penaltyRate < 0) {
@@ -1106,6 +1207,10 @@ export class Session {
     const refPrice =
       buildMarketView(record.orders, record.trades).vwap ??
       (record.auctionPrice || this.previousMarketPrice() || penaltyRate)
+    // Borrowing: each company's room this year, if it kept the option selected.
+    const borrowing = this.borrowingEnabled
+    const rooms = borrowing ? this.borrowRooms() : {}
+    const roomOf = (id: string) => (borrowing && this.borrowOptedIn(id) ? (rooms[id] ?? 0) : 0)
     for (const player of this.state.players) {
       held[player.id] = this.creditsHeld(player.id)
       const { buyCash, sellCash } = tradedCash(record.trades, player.id)
@@ -1154,8 +1259,15 @@ export class Session {
       // the emission that was planned for rather than the one that was drawn. See
       // `Player.decisionScore` — this is what the leaderboard scores.
       const plannedShort = Math.max(0, this.plannedFor(player, record.year) - held[player.id])
+      // Whatever of it the company may borrow is not fined — but it is owed, so the ledger
+      // values it at this year's reference price, the price the benchmark covers those tonnes
+      // at. Borrowing then never beats the benchmark (the tonnes are not free, not even in the
+      // final year), and its whole advantage is the fine it avoids. Next year the debt sits in
+      // both the company's holdings and the benchmark's endowment, so it cancels there.
+      const plannedBorrowed = Math.min(plannedShort, roomOf(player.id))
       decisionCost[player.id] = round1(
-        abateSpend + purchaseCost[player.id] - sellIncome[player.id] + plannedShort * penaltyRate,
+        abateSpend + purchaseCost[player.id] - sellIncome[player.id] +
+          (plannedShort - plannedBorrowed) * penaltyRate + plannedBorrowed * refPrice,
       )
       investGap[player.id] = investmentGap({
         spec: this.state.config.abatement.sectors[player.industry],
@@ -1176,9 +1288,19 @@ export class Session {
         costFactor: this.installCostFactor(record.year),
       })
     }
-    const { settlement } = settleYear(record.realized, held, purchaseCost, sellIncome, abateCost, {
-      penaltyRate,
-    })
+    let borrowed: Record<string, number> = {}
+    if (borrowing) {
+      borrowed = Object.fromEntries(
+        this.state.players.map((p) => {
+          const short = Math.max(0, (record.realized[p.id] ?? 0) - (held[p.id] ?? 0))
+          return [p.id, round1(Math.min(short, roomOf(p.id)))]
+        }),
+      )
+      record.borrowed = borrowed
+    }
+    const { settlement } = settleYear(
+      record.realized, held, purchaseCost, sellIncome, abateCost, { penaltyRate }, borrowed,
+    )
     record.settlement = settlement
     // Kept on the record so a completed year can still explain its own score.
     record.optimalCost = optimal
@@ -1269,6 +1391,41 @@ export class Session {
     }
     const record = this.currentYearRecord()!
     record.auctionBid[playerId] = { qty: round1(qty), price: round1(price) }
+  }
+
+  /**
+   * Cap stage: submit a SWEEP — several steps of (quantity, max price), e.g. 100 at up to 10
+   * and 100 more at up to 30. Replaces any earlier bid. The auction itself is unchanged: each
+   * step is ranked with everyone else's, and every credit won is paid at the one clearing
+   * price. Steps at the same price are merged; a one-step sweep is stored as a plain bid.
+   */
+  submitSweep(playerId: string, steps: { qty: number; price: number }[]) {
+    this.requirePhase('cap')
+    if (!this.mechanism.usesAuction) {
+      throw new GameError('WRONG_MODE', 'This mode has no cap-stage auction to bid into.')
+    }
+    if (!Array.isArray(steps) || steps.length === 0 || steps.length > MAX_SWEEP_STEPS) {
+      throw new GameError('BAD_BID', `A sweep has 1 to ${MAX_SWEEP_STEPS} steps.`)
+    }
+    const byPrice = new Map<number, number>()
+    for (const step of steps) {
+      const qty = Number(step?.qty)
+      const price = Number(step?.price)
+      if (!Number.isFinite(qty) || qty <= 0) {
+        throw new GameError('BAD_BID', 'Every step needs a quantity above zero.')
+      }
+      if (!Number.isFinite(price) || price < 0) {
+        throw new GameError('BAD_BID', 'Every step needs a non-negative price.')
+      }
+      const p = round1(price)
+      byPrice.set(p, round1((byPrice.get(p) ?? 0) + qty))
+    }
+    const merged = [...byPrice].map(([price, qty]) => ({ qty, price })).sort((a, b) => b.price - a.price)
+    const record = this.currentYearRecord()!
+    record.auctionBid[playerId] =
+      merged.length === 1
+        ? merged[0]
+        : { qty: round1(merged.reduce((a, b) => a + b.qty, 0)), price: merged[0].price, steps: merged }
   }
 
   /**

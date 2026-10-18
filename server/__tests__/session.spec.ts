@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_GAME_CONFIG, resolveConfig, type DeepPartial, type GameConfig } from '../../shared/config'
 
 const FIRST_GAME_YEAR = DEFAULT_GAME_CONFIG.emissions.firstGameYear
-import { clearAuction, cumulativeCapFactor, installCost, round1 } from '../../shared/engine'
+import { CAP_MECHANISMS, clearAuction, cumulativeCapFactor, installCost, round1 } from '../../shared/engine'
 import { GameError, Session, SessionStore } from '../session'
 import { hostSnapshot, playerSnapshot } from '../views'
 
@@ -28,8 +28,9 @@ function grandfathering(seed = 1, override?: DeepPartial<GameConfig>) {
  * so at the shipped 20% a single year reaches 20% and no amount of raising the lifetime
  * budget gets a company to zero emissions in one move.
  */
-function unlimitedAbatement(seed = 1) {
+function unlimitedAbatement(extra: DeepPartial<GameConfig> = {}, seed = 1) {
   return grandfathering(seed, {
+    ...extra,
     abatement: { lifetimeCap: 1, perRoundCap: 1, fixedCostPerTonneBaseline: 0 },
   })
 }
@@ -61,7 +62,8 @@ function auctioning(seed = 1, override?: DeepPartial<GameConfig>) {
 
 describe('EU-ETS banking & make-good debt carry', () => {
   it('carries the year-end net position: surplus banked, shortfall as debt', () => {
-    const s = unlimitedAbatement()
+    // Without borrowing: a shortfall is fined AND carried. (With it, see the borrowing tests.)
+    const s = unlimitedAbatement({ market: { borrowing: { enabled: false, limitFrac: 1 } } })
     // Two years: P1's full cut is bought in year 1 and only bites in year 2.
     installAndAdvance(s, { P1: 1 }) // P2 never installs → short → debt
     s.closeTrade()
@@ -603,6 +605,173 @@ describe('closeCapStage auction wiring', () => {
     expect(s.state.phase).toBe('reveal')
   })
 })
+
+describe('sweep bids (several steps at the cap stage)', () => {
+  it('stores the steps highest price first, merges equal prices, and summarises the bid', () => {
+    const s = auctioning()
+    s.startYear()
+    s.submitSweep('P1', [{ qty: 50, price: 10 }, { qty: 100, price: 30 }, { qty: 25, price: 10 }])
+    expect(s.currentYearRecord()!.auctionBid.P1).toEqual({
+      qty: 175,
+      price: 30,
+      steps: [{ qty: 100, price: 30 }, { qty: 75, price: 10 }],
+    })
+    // One step is just a bid; a later plain bid replaces the sweep.
+    s.submitSweep('P2', [{ qty: 40, price: 12 }])
+    expect(s.currentYearRecord()!.auctionBid.P2).toEqual({ qty: 40, price: 12 })
+    s.submitBid('P1', 10, 5)
+    expect(s.currentYearRecord()!.auctionBid.P1).toEqual({ qty: 10, price: 5 })
+  })
+
+  it('clears a sweep through the same auction and awards the sum of its steps', () => {
+    const s = auctioning()
+    s.startYear()
+    const rec = s.currentYearRecord()!
+    const pool = rec.regulatorPool
+    s.submitSweep('P1', [{ qty: round1(pool * 0.5), price: 90 }, { qty: round1(pool * 0.5), price: 40 }])
+    s.submitBid('P2', round1(pool * 0.75), 60)
+    const reserve = round1(s.openingReference() * s.state.config.allocation.auctionReserveFrac)
+    const expected = clearAuction(rec.auctionBid, pool, reserve)
+    s.closeCapStage()
+    expect(rec.auctionPrice).toBe(expected.clearingPrice)
+    expect(rec.regulatorGranted).toEqual(expected.awarded)
+    // Ranked 90 (P1, half the pool), 60 (P2, the marginal step), 40 (P1): P1 wins its top
+    // step in full and nothing at 40; P2 takes the half that is left.
+    expect(rec.auctionPrice).toBe(60)
+    expect(rec.regulatorGranted.P1).toBeCloseTo(round1(pool * 0.5), 1)
+    expect(round1(rec.regulatorGranted.P1 + rec.regulatorGranted.P2)).toBe(round1(pool))
+  })
+
+  it('refuses an empty or oversized sweep, a zero quantity and a negative price', () => {
+    const s = auctioning()
+    s.startYear()
+    expect(() => s.submitSweep('P1', [])).toThrow(/1 to 5 steps/)
+    expect(() => s.submitSweep('P1', Array.from({ length: 6 }, (_, i) => ({ qty: 10, price: i + 1 })))).toThrow(/1 to 5 steps/)
+    expect(() => s.submitSweep('P1', [{ qty: 0, price: 10 }])).toThrow(/quantity above zero/)
+    expect(() => s.submitSweep('P1', [{ qty: 10, price: -1 }])).toThrow(/non-negative price/)
+    expect(() => grandfatheringStarted().submitSweep('P1', [{ qty: 10, price: 1 }])).toThrow(/no cap-stage auction/i)
+  })
+})
+
+function grandfatheringStarted() {
+  const s = grandfathering()
+  s.startYear()
+  return s
+}
+
+describe('borrowing from next year\'s share', () => {
+  const on = (limitFrac: number | null = 1) => ({ market: { borrowing: { enabled: true, limitFrac } } })
+  const off = { market: { borrowing: { enabled: false, limitFrac: 1 } } }
+  /** One year with nobody buying anything, so every company ends it short. */
+  const settleShort = (s: Session, before?: (s: Session) => void) => {
+    s.startYear()
+    before?.(s)
+    s.closeCapStage()
+    s.openTrade()
+    s.closeTrade()
+    return s.currentYearRecord()!
+  }
+
+  it('measures the room against next year\'s auction share, split by baseline', () => {
+    const s = auctioning(1, on())
+    s.startYear()
+    const shares = s.nextYearShares()
+    const baseline = (id: string) => s.state.players.find((p) => p.id === id)!.emissions[s.state.config.emissions.baselineYear]
+    const nextPool = auctioningMechanismPool(s)
+    expect(round1(shares.P1 + shares.P2)).toBeCloseTo(nextPool, 0)
+    expect(shares.P1 / shares.P2).toBeCloseTo(baseline('P1') / baseline('P2'), 2)
+    expect(s.borrowBasis).toBe('auction')
+    expect(s.borrowRooms()).toEqual(shares)
+  })
+
+  it('measures it against next year\'s free allocation where there is no auction', () => {
+    const s = grandfathering(1, on(0.5))
+    s.startYear()
+    expect(s.borrowBasis).toBe('free')
+    const shares = s.nextYearShares()
+    expect(shares.P1).toBeGreaterThan(0)
+    expect(s.borrowRooms().P1).toBeCloseTo(round1(0.5 * shares.P1), 1)
+  })
+
+  it('waives the penalty on what is borrowed and still carries the whole shortfall as debt', () => {
+    const plain = settleShort(auctioning(1, off))
+    const s = auctioning(1, on())
+    let rooms: Record<string, number> = {}
+    const rec = settleShort(s, (x) => {
+      rooms = x.borrowRooms()
+    })
+    for (const id of ['P1', 'P2']) {
+      const short = rec.settlement![id].shortage
+      expect(short).toBe(plain.settlement![id].shortage)
+      expect(rec.borrowed![id]).toBe(round1(Math.min(short, rooms[id])))
+      expect(rec.settlement![id].penaltyCost).toBe(round1((short - rec.borrowed![id]) * s.state.config.market.penaltyRate))
+      expect(rec.settlement![id].penaltyCost).toBeLessThan(plain.settlement![id].penaltyCost)
+      // The debt is the same: borrowing only removes the fine.
+      expect(s.state.players.find((p) => p.id === id)!.bankedCredits).toBe(-short)
+    }
+  })
+
+  it('fines in full a company that cleared the option, and selects it again next year', () => {
+    const s = auctioning(1, on())
+    const rec = settleShort(s, (x) => x.setBorrowOptIn('P1', false))
+    expect(rec.borrowed!.P1).toBe(0)
+    expect(rec.settlement!.P1.penaltyCost).toBe(round1(rec.settlement!.P1.shortage * s.state.config.market.penaltyRate))
+    expect(rec.borrowed!.P2).toBeGreaterThan(0)
+    s.advanceYear()
+    expect(s.borrowOptedIn('P1')).toBe(true)
+  })
+
+  it('with no limit, borrows the whole shortfall', () => {
+    const s = auctioning(1, on(null))
+    const rec = settleShort(s)
+    expect(rec.borrowed!.P1).toBe(rec.settlement!.P1.shortage)
+    expect(rec.settlement!.P1.penaltyCost).toBe(0)
+  })
+
+  it('gives a pure-trader bot no room', () => {
+    const s = new Session('auctioning', 1, on())
+    s.addPlayer('Alice', 'Power & Utilities')
+    const mm = s.addBot('marketMaker')
+    s.startYear()
+    expect(s.borrowRooms()[mm.id]).toBe(0)
+  })
+
+  it('values borrowed tonnes at the year\'s price on the leaderboard: never fined, never free', () => {
+    // A small auction gives the year a price below the fine; everyone still ends it short.
+    const bid = (x: Session) => x.submitBid('P1', 10, 30)
+    const fined = auctioning(1, off)
+    settleShort(fined, bid)
+    const s = auctioning(1, on(null))
+    const rec = settleShort(s, bid)
+    expect(rec.auctionPrice).toBeLessThan(s.state.config.market.penaltyRate)
+    for (const id of ['P1', 'P2']) {
+      const borrower = s.getPlayer(id)!
+      // Cheaper than defaulting (no fine) …
+      expect(borrower.decisionScore).toBeLessThan(fined.getPlayer(id)!.decisionScore)
+      // … but not cheaper than the benchmark, which pays for the same tonnes.
+      expect(borrower.decisionScore).toBeGreaterThanOrEqual(borrower.optimalScore)
+    }
+  })
+
+  it('is refused when switched off, and validates its settings', () => {
+    const s = auctioning(1, off)
+    s.startYear()
+    expect(() => s.setBorrowOptIn('P1', false)).toThrow(/switched off/)
+    const lobby = auctioning(1, off)
+    expect(() => lobby.updateSettings({ borrowLimitFrac: -1 })).toThrow(/borrowLimitFrac/)
+    lobby.updateSettings({ borrowingEnabled: true, borrowLimitFrac: null })
+    expect(lobby.state.config.market.borrowing).toEqual({ enabled: true, limitFrac: null })
+    lobby.updateSettings({ borrowLimitFrac: 0.75 })
+    expect(lobby.state.config.market.borrowing.limitFrac).toBe(0.75)
+  })
+})
+
+/** Next year's auction supply, the way the session sizes it. */
+function auctioningMechanismPool(s: Session): number {
+  const baselineYear = s.state.config.emissions.baselineYear
+  const total = s.state.players.reduce((a, p) => a + (p.emissions[baselineYear] ?? 0), 0)
+  return CAP_MECHANISMS.auctioning.poolFor(s.state.players, s.state.currentYear + 1, s.state.config, total)
+}
 
 describe('updateSettings validation & precision', () => {
   it('stores capReductionFactor at fine precision (0.97 must not round to 1.0)', () => {

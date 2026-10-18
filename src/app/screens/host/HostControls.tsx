@@ -113,6 +113,9 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
   const [capReduction, setCapReduction] = useState(String(config.capReductionFactor))
   const [abateCap, setAbateCap] = useState(String(config.abatementLifetimeCap))
   const [abateFee, setAbateFee] = useState(String(config.abatementFixedCost))
+  // Empty = no limit.
+  const limitText = (v: number | null) => (v === null ? '' : String(v))
+  const [borrowLimit, setBorrowLimit] = useState(limitText(config.borrowLimitFrac))
   const [busy, setBusy] = useState(false)
 
   // Compared by value, not identity: `config.benchmark` arrives over the wire, so JSON.parse
@@ -129,6 +132,7 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
     setCapReduction(String(config.capReductionFactor))
     setAbateCap(String(config.abatementLifetimeCap))
     setAbateFee(String(config.abatementFixedCost))
+    setBorrowLimit(limitText(config.borrowLimitFrac))
     setBenchmark(Object.fromEntries(Object.entries(config.benchmark).map(([k, v]) => [k, String(v)])))
     setHybridShare(
       Object.fromEntries(Object.entries(config.hybridFreeShare).map(([k, v]) => [k, String(v)])),
@@ -142,6 +146,7 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
     config.capReductionFactor,
     config.abatementLifetimeCap,
     config.abatementFixedCost,
+    config.borrowLimitFrac,
     benchmarkKey,
     hybridShareKey,
   ])
@@ -156,6 +161,7 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
       capReductionFactor: Number(capReduction),
       abatementLifetimeCap: Number(abateCap),
       abatementFixedCost: Number(abateFee),
+      borrowLimitFrac: borrowLimit.trim() === '' ? null : Number(borrowLimit),
       benchmark: Object.fromEntries(
         Object.entries(benchmark).map(([k, v]) => [k, Number(v)]),
       ),
@@ -256,6 +262,39 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
           {config.reserveEnabled ? 'on' : 'off'}
         </button>
       </div>
+      {/* Applies from the next settlement: a company short at year end may cover the gap from
+          next year's share, unfined, and owes it next year. */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs text-foreground">Borrowing</div>
+          <div className="text-[10px] text-muted-foreground font-mono">
+            cover a shortfall from next year&apos;s auction share (free allocation where there is no
+            auction) — no penalty, repaid next year
+          </div>
+        </div>
+        <button
+          onClick={() =>
+            void hostAction('host:updateSettings', { borrowingEnabled: !config.borrowingEnabled })
+          }
+          className={cn(
+            'shrink-0 text-[10px] font-mono uppercase tracking-wider border rounded-full px-3 py-1 transition-colors',
+            config.borrowingEnabled
+              ? 'text-primary border-primary/40 bg-primary/10'
+              : 'text-muted-foreground border-border',
+          )}
+        >
+          {config.borrowingEnabled ? 'on' : 'off'}
+        </button>
+      </div>
+      {config.borrowingEnabled &&
+        field(
+          'Borrowing limit (× next year\'s share)',
+          borrowLimit,
+          setBorrowLimit,
+          borrowLimit.trim() === ''
+            ? 'empty = no limit: any shortfall can be borrowed'
+            : `up to ${Math.round(Number(borrowLimit) * 100) || 0}% of next year's share`,
+        )}
       <div className="pt-1 mt-1 border-t border-border">
         <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-2">
           Benchmark free credits (benchmarking mode)

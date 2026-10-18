@@ -87,6 +87,21 @@ export interface MarketConfig {
   /** End-of-game carry monetization fallback, as a fraction of `penaltyRate`. */
   finalPriceFallbackFraction: number
   /**
+   * Borrowing: a company short at settlement may cover the shortfall from NEXT year's share
+   * instead of paying the fine on it. The share is its slice of next year's auction supply
+   * (by baseline) under a regime that runs an auction, and its next free allocation otherwise.
+   *
+   * Borrowed tonnes are not a gift: they carry into next year as debt exactly like any other
+   * shortfall — only the penalty is waived — and a debt still open when the game ends is
+   * settled at the final market price. Each company opts in or out every year; the option
+   * starts out selected.
+   */
+  borrowing: {
+    enabled: boolean
+    /** Most a company may borrow, as a fraction of that share. `null` = no limit. */
+    limitFrac: number | null
+  }
+  /**
    * How many of the PREVIOUS year's closing prints the next year's reference price averages
    * over, volume-weighted.
    *
@@ -471,6 +486,67 @@ export interface BotsConfig {
   maxStep: number
   /** Minimum price a bot will ever quote — the effective tick floor. */
   minPrice: number
+  /**
+   * The reference point of the bots' AUCTION bids — what they expect a tonne to trade at this
+   * round, before the round has a price of its own. A look back over the last rounds rather than
+   * the last close alone, plus a short trend:
+   *
+   *   reference = Σ weights[k] × price(round − 1 − k)  +  trend × (price(round − 1) − price(round − 2))
+   *
+   * A round's price is its closing price (`market.referenceTrades` last prints, volume-weighted),
+   * else its last trade, else its auction price. Before any round has a price — round 1 — it is
+   * the opening value `market.penaltyRate × openingReferenceFraction`, as before.
+   *
+   * Used for the auction only. Trading, the bots' price ceiling, the players' screen, the auction
+   * reserve and the RL agents' observation keep the plain previous close.
+   */
+  reference: {
+    /** Off = the plain previous close, as before. */
+    enabled: boolean
+    /** Weight of the last round, the one before, … (meant to add up to 1). */
+    weights: number[]
+    /** Weight on the last round-to-round change (used once two rounds have a price). */
+    trend: number
+    /**
+     * Rounds without a price yet (early in the game). `'renormalize'`: the weights are rescaled
+     * over the rounds that have one, so round 2 anchors to round 1's close. `'opening'`: they
+     * count at the opening value, which pulls the first rounds toward it.
+     */
+    missing: 'renormalize' | 'opening'
+  }
+  /**
+   * Every bot's auction bid is a SWEEP around the price it would otherwise have bid: `steps`
+   * steps one `spread` (σ, a fraction of that price) apart, centred on it, clipped to the bot's
+   * price range — the same total quantity, spread over the steps by `shape`. See
+   * server/bots/sweepShape.ts for why: the bid price is an estimate, and the quantity on each
+   * step is the probability that the step's price is the right one.
+   *
+   *   'normal'  skew-normal shares with mean 0, so the average price paid stays the bid price;
+   *             `skew` > 0 leaves a thin tail at higher prices (insurance: being short costs the
+   *             fine), < 0 a tail at lower prices (a bargain tranche)
+   *   'even'    the same quantity on every step
+   *
+   * One step, or a spread of 0, is the old single bid.
+   */
+  sweep: {
+    steps: number
+    shape: 'normal' | 'even'
+    /** One step's width (σ), as a fraction of the bid price, per bot type. */
+    spread: Record<BotType, number>
+    /** Skew-normal shape α per bot type: 0 symmetric, + insurance tail high, − bargain tail low. */
+    skew: Record<BotType, number>
+    /**
+     * Where the steps go, per bot type.
+     *   'centred'    around the bid price, the quantity shared by `shape`/`skew` (same total)
+     *   'coverFirst' the old bid stays whole as the top step; `bank` × that quantity more is bid
+     *                on the steps below it, a half-normal tail that thins out as the price falls —
+     *                a firm that must cover never wins less than before, and buys extra (banks)
+     *                only when the auction clears cheap
+     */
+    placement: Record<BotType, 'centred' | 'coverFirst'>
+    /** For 'coverFirst': the extra quantity bid below the old bid, as a fraction of it. */
+    bank: Record<BotType, number>
+  }
   /** Persistent personality price dispersion (σ), drawn once per bot. */
   sigma: Record<BotType, number>
   marketMaker: MarketMakerConfig

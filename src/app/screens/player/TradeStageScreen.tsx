@@ -13,8 +13,9 @@ import { motion } from 'motion/react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { abatementCost, marginalCost } from '@shared/engine/abatement'
-import type { OrderSide, PlayerSnapshot } from '@shared/types'
+import type { BorrowView, OrderSide, PlayerSnapshot } from '@shared/types'
 import { Button } from '../../components/ui/button'
+import { Checkbox } from '../../components/ui/checkbox'
 import { Input } from '../../components/ui/input'
 import { Slider } from '../../components/ui/slider'
 import { ComplianceStrip, Sparkline, StatCard } from '../../components/game/cards'
@@ -246,6 +247,8 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
         abateCost={coverByAbating}
         abateBlockedReason={abateBlockedReason}
       />
+
+      {snap.you.borrow && <BorrowOption borrow={snap.you.borrow} short={Math.max(0, gap)} />}
 
       {banked !== 0 && (
         <div
@@ -544,6 +547,44 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
 }
 
 /** A compact figure inside a card — the abatement panel's three-up readout. */
+/**
+ * "Use part of next year's share to cover a shortfall": selected by default every year. What is
+ * borrowed is not fined, but it is owed next year — the screen says so, or the option reads as
+ * free credits.
+ */
+function BorrowOption({ borrow, short }: { borrow: BorrowView; short: number }) {
+  const { setBorrow } = useGame()
+  const [busy, setBusy] = useState(false)
+  const share = borrow.basis === 'auction' ? "next year's auction share" : "next year's free allocation"
+  const toggle = async (on: boolean) => {
+    setBusy(true)
+    await setBorrow(on)
+    setBusy(false)
+  }
+  return (
+    <label className="rounded-xl border border-border bg-card/60 p-3 flex items-start gap-2.5 text-sm cursor-pointer">
+      <Checkbox
+        checked={borrow.optIn}
+        disabled={busy}
+        onCheckedChange={(v) => void toggle(v === true)}
+        className="mt-0.5"
+        aria-label="Borrow from next year's share"
+      />
+      <span className="flex flex-col gap-0.5">
+        <span>
+          Use part of {share} to cover a shortfall{' '}
+          <span className="text-muted-foreground">(no penalty)</span>
+        </span>
+        <span className="text-[11px] font-mono text-muted-foreground">
+          {borrow.room === null ? 'no limit' : `up to ${borrow.room.toLocaleString()} t`}
+          {short > 0 && borrow.optIn && borrow.room !== null && ` · covers ${Math.min(short, borrow.room).toLocaleString()} of your ${short.toLocaleString()} t gap`}
+          {' · '}what you borrow is owed next year: buy it back at the auction or in the market
+        </span>
+      </span>
+    </label>
+  )
+}
+
 function MiniStat({
   label,
   value,

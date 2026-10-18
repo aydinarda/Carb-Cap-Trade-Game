@@ -78,8 +78,16 @@ export interface ClientToServerEvents {
     payload: { roomCode: string; name: string; industry: Industry },
     ack: Ack<{ playerId: string; token: string; profile: PlayerProfile }>,
   ) => void
-  /** Cap stage (auctioning): sealed bid — quantity and max price per credit. */
-  'player:submitBid': (payload: { qty: number; price: number }, ack: Ack) => void
+  /**
+   * Cap stage (auctioning): sealed bid — one step ({ qty, price }: quantity and max price per
+   * credit) or a sweep of several ({ steps }).
+   */
+  'player:submitBid': (
+    payload: { qty?: number; price?: number; steps?: { qty: number; price: number }[] },
+    ack: Ack,
+  ) => void
+  /** Select or clear "cover a shortfall from next year's share" for this year. */
+  'player:setBorrow': (payload: { on: boolean }, ack: Ack) => void
   /** Trade stage: place a limit order (bid/ask) in the order book. */
   'player:placeOrder': (payload: { side: OrderSide; qty: number; price: number }, ack: Ack) => void
   /** Trade stage: cancel one of your resting orders. */

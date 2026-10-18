@@ -42,6 +42,8 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
      */
     openingReferenceFraction: 0.25,
     finalPriceFallbackFraction: 1,
+    // Up to the whole of next year's share, as EU-ETS allowed within a trading period.
+    borrowing: { enabled: true, limitFrac: 1 },
     // The last ten prints of the previous year — where the market closed, not its yearly mean.
     referenceTrades: 10,
   },
@@ -245,6 +247,29 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     seed: { marketMakerFrac: 0.18, speculatorFlat: 20, underAuction: false },
     maxStep: 40,
     minPrice: 0.5,
+    // The auction's reference point: 50% last round + 30% the one before + 20% the one before
+    // that + a tenth of the last change; early rounds use the weights of the rounds they have.
+    reference: { enabled: true, weights: [0.5, 0.3, 0.2], trend: 0.1, missing: 'renormalize' },
+    // Five steps, one σ apart, around each bot's bid (server/bots/sweepShape.ts).
+    //  - compliance, 'coverFirst': its old bid stays whole on top — a firm that must cover never
+    //    wins less than it did — and 10% more is bid on four steps 7.5% apart below it, thinning
+    //    out (55/24/13/8%): it banks a little when the auction is cheap. Measured over 30
+    //    simulated auctioning games, 10% keeps prices rising with the tightening cap as the single
+    //    bid did (round 6: 102 vs 116) with the auction a little nearer the market (21% vs 22%
+    //    apart; hybrid 20% vs 24%); 40% makes prices fall. A centred sweep instead made these
+    //    firms lose their low steps, end the round short, and bid the market to twice the fine.
+    //  - market makers σ 0.05, centred, skew +1: tight, they must win their book.
+    //  - speculators σ 0.12, centred, skew −2: a bargain tranche at lower prices.
+    //  - noise σ 0.15, centred, symmetric. For scale: the market lands ~22% (median) from the
+    //    auction reference.
+    sweep: {
+      steps: 5,
+      shape: 'normal',
+      spread: { compliance: 0.075, marketMaker: 0.05, speculator: 0.12, noise: 0.15 },
+      skew: { compliance: 2, marketMaker: 1, speculator: -2, noise: 0 },
+      placement: { compliance: 'coverFirst', marketMaker: 'centred', speculator: 'centred', noise: 'centred' },
+      bank: { compliance: 0.1, marketMaker: 0, speculator: 0, noise: 0 },
+    },
     sigma: { compliance: 0.05, marketMaker: 0.08, speculator: 0.12, noise: 0.2 },
     marketMaker: {
       minMargin: 2.5,

@@ -65,6 +65,47 @@ export function validateConfig(config: GameConfig): GameConfig {
   positive(config.allocation.auctionCapRatio, 'allocation.auctionCapRatio')
   positive(config.allocation.freeCreditRatio, 'allocation.freeCreditRatio')
 
+  // The bots' look-back reference: at least one round, every weight a non-negative number.
+  const ref = config.bots.reference
+  if (
+    !Array.isArray(ref.weights) || ref.weights.length === 0 || ref.weights.length > 10 ||
+    ref.weights.some((w) => !Number.isFinite(w) || w < 0)
+  ) {
+    throw new ConfigError('bots.reference.weights must be 1 to 10 non-negative numbers.')
+  }
+  if (!Number.isFinite(ref.trend)) throw new ConfigError('bots.reference.trend must be a number.')
+  if (ref.missing !== 'renormalize' && ref.missing !== 'opening') {
+    throw new ConfigError("bots.reference.missing must be 'renormalize' or 'opening'.")
+  }
+  // Bot sweeps: 1 to 5 steps (the auction's limit), and a spread that keeps every step positive.
+  const sweep = config.bots.sweep
+  if (!Number.isInteger(sweep.steps) || sweep.steps < 1 || sweep.steps > 5) {
+    throw new ConfigError('bots.sweep.steps must be a whole number from 1 to 5.')
+  }
+  for (const [type, spread] of Object.entries(sweep.spread)) {
+    if (!Number.isFinite(spread) || spread < 0 || spread * (sweep.steps - 1) / 2 >= 1) {
+      throw new ConfigError(`bots.sweep.spread.${type} must be ≥ 0 and keep the lowest step above 0.`)
+    }
+  }
+  if (sweep.shape !== 'normal' && sweep.shape !== 'even') {
+    throw new ConfigError("bots.sweep.shape must be 'normal' or 'even'.")
+  }
+  for (const [type, placement] of Object.entries(sweep.placement)) {
+    if (placement !== 'centred' && placement !== 'coverFirst') {
+      throw new ConfigError(`bots.sweep.placement.${type} must be 'centred' or 'coverFirst'.`)
+    }
+  }
+  for (const [type, bank] of Object.entries(sweep.bank)) {
+    if (!Number.isFinite(bank) || bank < 0 || bank > 2) {
+      throw new ConfigError(`bots.sweep.bank.${type} must be between 0 and 2.`)
+    }
+  }
+  for (const [type, skew] of Object.entries(sweep.skew)) {
+    if (!Number.isFinite(skew) || Math.abs(skew) > 10) {
+      throw new ConfigError(`bots.sweep.skew.${type} must be a number from −10 to 10.`)
+    }
+  }
+
   const lrf = config.allocation.capReductionFactor
   if (!Number.isFinite(lrf) || lrf <= 0 || lrf > 1) {
     throw new ConfigError('allocation.capReductionFactor must be in (0, 1].')

@@ -15,6 +15,10 @@ import { round1 } from './rng'
  * The penalty is a real EU-ETS fine, not a price ceiling: the uncovered shortfall
  * ALSO carries forward as a make-good debt (handled in the session), so defaulting
  * costs the fine now plus buying the missing allowances later.
+ *
+ * `borrowed` is the part of each shortfall covered from next year's share (see
+ * `MarketConfig.borrowing`): it carries forward exactly like the rest of the debt, but is not
+ * fined. Absent, nothing is borrowed and every uncovered tonne is fined, as before.
  */
 export function settleYear(
   realized: Record<string, number>,
@@ -23,6 +27,7 @@ export function settleYear(
   sellIncome: Record<string, number>,
   abatementCost: Record<string, number>,
   rates: { penaltyRate: number },
+  borrowed: Record<string, number> = {},
 ): {
   settlement: Record<string, PlayerSettlement>
 } {
@@ -32,7 +37,7 @@ export function settleYear(
     const abateCost = round1(abatementCost[id] ?? 0)
     const purchCost = round1(purchaseCost[id] ?? 0)
     const sellIncomeVal = round1(sellIncome[id] ?? 0)
-    const penaltyCost = round1(shortage * rates.penaltyRate)
+    const penaltyCost = round1(Math.max(0, shortage - (borrowed[id] ?? 0)) * rates.penaltyRate)
     settlement[id] = {
       shortage,
       abatementCost: abateCost,

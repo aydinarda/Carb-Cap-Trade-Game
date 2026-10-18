@@ -1,6 +1,7 @@
-import { Check, Gavel } from 'lucide-react'
+import { Check, Gavel, Plus, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import { bidSteps, MAX_SWEEP_STEPS, type AuctionStep } from '@shared/engine/auction'
 import type { PlayerSnapshot } from '@shared/types'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -24,29 +25,79 @@ function residualNeed(snap: PlayerSnapshot): number {
   return Math.max(0, Math.round(snap.you.plannedEmission - held))
 }
 
-/** Cap-stage auction: submit a sealed bid (quantity + max price). */
+/** The steps on screen when the panel opens: the bid already in, else one step for the residual need. */
+function initialSteps(snap: PlayerSnapshot): AuctionStep[] {
+  const committed = snap.you.auctionBid
+  if (committed) return bidSteps(committed).map((s) => ({ qty: s.qty, price: s.price }))
+  return [{ qty: residualNeed(snap), price: r1(snap.prevMarketPrice ?? 10) }]
+}
+
+/**
+ * The most a sweep can cost. Whatever the clearing price p turns out to be, the company wins
+ * the steps priced at p or above and pays p for each credit — so the worst case is the largest
+ * p × (quantity at or above p) over the step prices.
+ */
+function worstCase(steps: AuctionStep[]): { cost: number; at: number } {
+  let best = { cost: 0, at: 0 }
+  for (const s of steps) {
+    const qty = steps.filter((o) => o.price >= s.price).reduce((a, o) => a + o.qty, 0)
+    const cost = r1(qty * s.price)
+    if (cost > best.cost) best = { cost, at: s.price }
+  }
+  return best
+}
+
+const describeSteps = (steps: AuctionStep[]) =>
+  steps.map((s) => `${s.qty} cr at up to ${s.price}`).join(' · ')
+
+/**
+ * Cap-stage auction: submit a sealed bid — one step (quantity + max price), or a SWEEP of up
+ * to MAX_SWEEP_STEPS steps added with "+". Each step is ranked like a separate bid; every
+ * credit won is paid at the single clearing price.
+ */
 export function AuctionBidPanel({ snap }: { snap: PlayerSnapshot }) {
-  const { submitBid } = useGame()
+  const { submitBid, submitSweep } = useGame()
   const expected = snap.you.plannedEmission
   const committed = snap.you.auctionBid
   const cleared = snap.auctionPrice !== null
 
-  const priceAnchor = snap.prevMarketPrice ?? 10
-  const [qty, setQty] = useState<number>(committed?.qty ?? residualNeed(snap))
-  const [price, setPrice] = useState<number>(committed?.price ?? r1(priceAnchor))
+  const [steps, setSteps] = useState<AuctionStep[]>(() => initialSteps(snap))
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    setQty(snap.you.auctionBid?.qty ?? residualNeed(snap))
-    setPrice(snap.you.auctionBid?.price ?? r1(snap.prevMarketPrice ?? 10))
+    setSteps(initialSteps(snap))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap.currentYear])
 
+  const live = steps.filter((s) => s.qty > 0)
+  const total = r1(live.reduce((a, s) => a + s.qty, 0))
+  const worst = worstCase(live)
+
+  const setStep = (i: number, patch: Partial<AuctionStep>) =>
+    setSteps((all) => all.map((s, k) => (k === i ? { ...s, ...patch } : s)))
+  // A new step defaults to the same quantity at a lower price: the next slice of a demand curve.
+  const addStep = () =>
+    setSteps((all) => {
+      const last = all[all.length - 1] ?? { qty: residualNeed(snap), price: r1(snap.prevMarketPrice ?? 10) }
+      return [...all, { qty: last.qty, price: r1(last.price * 0.8) }]
+    })
+  const removeStep = (i: number) => setSteps((all) => all.filter((_, k) => k !== i))
+
   const submit = async () => {
+    if (live.length === 0) {
+      toast.error('Enter a quantity above zero for at least one step.')
+      return
+    }
     setBusy(true)
-    const ok = await submitBid(qty, price)
+    const ok = live.length === 1 ? await submitBid(live[0].qty, live[0].price) : await submitSweep(live)
     setBusy(false)
-    if (ok) toast.success(`Bid submitted: ${qty} credits at up to ${price} each`)
+    if (ok) {
+      toast.success(
+        live.length === 1
+          ? `Bid submitted: ${live[0].qty} credits at up to ${live[0].price} each`
+          : `Sweep submitted: ${live.length} steps, ${total} credits in total`,
+      )
+    }
   }
 
   // After the auction clears, show the outcome.
@@ -64,13 +115,28 @@ export function AuctionBidPanel({ snap }: { snap: PlayerSnapshot }) {
           <StatCard label="You won" value={award} unit="cr" tone={award > 0 ? 'good' : 'bad'} />
           <StatCard label="Cost" value={r1(award * clearing)} tone="bad" hint={`${award} × ${clearing}`} />
         </div>
-        {committed && (
+        {committed && bidSteps(committed).length === 1 && (
           <p className="text-[11px] text-muted-foreground font-mono mt-3">
             Your bid was {committed.qty} cr at up to {committed.price}.{' '}
             {committed.price >= clearing
               ? 'Won at the clearing price.'
               : 'Bid below clearing — not filled.'}
           </p>
+        )}
+        {committed && bidSteps(committed).length > 1 && (
+          <div className="mt-3 flex flex-col gap-0.5">
+            <p className="text-[11px] text-muted-foreground font-mono">Your sweep, step by step:</p>
+            {bidSteps(committed).map((step, i) => (
+              <p key={i} className="text-[11px] text-muted-foreground font-mono">
+                {step.qty} cr at up to {step.price} —{' '}
+                {step.price > clearing
+                  ? 'filled at the clearing price'
+                  : step.price === clearing
+                    ? 'the marginal step: filled in part, pro-rata'
+                    : 'below clearing — not filled'}
+              </p>
+            ))}
+          </div>
         )}
       </div>
     )
@@ -107,34 +173,76 @@ export function AuctionBidPanel({ snap }: { snap: PlayerSnapshot }) {
 
       <FlowHint steps={CAP_FLOW.auctioning} />
 
-      <div className="grid grid-cols-2 gap-4 mt-5">
-        <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-2 mt-5">
+        <div className="grid grid-cols-[1fr_1fr_2rem] gap-3">
           <label className="text-[10px] font-mono uppercase text-muted-foreground">Quantity (cr)</label>
-          <Input
-            type="number"
-            min={0}
-            step="0.1"
-            value={qty}
-            onChange={(e) => setQty(Math.max(0, Number(e.target.value)))}
-            className="font-mono text-right"
-          />
-        </div>
-        <div className="flex flex-col gap-1">
           <label className="text-[10px] font-mono uppercase text-muted-foreground">Max price / credit</label>
-          <Input
-            type="number"
-            min={0}
-            step="0.1"
-            value={price}
-            onChange={(e) => setPrice(Math.max(0, Number(e.target.value)))}
-            className="font-mono text-right"
-          />
+          <span />
         </div>
+        {steps.map((step, i) => (
+          <div key={i} className="grid grid-cols-[1fr_1fr_2rem] gap-3 items-center">
+            <Input
+              type="number"
+              min={0}
+              step="0.1"
+              value={step.qty}
+              aria-label={`Step ${i + 1} quantity`}
+              onChange={(e) => setStep(i, { qty: Math.max(0, Number(e.target.value)) })}
+              className="font-mono text-right"
+            />
+            <Input
+              type="number"
+              min={0}
+              step="0.1"
+              value={step.price}
+              aria-label={`Step ${i + 1} max price`}
+              onChange={(e) => setStep(i, { price: Math.max(0, Number(e.target.value)) })}
+              className="font-mono text-right"
+            />
+            {steps.length > 1 ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => removeStep(i)}
+                aria-label={`Remove step ${i + 1}`}
+                className="h-8 w-8"
+              >
+                <X size={14} />
+              </Button>
+            ) : (
+              <span />
+            )}
+          </div>
+        ))}
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={addStep}
+            disabled={steps.length >= MAX_SWEEP_STEPS}
+            className="font-mono text-xs"
+          >
+            <Plus size={12} /> Add step
+          </Button>
+          <span className="text-[11px] font-mono text-muted-foreground">
+            {steps.length > 1
+              ? `sweep · ${steps.length} of ${MAX_SWEEP_STEPS} steps`
+              : `add steps to bid a curve (up to ${MAX_SWEEP_STEPS})`}
+          </span>
+        </div>
+        {steps.length > 1 && (
+          <p className="text-[11px] text-muted-foreground leading-snug">
+            Each step is ranked like a separate bid. If the auction clears at price p, you win every
+            step priced at p or above and pay p for each credit.
+          </p>
+        )}
       </div>
 
       <div className="flex items-center justify-between mt-5">
         <span className="text-xs font-mono text-muted-foreground">
-          If fully won: up to {r1(qty * price).toLocaleString()} cost
+          {live.length > 1
+            ? `${total.toLocaleString()} cr in total · at most ${worst.cost.toLocaleString()} if it clears at ${worst.at}`
+            : `If fully won: up to ${worst.cost.toLocaleString()} cost`}
         </span>
         <Button onClick={() => void submit()} disabled={busy} className="font-bold">
           {committed ? (
@@ -148,7 +256,8 @@ export function AuctionBidPanel({ snap }: { snap: PlayerSnapshot }) {
       </div>
       {committed && (
         <p className="text-xs text-primary font-mono mt-2 flex items-center gap-1">
-          <Check size={12} /> Bid in — changeable until the instructor closes the auction.
+          <Check size={12} /> Bid in{bidSteps(committed).length > 1 ? ` (${describeSteps(bidSteps(committed))})` : ''} —
+          changeable until the instructor closes the auction.
         </p>
       )}
     </div>

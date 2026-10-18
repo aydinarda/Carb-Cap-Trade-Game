@@ -14,6 +14,10 @@ import { hostSnapshot } from '../views'
  * the shipped configuration. If a change here is intentional, re-record with `vitest -u` and
  * say so in the commit; if it is not, something moved that should not have.
  *
+ * Re-recorded when borrowing became the default: a shortfall is now covered from next year's
+ * share (up to 100% of it) instead of fined, so the `penaltyCost` figures below fell to 0 and the
+ * year and total costs with them. Nothing else moved.
+ *
  * Re-recorded again when the year-to-year reference price became the volume-weighted mean
  * of the previous year's last ten prints instead of its whole-year VWAP.
  *
@@ -137,18 +141,18 @@ describe('golden — grandfathering', () => {
         "regulatorGranted": {},
         "regulatorPool": 0,
         "score": {
-          "P1": 5287,
+          "P1": 5147,
           "P2": 0,
           "P3": 6594.4,
         },
         "settlement": {
           "P1": {
             "abatementCost": 5627,
-            "penaltyCost": 140,
+            "penaltyCost": 0,
             "purchaseCost": 0,
             "sellIncome": 480,
             "shortage": 1.4,
-            "yearCost": 5287,
+            "yearCost": 5147,
           },
           "P2": {
             "abatementCost": 0,
@@ -216,7 +220,7 @@ describe('golden — grandfathering', () => {
         "regulatorGranted": {},
         "regulatorPool": 0,
         "score": {
-          "P1": 11695.7,
+          "P1": 11555.7,
           "P2": 0,
           "P3": 19773.2,
         },
@@ -315,18 +319,18 @@ describe('golden — benchmarking', () => {
         "regulatorGranted": {},
         "regulatorPool": 0,
         "score": {
-          "P1": 7257,
+          "P1": 5147,
           "P2": 0,
-          "P3": 7364.4,
+          "P3": 6594.4,
         },
         "settlement": {
           "P1": {
             "abatementCost": 5627,
-            "penaltyCost": 2110,
+            "penaltyCost": 0,
             "purchaseCost": 0,
             "sellIncome": 480,
             "shortage": 21.1,
-            "yearCost": 7257,
+            "yearCost": 5147,
           },
           "P2": {
             "abatementCost": 0,
@@ -338,11 +342,11 @@ describe('golden — benchmarking', () => {
           },
           "P3": {
             "abatementCost": 6114.4,
-            "penaltyCost": 770,
+            "penaltyCost": 0,
             "purchaseCost": 480,
             "sellIncome": 0,
             "shortage": 7.7,
-            "yearCost": 7364.4,
+            "yearCost": 6594.4,
           },
         },
       }
@@ -394,9 +398,9 @@ describe('golden — benchmarking', () => {
         "regulatorGranted": {},
         "regulatorPool": 0,
         "score": {
-          "P1": 13665.7,
+          "P1": 11555.7,
           "P2": 0,
-          "P3": 24823.2,
+          "P3": 19773.2,
         },
         "settlement": {
           "P1": {
@@ -417,11 +421,11 @@ describe('golden — benchmarking', () => {
           },
           "P3": {
             "abatementCost": 12698.8,
-            "penaltyCost": 4280,
+            "penaltyCost": 0,
             "purchaseCost": 480,
             "sellIncome": 0,
             "shortage": 42.8,
-            "yearCost": 17458.8,
+            "yearCost": 13178.8,
           },
         },
       }
@@ -497,18 +501,18 @@ describe('golden — auctioning', () => {
         },
         "regulatorPool": 2205.9,
         "score": {
-          "P1": 69657,
+          "P1": 45647,
           "P2": 13500,
-          "P3": 58384.4,
+          "P3": 38094.4,
         },
         "settlement": {
           "P1": {
             "abatementCost": 5627,
-            "penaltyCost": 24010,
+            "penaltyCost": 0,
             "purchaseCost": 40500,
             "sellIncome": 480,
             "shortage": 240.1,
-            "yearCost": 69657,
+            "yearCost": 45647,
           },
           "P2": {
             "abatementCost": 0,
@@ -520,11 +524,11 @@ describe('golden — auctioning', () => {
           },
           "P3": {
             "abatementCost": 6114.4,
-            "penaltyCost": 20290,
+            "penaltyCost": 0,
             "purchaseCost": 31980,
             "sellIncome": 0,
             "shortage": 202.9,
-            "yearCost": 58384.4,
+            "yearCost": 38094.4,
           },
         },
       }
@@ -580,34 +584,34 @@ describe('golden — auctioning', () => {
         },
         "regulatorPool": 2128.7,
         "score": {
-          "P1": 163515.7,
-          "P2": 21270,
-          "P3": 150253.2,
+          "P1": 101555.7,
+          "P2": 13500,
+          "P3": 89773.2,
         },
         "settlement": {
           "P1": {
             "abatementCost": 6888.7,
-            "penaltyCost": 37950,
+            "penaltyCost": 0,
             "purchaseCost": 49500,
             "sellIncome": 480,
             "shortage": 379.5,
-            "yearCost": 93858.7,
+            "yearCost": 55908.7,
           },
           "P2": {
             "abatementCost": 0,
-            "penaltyCost": 7770,
+            "penaltyCost": 0,
             "purchaseCost": 0,
             "sellIncome": 0,
             "shortage": 77.7,
-            "yearCost": 7770,
+            "yearCost": 0,
           },
           "P3": {
             "abatementCost": 12698.8,
-            "penaltyCost": 40190,
+            "penaltyCost": 0,
             "purchaseCost": 38980,
             "sellIncome": 0,
             "shortage": 401.9,
-            "yearCost": 91868.8,
+            "yearCost": 51678.8,
           },
         },
       }
@@ -693,8 +697,8 @@ describe('golden — hybrid', () => {
         "regulatorPool": 1514.3,
         "score": {
           "P1": 54647,
-          "P2": 18880,
-          "P3": 50440.9,
+          "P2": 5140,
+          "P3": 40380.9,
         },
         "settlement": {
           "P1": {
@@ -707,19 +711,19 @@ describe('golden — hybrid', () => {
           },
           "P2": {
             "abatementCost": 0,
-            "penaltyCost": 18880,
+            "penaltyCost": 5140,
             "purchaseCost": 0,
             "sellIncome": 0,
             "shortage": 188.8,
-            "yearCost": 18880,
+            "yearCost": 5140,
           },
           "P3": {
             "abatementCost": 6114.4,
-            "penaltyCost": 10060,
+            "penaltyCost": 0,
             "purchaseCost": 34266.5,
             "sellIncome": 0,
             "shortage": 100.6,
-            "yearCost": 50440.9,
+            "yearCost": 40380.9,
           },
         },
       }
@@ -776,8 +780,8 @@ describe('golden — hybrid', () => {
         "regulatorPool": 1461.4,
         "score": {
           "P1": 110555.7,
-          "P2": 56650,
-          "P3": 120176.7,
+          "P2": 29650,
+          "P3": 84436.7,
         },
         "settlement": {
           "P1": {
@@ -790,19 +794,19 @@ describe('golden — hybrid', () => {
           },
           "P2": {
             "abatementCost": 0,
-            "penaltyCost": 37770,
+            "penaltyCost": 24510,
             "purchaseCost": 0,
             "sellIncome": 0,
             "shortage": 377.7,
-            "yearCost": 37770,
+            "yearCost": 24510,
           },
           "P3": {
             "abatementCost": 12698.8,
-            "penaltyCost": 25680,
+            "penaltyCost": 0,
             "purchaseCost": 31357,
             "sellIncome": 0,
             "shortage": 256.8,
-            "yearCost": 69735.8,
+            "yearCost": 44055.8,
           },
         },
       }

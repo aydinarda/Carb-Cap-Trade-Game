@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { clearAuction } from '../auction'
+import { createRng } from '../rng'
+import { clearAuction, type AuctionBid } from '../auction'
 
 describe('clearAuction (uniform-price, sealed-bid)', () => {
   it('fills highest bidders first; everyone pays the single clearing price', () => {
@@ -57,5 +58,52 @@ describe('clearAuction (uniform-price, sealed-bid)', () => {
       clearingPrice: 0,
       awarded: { A: 0 },
     })
+  })
+})
+
+describe('clearAuction — sweeps (several steps per company)', () => {
+  it('clears a one-step sweep exactly like the plain bid, on any book', () => {
+    const rng = createRng(7)
+    for (let trial = 0; trial < 300; trial++) {
+      const plain: Record<string, AuctionBid> = {}
+      const swept: Record<string, AuctionBid> = {}
+      for (let i = 0; i < 1 + rng.int(0, 6); i++) {
+        const bid = { qty: Math.round(rng.next() * 3000) / 10, price: Math.round(rng.next() * 500) / 10 }
+        plain[`P${i}`] = bid
+        swept[`P${i}`] = { ...bid, steps: [{ ...bid }] }
+      }
+      const supply = Math.round(rng.next() * 6000) / 10
+      const reserve = rng.next() < 0.5 ? 0 : Math.round(rng.next() * 300) / 10
+      expect(clearAuction(swept, supply, reserve)).toEqual(clearAuction(plain, supply, reserve))
+    }
+  })
+
+  it('ranks each step on its own and pays every credit the one clearing price', () => {
+    // supply 150. A sweeps 100@30 + 100@10, B bids 100@20. Ranked: A30, B20, A10 → the
+    // cumulative crosses 150 at B's step, so the price is 20; A's 10-step wins nothing.
+    const { clearingPrice, awarded } = clearAuction(
+      { A: { qty: 200, price: 30, steps: [{ qty: 100, price: 30 }, { qty: 100, price: 10 }] }, B: { qty: 100, price: 20 } },
+      150,
+    )
+    expect(clearingPrice).toBe(20)
+    expect(awarded).toEqual({ A: 100, B: 50 })
+  })
+
+  it('shares the marginal price pro-rata between a sweep step and a plain bid', () => {
+    // supply 150. A: 100@30 + 100@20, B: 100@20. Above 20: A's 100. At 20: 200 asked for
+    // the 50 left → a quarter each: A 100 + 25, B 25.
+    const { clearingPrice, awarded } = clearAuction(
+      { A: { qty: 200, price: 30, steps: [{ qty: 100, price: 30 }, { qty: 100, price: 20 }] }, B: { qty: 100, price: 20 } },
+      150,
+    )
+    expect(clearingPrice).toBe(20)
+    expect(awarded).toEqual({ A: 125, B: 25 })
+  })
+
+  it('fills every step when undersubscribed, at the lowest step price (or the reserve)', () => {
+    const book = { A: { qty: 60, price: 30, steps: [{ qty: 40, price: 30 }, { qty: 20, price: 12 }] }, B: { qty: 10, price: 18 } }
+    expect(clearAuction(book, 500)).toEqual({ clearingPrice: 12, awarded: { A: 60, B: 10 } })
+    // A step under the reserve wins nothing, exactly as a plain bid there would.
+    expect(clearAuction(book, 500, 15)).toEqual({ clearingPrice: 18, awarded: { A: 40, B: 10 } })
   })
 })

@@ -201,8 +201,12 @@ export function registerSockets(io: IO): Broadcaster {
       }
     }
 
-    socket.on('player:submitBid', ({ qty, price }, ack) =>
-      playerAction(ack, (s, pid) => s.submitBid(pid, Number(qty), Number(price))))
+    // One step ({ qty, price }) or a sweep ({ steps: [{ qty, price }, …] }).
+    socket.on('player:submitBid', ({ qty, price, steps }, ack) =>
+      playerAction(ack, (s, pid) =>
+        Array.isArray(steps) ? s.submitSweep(pid, steps) : s.submitBid(pid, Number(qty), Number(price))))
+    socket.on('player:setBorrow', ({ on }, ack) =>
+      playerAction(ack, (s, pid) => s.setBorrowOptIn(pid, on === true)))
     socket.on('player:placeOrder', ({ side, qty, price }, ack) =>
       playerAction(ack, (s, pid) => s.placeOrder(pid, side, Number(qty), Number(price))))
     socket.on('player:cancelOrder', ({ orderId }, ack) =>

@@ -1,9 +1,27 @@
 import { round1 } from './rng'
 
-export interface AuctionBid {
+/** One step of a bid: this many credits at up to this price each. */
+export interface AuctionStep {
   qty: number
   /** Max price the firm is willing to pay per credit. */
   price: number
+}
+
+/** Most steps a sweep may have — enough for a demand curve, few enough to read at a glance. */
+export const MAX_SWEEP_STEPS = 5
+
+/**
+ * A company's sealed bid. Usually one step; a SWEEP ("100 at up to 10, 100 more at up to 30")
+ * lists its steps in `steps`, and then `qty` and `price` summarise it — the total quantity and
+ * the highest step price — so everything that reads a bid as one number still reads it right.
+ */
+export interface AuctionBid extends AuctionStep {
+  steps?: AuctionStep[]
+}
+
+/** The steps a bid stands for: its sweep, or the bid itself. */
+export function bidSteps(bid: AuctionBid): AuctionStep[] {
+  return bid.steps?.length ? bid.steps : [bid]
 }
 
 /**
@@ -13,6 +31,10 @@ export interface AuctionBid {
  * winner pays that single clearing price. Bids at the marginal price share the
  * remaining supply pro-rata. If total demand ≤ supply, all bids win in full and
  * the clearing price is the lowest submitted bid.
+ *
+ * A sweep enters as its separate steps, ranked with everyone else's: a company wins every
+ * step priced above the clearing price in full, its marginal step pro-rata, and pays the one
+ * clearing price for all of it. A one-step bid clears exactly as it always did.
  */
 export function clearAuction(
   bids: Record<string, AuctionBid>,
@@ -32,9 +54,14 @@ export function clearAuction(
   const awarded: Record<string, number> = {}
   for (const id of Object.keys(bids)) awarded[id] = 0
 
-  const entries = Object.entries(bids)
+  const entries: [string, AuctionStep][] = Object.entries(bids)
+    .flatMap(([id, bid]) => bidSteps(bid).map((step): [string, AuctionStep] => [id, step]))
     .filter(([, b]) => b.qty > 0 && b.price > 0 && b.price >= reservePrice)
     .sort((a, b) => b[1].price - a[1].price)
+  // A company's award is the sum over its steps; with one step this is that step's award.
+  const add = (id: string, qty: number) => {
+    awarded[id] = round1(awarded[id] + round1(qty))
+  }
 
   if (entries.length === 0 || supply <= 0) return { clearingPrice: 0, awarded }
 
@@ -42,7 +69,7 @@ export function clearAuction(
   if (totalDemand <= supply) {
     // Undersubscribed: everyone who cleared the reserve is filled, and the price is the
     // reserve itself rather than whatever the least eager winner happened to offer.
-    for (const [id, b] of entries) awarded[id] = round1(b.qty)
+    for (const [id, b] of entries) add(id, b.qty)
     const lowest = entries[entries.length - 1][1].price
     return { clearingPrice: round1(Math.max(reservePrice, lowest)), awarded }
   }
@@ -68,9 +95,8 @@ export function clearAuction(
   const ratio = atMarginalQty > 0 ? Math.min(1, remainingForMarginal / atMarginalQty) : 0
 
   for (const [id, b] of entries) {
-    if (b.price > marginalPrice) awarded[id] = round1(b.qty)
-    else if (b.price === marginalPrice) awarded[id] = round1(b.qty * ratio)
-    else awarded[id] = 0
+    if (b.price > marginalPrice) add(id, b.qty)
+    else if (b.price === marginalPrice) add(id, b.qty * ratio)
   }
   return { clearingPrice: round1(Math.max(reservePrice, marginalPrice)), awarded }
 }

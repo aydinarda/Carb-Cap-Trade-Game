@@ -64,6 +64,10 @@ interface GameContextValue {
     payload?: Record<string, unknown>,
   ) => Promise<boolean>
   submitBid: (qty: number, price: number) => Promise<boolean>
+  /** A sweep: several (quantity, max price) steps, cleared by the same uniform-price auction. */
+  submitSweep: (steps: { qty: number; price: number }[]) => Promise<boolean>
+  /** Select or clear "cover a shortfall from next year's share" for this year. */
+  setBorrow: (on: boolean) => Promise<boolean>
   placeOrder: (side: OrderSide, qty: number, price: number) => Promise<boolean>
   cancelOrder: (orderId: string) => Promise<boolean>
   abate: (fraction: number) => Promise<boolean>
@@ -155,6 +159,9 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
     const submitBid = (qty: number, price: number) =>
       playerRequest('player:submitBid', { qty, price })
+    const submitSweep = (steps: { qty: number; price: number }[]) =>
+      playerRequest('player:submitBid', { steps })
+    const setBorrow = (on: boolean) => playerRequest('player:setBorrow', { on })
     const placeOrder = (side: OrderSide, qty: number, price: number) =>
       playerRequest('player:placeOrder', { side, qty, price })
     const cancelOrder = (orderId: string) => playerRequest('player:cancelOrder', { orderId })
@@ -177,6 +184,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
       createSession,
       hostAction,
       submitBid,
+      submitSweep,
+      setBorrow,
       placeOrder,
       cancelOrder,
       abate,
