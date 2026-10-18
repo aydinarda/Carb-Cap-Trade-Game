@@ -1,10 +1,10 @@
 import {
+  auctionReference,
   disperse,
   priceCeiling,
-  referencePrice,
   tryPlace,
   trySell,
-  trySubmitBid,
+  trySubmitSweep,
 } from './helpers'
 import type { BotCtx } from './types'
 
@@ -55,6 +55,6 @@ export function auction(ctx: BotCtx): boolean {
   const cfg = session.state.config.bots.speculator
   // Anchor to the discovered price (not a static 0.5·P) so the clearing tracks the
   // market year to year; disperse by personality so speculators don't tie.
-  const price = disperse(referencePrice(session), ctx.rt.bias ?? 0, P)
-  return trySubmitBid(session, bot.id, cfg.initialInventory, price)
+  const price = disperse(auctionReference(session), ctx.rt.bias ?? 0, P)
+  return trySubmitSweep(session, bot, cfg.initialInventory, price)
 }

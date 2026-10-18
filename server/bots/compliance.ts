@@ -5,6 +5,7 @@ import {
   type AbatementSpec,
 } from '../../shared/engine'
 import {
+  auctionReference,
   clamp,
   considerInstall,
   disperse,
@@ -15,7 +16,7 @@ import {
   syncQuote,
   tryPlace,
   trySell,
-  trySubmitBid,
+  trySubmitSweep,
 } from './helpers'
 import type { BotCtx } from './types'
 
@@ -161,7 +162,8 @@ export function auction(ctx: BotCtx): boolean {
   const record = session.currentYearRecord()
   if (!record) return false
   const P = priceCeiling(session)
-  const ref = referencePrice(session)
+  // The auction's own reference point (`bots.reference`), not the trading one.
+  const ref = auctionReference(session)
   // Whatever it invests in now arrives next year, so it buys against this year's planned
   // emissions in full. Capacity bought at the cap stage would still leave THIS year's
   // residual untouched, so the decision is left to the trade stage where the price is
@@ -209,5 +211,8 @@ export function auction(ctx: BotCtx): boolean {
   const floor = ref * (1 - band)
   const roof = Math.min(P, ref * (1 + band))
   const bid = clamp(Math.max(ref, reservation), floor, Math.max(floor, roof))
-  return trySubmitBid(session, bot.id, residual, disperse(bid, ctx.rt.bias ?? 0, P))
+  // The sweep never bids above the band's roof (upward steps fed a price spiral); below, its
+  // banking steps may go under the floor — buying extra only when the auction is cheap is the point.
+  const minPrice = session.state.config.bots.minPrice
+  return trySubmitSweep(session, bot, residual, disperse(bid, ctx.rt.bias ?? 0, P), [minPrice, Math.max(floor, roof)])
 }

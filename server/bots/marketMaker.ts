@@ -1,5 +1,6 @@
 import { buildMarketView, round1 } from '../../shared/engine'
 import {
+  auctionReference,
   clamp,
   disperse,
   priceCeiling,
@@ -8,7 +9,7 @@ import {
   syncQuote,
   tryPlace,
   trySell,
-  trySubmitBid,
+  trySubmitSweep,
 } from './helpers'
 import type { BotCtx } from './types'
 
@@ -163,11 +164,13 @@ export function auction(ctx: BotCtx): boolean {
   // Priced at a premium over the reference: the maker is buying a book to sell from, so it
   // has to outbid the emitters that only want to cover themselves. Bidding at or under the
   // reference loses every auction to a firm with a compliance obligation.
-  const ref = recentPrice(session, record, cfg.recentTrades)
+  // Nothing has traded yet this round, so `recentPrice` would only fall back to the plain
+  // reference: the auction's own reference point (`bots.reference`) instead.
+  const ref = auctionReference(session)
   const price = clamp(
     disperse(ref * (1 + cfg.auctionPremium), ctx.rt.bias ?? 0, P),
     minPrice,
     P,
   )
-  return trySubmitBid(session, bot.id, target, round1(price))
+  return trySubmitSweep(session, bot, target, round1(price))
 }

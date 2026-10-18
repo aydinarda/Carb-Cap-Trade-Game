@@ -1,13 +1,14 @@
 import { marginalCost, optimalAbatement } from '../../shared/engine'
 import {
   anchorValue,
+  auctionReference,
   clamp,
   considerInstall,
   priceCeiling,
   referencePrice,
   sellCapacity,
   syncQuote,
-  trySubmitBid,
+  trySubmitSweep,
 } from './helpers'
 import type { BotCtx } from './types'
 
@@ -78,12 +79,12 @@ export function auction(ctx: BotCtx): boolean {
   if (residual <= 0) return false
   // Still small and still a fixed lot — capped by what it actually needs.
   const qty = Math.min(cfg.size, residual)
-  // Anchored to the discovered price (an allowance's resale value), with noise.
-  const ref = referencePrice(session)
+  // Anchored to the auction's reference point (`bots.reference`), with noise.
+  const ref = auctionReference(session)
   const price = clamp(
     ref * (1 + (ctx.rt.bias ?? 0) + rng.uniform(-cfg.auctionJitter, cfg.auctionJitter)),
     minPrice,
     P,
   )
-  return trySubmitBid(session, bot.id, qty, price) // small auction buy
+  return trySubmitSweep(session, bot, qty, price) // small auction buy
 }

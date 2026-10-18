@@ -10,8 +10,10 @@ import * as compliance from '../bots/compliance'
 import * as marketMaker from '../bots/marketMaker'
 import * as noise from '../bots/noise'
 import * as speculator from '../bots/speculator'
-import { botAvgCost, disperse, priceCeiling, referencePrice, sellCapacity } from '../bots/helpers'
+import { auctionReference, botAvgCost, disperse, priceCeiling, referencePrice, sellCapacity, trySubmitSweep } from '../bots/helpers'
 import { Session } from '../session'
+import { bankWeights, sweepWeights } from '../bots/sweepShape'
+import type { DeepPartial, GameConfig } from '../../shared/config'
 import type { BotCtx, BotRuntime } from '../bots/types'
 
 const ARCHETYPES = { compliance, marketMaker, speculator, noise }
@@ -104,7 +106,10 @@ describe('bot archetypes — single tick', () => {
 
       const ctx = ctxFor(s, bot.id)
       arch.auction(ctx)
-      expect(s.currentYearRecord()!.auctionBid[bot.id]).toBeDefined()
+      const bid = s.currentYearRecord()!.auctionBid[bot.id]
+      expect(bid).toBeDefined()
+      // Every bot bids a five-step sweep around its price.
+      expect(bid.steps).toHaveLength(5)
 
       s.closeCapStage()
       s.openTrade()
@@ -545,5 +550,177 @@ describe('bot archetypes under benchmarking (no primary auction)', () => {
     const { penaltyRate, openingReferenceFraction } = s.state.config.market
     expect(bid!.price).toBeGreaterThan(penaltyRate * openingReferenceFraction)
     expect(bid!.price).toBeLessThanOrEqual(penaltyRate)
+  })
+})
+
+describe("bots' auction reference (bots.reference)", () => {
+  /**
+   * Plays one round per price (P1 sells P2 one tonne at it, so it is that round's closing
+   * price) and opens the next round — the reference is what bots see when a round opens.
+   */
+  const playRounds = (s: Session, prices: number[]) => {
+    s.startYear()
+    for (const price of prices) {
+      s.closeCapStage()
+      s.openTrade()
+      s.placeOrder('P1', 'sell', 1, price)
+      s.placeOrder('P2', 'buy', 1, price)
+      s.closeTrade()
+      s.advanceYear()
+    }
+    return s
+  }
+  const twoCompanies = (over?: DeepPartial<GameConfig>) => {
+    const s = new Session('grandfathering', 3, over)
+    s.addPlayer('Seller', 'Power & Utilities')
+    s.addPlayer('Buyer', 'Transport')
+    return s
+  }
+  const opening = { bots: { reference: { missing: 'opening' as const } } }
+
+  it('weighs the last three rounds 50/30/20 and adds a tenth of the last change', () => {
+    const s = playRounds(twoCompanies(), [10, 20, 40])
+    expect(auctionReference(s)).toBe(round1(0.5 * 40 + 0.3 * 20 + 0.2 * 10 + 0.1 * (40 - 20)))
+  })
+
+  it('opens at the opening value, then rescales the weights over the rounds it has', () => {
+    const fresh = twoCompanies()
+    fresh.startYear()
+    expect(auctionReference(fresh)).toBe(25) // round 1: nothing has traded, as before
+    // Round 2 anchors to round 1's close — not pulled toward the 25 placeholder.
+    expect(auctionReference(playRounds(twoCompanies(), [60]))).toBe(60)
+    // Round 3: the two weights it has, rescaled to add up to 1, plus the trend.
+    expect(auctionReference(playRounds(twoCompanies(), [10, 20]))).toBe(round1((0.5 * 20 + 0.3 * 10) / 0.8 + 0.1 * (20 - 10)))
+    // The other rule: missing rounds count at the opening value.
+    expect(auctionReference(playRounds(twoCompanies(opening), [60]))).toBe(round1(0.5 * 60 + 0.3 * 25 + 0.2 * 25 + 0.1 * (60 - 25)))
+  })
+
+  it('is editable, and off falls back to the plain previous close', () => {
+    const s = playRounds(twoCompanies({ bots: { reference: { weights: [1], trend: 0 } } }), [12, 30])
+    expect(auctionReference(s)).toBe(30)
+    const off = playRounds(twoCompanies({ bots: { reference: { enabled: false } } }), [12, 30])
+    expect(auctionReference(off)).toBe(off.openingReference())
+    expect(() => twoCompanies({ bots: { reference: { weights: [] } } })).toThrow(/bots.reference.weights/)
+    expect(() => twoCompanies({ bots: { reference: { missing: 'zero' as never } } })).toThrow(/bots.reference.missing/)
+  })
+
+  it('anchors the auction only: trading, the players\' screen and the reserve keep the plain close', () => {
+    // Two auctioning rounds at known closes, then look at round 3. The seller wins the whole
+    // auction each round, so it always has a tonne to sell.
+    const t = new Session('auctioning', 3)
+    t.addPlayer('Seller', 'Power & Utilities')
+    t.addPlayer('Buyer', 'Transport')
+    t.startYear()
+    for (const price of [20, 40]) {
+      t.submitBid('P1', t.currentYearRecord()!.regulatorPool, 30)
+      t.closeCapStage()
+      t.openTrade()
+      t.placeOrder('P1', 'sell', 1, price)
+      t.placeOrder('P2', 'buy', 1, price)
+      t.closeTrade()
+      t.advanceYear()
+    }
+    expect(auctionReference(t)).toBe(round1((0.5 * 40 + 0.3 * 20) / 0.8 + 0.1 * (40 - 20)))
+    expect(referencePrice(t)).toBe(t.openingReference())
+    expect(t.openingReference()).toBe(40)
+    expect(playerSnapshotPrev(t)).toBe(40)
+  })
+
+  it('gives the trading reference the round\'s own auction price once that clears', () => {
+    const s = new Session('auctioning', 3)
+    s.addPlayer('A', 'Power & Utilities')
+    s.startYear()
+    s.submitBid('P1', 100, 40)
+    s.closeCapStage()
+    expect(referencePrice(s)).toBe(s.currentYearRecord()!.auctionPrice)
+  })
+})
+
+/** What the players' screen shows as the previous round's price. */
+function playerSnapshotPrev(s: Session): number | null {
+  return s.previousMarketPrice()
+}
+
+describe('bot auction sweeps (bots.sweep)', () => {
+  const centred = { compliance: 'centred' as const }
+  const auctionWithBot = (over?: DeepPartial<GameConfig>) => {
+    const s = new Session('auctioning', 1, over)
+    const bot = s.addBot('compliance')
+    s.addPlayer('Human', 'Transport')
+    s.startYear()
+    return { s, bot }
+  }
+  const bidOf = (s: Session, id: string) => s.currentYearRecord()!.auctionBid[id]
+  const avgPrice = (steps: { qty: number; price: number }[]) =>
+    steps.reduce((a, st) => a + st.qty * st.price, 0) / steps.reduce((a, st) => a + st.qty, 0)
+  const total = (steps: { qty: number }[]) => round1(steps.reduce((a, st) => a + st.qty, 0))
+
+  it('centred: shares the quantity like a normal over five steps one σ apart, keeping total and average price', () => {
+    const { s, bot } = auctionWithBot({ bots: { sweep: { placement: centred, skew: { compliance: 0 } } } })
+    expect(trySubmitSweep(s, bot, 1000, 40)).toBe(true)
+    const bid = bidOf(s, bot.id)
+    // compliance σ 7.5%: 40 × (1 ± 0.075k), highest price first.
+    expect(bid.steps!.map((st) => st.price)).toEqual([46, 43, 40, 37, 34])
+    expect(bid.steps!.map((st) => st.qty)).toEqual([66.8, 241.7, 383, 241.7, 66.8]) // 6.7 / 24.2 / 38.3 / 24.2 / 6.7 %
+    expect(bid.qty).toBe(1000)
+    expect(avgPrice(bid.steps!)).toBeCloseTo(40, 6)
+  })
+
+  it('centred: leans with its skew without moving the average price', () => {
+    const { s, bot } = auctionWithBot({ bots: { sweep: { placement: centred } } }) // skew +2
+    trySubmitSweep(s, bot, 1000, 40)
+    const steps = bidOf(s, bot.id).steps!
+    expect(steps[0].qty).toBeGreaterThan(steps[4].qty) // the dearest step carries more than the cheapest
+    expect(total(steps)).toBe(1000)
+    expect(Math.abs(avgPrice(steps) - 40)).toBeLessThan(0.1)
+  })
+
+  it('cover first: keeps the old bid whole on top and banks 10% more on four cheaper steps', () => {
+    const { s, bot } = auctionWithBot() // compliance ships 'coverFirst', bank 0.1
+    trySubmitSweep(s, bot, 1000, 40)
+    const steps = bidOf(s, bot.id).steps!
+    expect(steps[0]).toEqual({ qty: 1000, price: 40 }) // the old single bid, untouched
+    expect(steps.slice(1).map((st) => st.price)).toEqual([37, 34, 31, 28])
+    expect(total(steps.slice(1))).toBeCloseTo(100, 0)
+    const extras = steps.slice(1).map((st) => st.qty)
+    expect(extras).toEqual([...extras].sort((a, b) => b - a)) // thinning out as the price falls
+    // So at any clearing price at or below the bid, it wins at least what the single bid did.
+    for (const p of [40, 35, 30, 25]) {
+      const won = steps.filter((st) => st.price >= p).reduce((a, st) => a + st.qty, 0)
+      expect(won).toBeGreaterThanOrEqual(1000)
+    }
+  })
+
+  it('mirrors for a negative skew, and spreads evenly with the even shape', () => {
+    expect(sweepWeights(5, 'normal', -2)).toEqual([...sweepWeights(5, 'normal', 2)].reverse().map((w) => expect.closeTo(w, 9)))
+    expect(sweepWeights(5, 'normal', 0).reduce((a, w) => a + w, 0)).toBeCloseTo(1, 9)
+    expect(bankWeights(5).reduce((a, w) => a + w, 0)).toBeCloseTo(1, 9)
+    const { s, bot } = auctionWithBot({ bots: { sweep: { placement: centred, shape: 'even' } } })
+    trySubmitSweep(s, bot, 100, 40)
+    expect(bidOf(s, bot.id).steps!.map((st) => st.qty)).toEqual([20, 20, 20, 20, 20])
+  })
+
+  it('never bids above the bot\'s range and merges steps that land together', () => {
+    const { s, bot } = auctionWithBot({ bots: { sweep: { placement: centred } } })
+    trySubmitSweep(s, bot, 50, 40, [0.5, 41])
+    const steps = bidOf(s, bot.id).steps!
+    expect(Math.max(...steps.map((st) => st.price))).toBe(41)
+    expect(steps).toHaveLength(4) // 43 and 46 both clip to 41 and merge
+    expect(total(steps)).toBe(50)
+  })
+
+  it('is a single bid with one step or no spread, and refuses settings it cannot honour', () => {
+    const one = auctionWithBot({ bots: { sweep: { steps: 1 } } })
+    trySubmitSweep(one.s, one.bot, 30, 40)
+    expect(bidOf(one.s, one.bot.id)).toEqual({ qty: 30, price: 40 })
+    const flat = auctionWithBot({ bots: { sweep: { spread: { compliance: 0 } } } })
+    trySubmitSweep(flat.s, flat.bot, 30, 40)
+    expect(bidOf(flat.s, flat.bot.id)).toEqual({ qty: 30, price: 40 })
+    expect(() => auctionWithBot({ bots: { sweep: { spread: { noise: 0.5 } } } })).toThrow(/bots.sweep.spread.noise/)
+    expect(() => auctionWithBot({ bots: { sweep: { steps: 6 } } })).toThrow(/bots.sweep.steps/)
+    expect(() => auctionWithBot({ bots: { sweep: { shape: 'flat' as never } } })).toThrow(/bots.sweep.shape/)
+    expect(() => auctionWithBot({ bots: { sweep: { skew: { noise: 50 } } } })).toThrow(/bots.sweep.skew.noise/)
+    expect(() => auctionWithBot({ bots: { sweep: { placement: { noise: 'up' as never } } } })).toThrow(/bots.sweep.placement.noise/)
+    expect(() => auctionWithBot({ bots: { sweep: { bank: { compliance: 3 } } } })).toThrow(/bots.sweep.bank.compliance/)
   })
 })
