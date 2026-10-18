@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { RlModelInfo } from '../../shared/types'
-import { featuresFor, RL_MODES, type RlMode } from './observe'
+import { featureSetOf, featuresFor, LATEST_FEATURE_SET, RL_MODES, type FeatureSet, type RlMode } from './observe'
 
 /**
  * Trained RL policies the host can put into a game, read from `server/rl/models/*.json`.
@@ -12,8 +12,9 @@ import { featuresFor, RL_MODES, type RlMode } from './observe'
  * was trained behind, so the server runs it with plain arithmetic: no Python, no ML runtime.
  *
  * A file is only offered when it is safe to run, and otherwise listed with the reason:
- *  - its feature list must match what `./observe.ts` builds for its mode, name for name,
- *    because this folder holds a COPY of the training code and the two can drift;
+ *  - its feature list must match what `./observe.ts` builds for its mode, name for name, in one
+ *    of the feature sets (1, or 2 with borrowing), because this folder holds a COPY of the
+ *    training code and the two can drift;
  *  - it must reproduce the reference actions Python computed when it was exported.
  */
 
@@ -49,6 +50,8 @@ export interface LoadedModel {
   /** The decision clock it was trained with. */
   everyMs: number
   decisionsPerWindow: number
+  /** The observation it was trained on; set 2 and later also make the borrowing choice. */
+  featureSet: FeatureSet
 }
 
 const ACTION_DIM = 4
@@ -154,13 +157,16 @@ export function modelFromFile(raw: unknown, fallbackId: string): LoadedModel {
     policy: null,
     everyMs: 0,
     decisionsPerWindow: 0,
+    featureSet: 1,
   })
 
   if (file.format !== 1) return refuse(`unsupported model file format ${String(file.format)}`)
   if (!mode) return refuse(`unknown mode "${String(file.mode)}"`)
 
-  const expected = featuresFor(mode).map((f) => f.name)
   const trained = Array.isArray(file.features) ? file.features : []
+  const featureSet = featureSetOf(mode, trained)
+  // Explain a mismatch against the set the file is closest to in size.
+  const expected = featuresFor(mode, featureSet ?? (trained.length > featuresFor(mode, 1).length ? LATEST_FEATURE_SET : 1)).map((f) => f.name)
   if (trained.length !== expected.length) {
     return refuse(
       `trained on ${trained.length} observation features, but this server builds ${expected.length} for ${mode}`,
@@ -205,6 +211,7 @@ export function modelFromFile(raw: unknown, fallbackId: string): LoadedModel {
     policy,
     everyMs: every * 1000,
     decisionsPerWindow: Math.max(1, Math.floor(round / every + 1e-9)),
+    featureSet: featureSet as FeatureSet,
   }
 }
 

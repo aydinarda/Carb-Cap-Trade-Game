@@ -5,7 +5,7 @@ import { playerSnapshot } from '../views'
 import { apply, decode } from './act'
 import { createMemory, remember, type Memory } from './memory'
 import { getModel, listModels, type LoadedModel, type Policy } from './models'
-import { observe, type RlMode, type StepKind } from './observe'
+import { observe, type FeatureSet, type RlMode, type StepKind } from './observe'
 
 /**
  * Plays the RL agents a host added in the lobby.
@@ -64,6 +64,8 @@ interface Agent {
   policy: Policy
   everyMs: number
   decisionsPerWindow: number
+  /** The observation its model was trained on; set 2 and later make the borrowing choice too. */
+  featureSet: FeatureSet
   memory: Memory
   capSeen: { year: number; at: number } | null
   bidYear: number | null
@@ -232,6 +234,7 @@ export class RlAgentManager {
     agent.policy = model.policy as Policy
     agent.everyMs = model.everyMs
     agent.decisionsPerWindow = model.decisionsPerWindow
+    agent.featureSet = model.featureSet
     agent.player.agentModel = model.info.id
   }
 
@@ -283,8 +286,9 @@ export class RlAgentManager {
     const snap = playerSnapshot(session, agent.player.id)
     // Exactly as in training: fold this snapshot into memory, then observe it.
     remember(agent.memory, snap)
-    const obs = observe(snap, agent.memory, agent.mode, kind)
-    const intent = decode(agent.policy.act(obs.vector), snap, kind)
+    const obs = observe(snap, agent.memory, agent.mode, kind, agent.featureSet)
+    // A model trained before borrowing leaves it selected, as bots do; a later one chooses.
+    const intent = decode(agent.policy.act(obs.vector), snap, kind, undefined, agent.featureSet >= 2 ? 'action' : 'always')
     const { rejected } = apply(session, agent.player.id, intent)
     if (rejected) agent.stats.refused += 1
     if (kind === 'bid') agent.stats.bids += 1

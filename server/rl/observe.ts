@@ -29,9 +29,9 @@ import { MEMORY_YEARS, type Memory } from './memory'
  * Normalisers: P = penalty rate, B = the company's baseline emission, C = the class's.
  */
 
-export type RlMode = 'benchmarking' | 'auctioning' | 'hybrid'
+export type RlMode = 'grandfathering' | 'benchmarking' | 'auctioning' | 'hybrid'
 /** Every mode the agent can be trained in — each one its own model. */
-export const RL_MODES: RlMode[] = ['benchmarking', 'auctioning', 'hybrid']
+export const RL_MODES: RlMode[] = ['grandfathering', 'benchmarking', 'auctioning', 'hybrid']
 export type StepKind = 'bid' | 'trade' | 'abate'
 
 export interface Feature {
@@ -41,7 +41,21 @@ export interface Feature {
   source: string
   /** Omitted when the feature exists in every mode. */
   modes?: RlMode[]
+  /** The feature set that added it; omitted = 1, the set every shipped model was trained on. */
+  since?: FeatureSet
 }
+
+/**
+ * Observation versions. A model file lists the features it was trained on, so a server knows
+ * which set to build for it; a set only ever APPENDS to the one before, so every older model
+ * keeps working unchanged.
+ *
+ *   1  everything up to borrowing — the shipped hybrid models and the first versions
+ *   2  + borrowing: whether it is on, the room, and whether the company has it selected
+ */
+export type FeatureSet = 1 | 2
+export const FEATURE_SETS: FeatureSet[] = [1, 2]
+export const LATEST_FEATURE_SET: FeatureSet = 2
 
 export interface Cell {
   value: number
@@ -76,6 +90,9 @@ const VALUE_LIMIT = 1e6
 // cap — so every feature that belongs to either one belongs to it too.
 const AUCTION: RlMode[] = ['auctioning', 'hybrid']
 const BENCH: RlMode[] = ['benchmarking', 'hybrid']
+// Every regime that hands out free credits — by emission history (grandfathering) or by sector
+// benchmark. The benchmark numbers themselves stay BENCH: grandfathering has none to show.
+const FREE: RlMode[] = ['grandfathering', 'benchmarking', 'hybrid']
 
 const SLUG: Record<Industry, string> = {
   'Power & Utilities': 'power',
@@ -98,8 +115,8 @@ export function eventFeatureName(key: AnnouncementKey, fact: string): string {
 
 function buildFeatures(): Feature[] {
   const out: Feature[] = []
-  const add = (group: string, name: string, source: string, modes?: RlMode[]) =>
-    out.push({ group, name, source, modes })
+  const add = (group: string, name: string, source: string, modes?: RlMode[], since?: FeatureSet) =>
+    out.push({ group, name, source, modes, ...(since ? { since } : {}) })
 
   add('step', 'step_bid', 'env: sealed-bid decision', AUCTION)
   add('step', 'step_trade', 'env: buy/sell decision')
@@ -123,7 +140,7 @@ function buildFeatures(): Feature[] {
   add('position', 'banked', 'you.banked')
   add('position', 'credits_held', 'you.creditsHeld')
   add('position', 'has_held', 'you.creditsHeld shown')
-  add('position', 'free_alloc', 'you.freeAllocation', BENCH)
+  add('position', 'free_alloc', 'you.freeAllocation', FREE)
   add('position', 'gap', 'planned − (held ?? free + banked + award)')
   add('position', 'bid_qty', 'you.auctionBid.qty', AUCTION)
   add('position', 'bid_price', 'you.auctionBid.price', AUCTION)
@@ -191,9 +208,9 @@ function buildFeatures(): Feature[] {
   add('class', 'class_expected', 'classAggregate.totalExpected')
   add('class', 'reserve_pot', 'classAggregate.reservePot')
   add('class', 'reserve_released', 'classAggregate.reserveReleased')
-  add('class', 'class_free', 'classAggregate.totalFreeAllocation', BENCH)
+  add('class', 'class_free', 'classAggregate.totalFreeAllocation', FREE)
   for (const i of INDUSTRY_NAMES) {
-    add('class', `sector_alloc_${SLUG[i]}`, 'classAggregate.industryBreakdown[].allocated', BENCH)
+    add('class', `sector_alloc_${SLUG[i]}`, 'classAggregate.industryBreakdown[].allocated', FREE)
   }
   add('class', 'class_last_realized_vs_cap', 'yearHistory, last year: realized / cap')
   add('class', 'cap_trend', 'yearHistory: last cap / first cap')
@@ -234,20 +251,43 @@ function buildFeatures(): Feature[] {
   add('memory', 'price_change_last_decision', 'market.lastPrice − price at the previous decision')
   add('memory', 'ev_rates_seen_rounds', 'rounds the rate-cut headline has been on screen')
 
+  // Set 2 — borrowing from next year's share. Appended, so set 1 keeps its exact order.
+  add('borrow', 'borrow_on', 'you.borrow: borrowing available to this company', undefined, 2)
+  add('borrow', 'borrow_room', 'you.borrow.room / baseline (no limit = 3)', undefined, 2)
+  add('borrow', 'borrow_unlimited', 'you.borrow.room === null', undefined, 2)
+  add('borrow', 'borrow_opted', 'you.borrow.optIn: the option is selected', undefined, 2)
+
   return out
 }
 
 export const FEATURES: Feature[] = buildFeatures()
 
-const BY_MODE: Record<RlMode, Feature[]> = {
-  benchmarking: FEATURES.filter((f) => !f.modes || f.modes.includes('benchmarking')),
-  auctioning: FEATURES.filter((f) => !f.modes || f.modes.includes('auctioning')),
-  hybrid: FEATURES.filter((f) => !f.modes || f.modes.includes('hybrid')),
+const inMode = (mode: RlMode, set: FeatureSet) => (f: Feature) =>
+  (!f.modes || f.modes.includes(mode)) && (f.since ?? 1) <= set
+const BY_MODE = Object.fromEntries(
+  FEATURE_SETS.map((set) => [
+    set,
+    {
+      grandfathering: FEATURES.filter(inMode('grandfathering', set)),
+      benchmarking: FEATURES.filter(inMode('benchmarking', set)),
+      auctioning: FEATURES.filter(inMode('auctioning', set)),
+      hybrid: FEATURES.filter(inMode('hybrid', set)),
+    },
+  ]),
+) as Record<FeatureSet, Record<RlMode, Feature[]>>
+
+/** The features one mode's model sees, in vector order — set 1 unless a later one is asked for. */
+export function featuresFor(mode: RlMode, set: FeatureSet = 1): Feature[] {
+  return BY_MODE[set][mode]
 }
 
-/** The features one mode's model sees, in vector order. */
-export function featuresFor(mode: RlMode): Feature[] {
-  return BY_MODE[mode]
+/** Which feature set a model trained on these feature names uses; null if none matches. */
+export function featureSetOf(mode: RlMode, names: readonly string[]): FeatureSet | null {
+  for (const set of FEATURE_SETS) {
+    const want = featuresFor(mode, set)
+    if (want.length === names.length && want.every((f, i) => f.name === names[i])) return set
+  }
+  return null
 }
 
 /** Credits in hand as the screen presents them — before the reveal, the parts that are shown. */
@@ -333,6 +373,11 @@ export function computeFeatures(snap: PlayerSnapshot, mem: Memory, step: StepKin
   put('bid_qty', div(you.auctionBid?.qty, B), you.auctionBid?.qty)
   put('bid_price', div(you.auctionBid?.price, P), you.auctionBid?.price)
   put('auction_award', div(you.auctionAward, B), you.auctionAward)
+  const borrow = you.borrow ?? null
+  bit('borrow_on', borrow !== null)
+  put('borrow_room', borrow === null ? 0 : borrow.room === null ? 3 : clip(borrow.room / B, 0, 3), borrow?.room)
+  bit('borrow_unlimited', borrow !== null && borrow.room === null)
+  bit('borrow_opted', borrow?.optIn === true)
   const history = Object.keys(you.emissions)
     .map(Number)
     .filter((y) => y < year)
@@ -533,9 +578,9 @@ export function computeFeatures(snap: PlayerSnapshot, mem: Memory, step: StepKin
 }
 
 /** One mode's observation vector, in `featuresFor(mode)` order, with the raw values alongside. */
-export function observe(snap: PlayerSnapshot, mem: Memory, mode: RlMode, step: StepKind): Observation {
+export function observe(snap: PlayerSnapshot, mem: Memory, mode: RlMode, step: StepKind, set: FeatureSet = 1): Observation {
   const cells = computeFeatures(snap, mem, step)
-  const rows = featuresFor(mode).map((feature) => {
+  const rows = featuresFor(mode, set).map((feature) => {
     const cell = cells.get(feature.name)
     if (!cell) throw new Error(`rl/observe: feature "${feature.name}" is listed but never computed`)
     return { feature, raw: cell.raw, value: cell.value }
