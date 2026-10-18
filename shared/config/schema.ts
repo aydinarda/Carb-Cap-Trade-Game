@@ -606,6 +606,17 @@ export interface BotsConfig {
      * still visible in where it lands.
      */
     auctionBandFrac: number
+    /**
+     * How much harder a firm bids in the market for every tonne it carried in short from last
+     * round, relative to this round's planned emission: its buy price is
+     *
+     *   reservation × (1 + debtPush × carried shortfall / planned emission)
+     *
+     * capped at the bots' price ceiling. A firm that rolled a debt into this round owes those
+     * tonnes on top of this year's — its plain reservation (the cost of cutting the tonne itself,
+     * which only arrives next year) underprices them. 0 = no push.
+     */
+    debtPush: number
   }
   /**
    * Corrections to bot behaviour, each off by default so the shipped game is unchanged and

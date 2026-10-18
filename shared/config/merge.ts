@@ -77,6 +77,10 @@ export function validateConfig(config: GameConfig): GameConfig {
   if (ref.missing !== 'renormalize' && ref.missing !== 'opening') {
     throw new ConfigError("bots.reference.missing must be 'renormalize' or 'opening'.")
   }
+  const push = config.bots.compliance.debtPush
+  if (!Number.isFinite(push) || push < 0 || push > 10) {
+    throw new ConfigError('bots.compliance.debtPush must be between 0 and 10.')
+  }
   // Bot sweeps: 1 to 5 steps (the auction's limit), and a spread that keeps every step positive.
   const sweep = config.bots.sweep
   if (!Number.isInteger(sweep.steps) || sweep.steps < 1 || sweep.steps > 5) {

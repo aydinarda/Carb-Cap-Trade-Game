@@ -724,3 +724,44 @@ describe('bot auction sweeps (bots.sweep)', () => {
     expect(() => auctionWithBot({ bots: { sweep: { bank: { compliance: 3 } } } })).toThrow(/bots.sweep.bank.compliance/)
   })
 })
+
+describe('compliance pushes its market bids by the shortfall it carried in (bots.compliance.debtPush)', () => {
+  const firm = (over?: DeepPartial<GameConfig>) => {
+    const s = new Session('grandfathering', 5, over)
+    const bot = s.addBot('compliance')
+    s.addPlayer('Human', 'Transport')
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    return { s, bot }
+  }
+
+  it('scales the reservation by 1 + debtPush × carried shortfall / planned emission, capped at the ceiling', () => {
+    const { s, bot } = firm()
+    const rec = s.currentYearRecord()!
+    rec.carriedIn[bot.id] = -500
+    expect(compliance.debtPushed(s, bot.id, 40, 1000, 200)).toBe(60) // half a year's emission carried: 1.5×
+    expect(compliance.debtPushed(s, bot.id, 150, 1000, 200)).toBe(200) // never past the ceiling
+    rec.carriedIn[bot.id] = 120 // a surplus carried in pushes nothing
+    expect(compliance.debtPushed(s, bot.id, 40, 1000, 200)).toBe(40)
+    const off = firm({ bots: { compliance: { debtPush: 0 } } })
+    off.s.currentYearRecord()!.carriedIn[off.bot.id] = -500
+    expect(compliance.debtPushed(off.s, off.bot.id, 40, 1000, 200)).toBe(40)
+    expect(() => firm({ bots: { compliance: { debtPush: -1 } } })).toThrow(/debtPush/)
+  })
+
+  it('rests a higher buy order in the market when it carried a shortfall in', () => {
+    const bidOf = (debtPush: number) => {
+      const { s, bot } = firm({ bots: { compliance: { debtPush } } })
+      const rec = s.currentYearRecord()!
+      rec.carriedIn[bot.id] = -round1(s.plannedEmission(bot.id) * 0.4)
+      compliance.trade({ ...ctxFor(s, bot.id), market: buildMarketView(rec.orders, rec.trades) })
+      const order = rec.orders.find((o) => o.playerId === bot.id && o.side === 'buy' && o.status === 'open')
+      return order?.price ?? null
+    }
+    const plain = bidOf(0)
+    const pushed = bidOf(1)
+    expect(plain).not.toBeNull()
+    expect(pushed!).toBeGreaterThan(plain!)
+  })
+})

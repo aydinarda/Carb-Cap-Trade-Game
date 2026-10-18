@@ -307,7 +307,8 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       sizeJitter: 0.5,
     },
     // minTradeSize is TONNES and does not scale with money; priceStep is money.
-    compliance: { minTradeSize: 0.5, priceStep: 0.5, coverTarget: 1.1, auctionBandFrac: 0.15 },
+    // debtPush 1: bid in proportion — a carried shortfall of half this year's emission bids 1.5×.
+    compliance: { minTradeSize: 0.5, priceStep: 0.5, coverTarget: 1.1, auctionBandFrac: 0.15, debtPush: 1 },
     fixes: {
       noiseAbatement: false,
       // ON. `reservationPrice` returns the ceiling outright at rCover >= 1, and under

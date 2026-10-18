@@ -18,6 +18,7 @@ import {
   trySell,
   trySubmitSweep,
 } from './helpers'
+import type { Session } from '../session'
 import type { BotCtx } from './types'
 
 /**
@@ -129,11 +130,14 @@ export function trade(ctx: BotCtx): boolean {
     // read every early-round firm as unable to cut, hence value the marginal tonne at the
     // fine, and hand the opening rounds the flat near-penalty price the per-round cap was
     // introduced to break.
-    const reservation = reservationPrice(
+    const base = reservationPrice(
       planned, held, coeff, P,
       session.state.config.bots.fixes.complianceReservation,
       session.lifetimeCapFor(bot.id),
     )
+    // A shortfall carried in from last round is owed on top of this year's: bid harder in
+    // proportion to it (`compliance.debtPush`). See `debtPushed`.
+    const reservation = debtPushed(session, bot.id, base, planned, P)
     const reservationB = disperse(reservation, ctx.rt.bias ?? 0, P)
     if (mv.bestAsk !== null && mv.bestAsk < reservation) {
       return tryPlace(session, bot.id, 'buy', need, mv.bestAsk) // lift a cheap ask
@@ -155,6 +159,18 @@ export function trade(ctx: BotCtx): boolean {
     )
   }
   return false
+}
+
+/**
+ * The market buy price of a firm that carried a shortfall in from last round: its reservation
+ * × (1 + debtPush × carried shortfall / this round's planned emission), capped at the ceiling.
+ * With nothing carried in — or a surplus — it is the plain reservation.
+ */
+export function debtPushed(session: Session, botId: string, reservation: number, planned: number, ceiling: number): number {
+  const push = session.state.config.bots.compliance.debtPush
+  const carried = session.currentYearRecord()?.carriedIn[botId] ?? 0
+  if (!(push > 0) || carried >= 0 || !(planned > 0)) return reservation
+  return Math.min(ceiling, reservation * (1 + (push * -carried) / planned))
 }
 
 export function auction(ctx: BotCtx): boolean {
