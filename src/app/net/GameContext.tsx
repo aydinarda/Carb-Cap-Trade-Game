@@ -15,6 +15,7 @@ import {
   loadIdentity,
   resetSocket,
   saveIdentity,
+  watchTarget,
   type AppSocket,
 } from './socket'
 
@@ -72,6 +73,8 @@ interface GameContextValue {
   cancelOrder: (orderId: string) => Promise<boolean>
   abate: (fraction: number) => Promise<boolean>
   leave: () => void
+  /** The company being watched on the read-only watch page; null when playing or hosting. */
+  watching: string | null
 }
 
 const GameContext = createContext<GameContextValue | null>(null)
@@ -99,15 +102,19 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
   // A stored identity whose session is gone (e.g. server restarted) never
   // receives a snapshot — fall back to a fresh join instead of hanging.
+  const watching = watchTarget()
+
   useEffect(() => {
-    if (!connected || !hasIdentity || snapshot !== null) return
+    // Never on the watch page: the identity there is the host tab's, and clearing it would log
+    // the host out of the game it is running.
+    if (watching || !connected || !hasIdentity || snapshot !== null) return
     const timer = setTimeout(() => {
       clearIdentity()
       setHasIdentity(false)
       toast.info('Your previous session is no longer available.')
     }, 4000)
     return () => clearTimeout(timer)
-  }, [connected, hasIdentity, snapshot])
+  }, [connected, hasIdentity, snapshot, watching])
 
   const value = useMemo<GameContextValue>(() => {
     const joinAsPlayer = async (roomCode: string, name: string, industry: Industry) => {
@@ -174,6 +181,35 @@ export function GameProvider({ children }: { children: ReactNode }) {
       resetSocket()
     }
 
+    if (watching) {
+      // Read only: nothing on this page acts, and nothing touches the stored host identity.
+      const readOnly = async () => {
+        toast.info('Read only — you are watching this company')
+        return false
+      }
+      const refuse = async () => {
+        throw new Error('Read only — you are watching this company')
+      }
+      return {
+        connected,
+        resuming: snapshot === null,
+        snapshot,
+        playerSnapshot: snapshot?.role === 'player' ? snapshot : null,
+        hostSnapshot: null,
+        joinAsPlayer: refuse,
+        createSession: refuse,
+        hostAction: readOnly,
+        submitBid: readOnly,
+        submitSweep: readOnly,
+        setBorrow: readOnly,
+        placeOrder: readOnly,
+        cancelOrder: readOnly,
+        abate: readOnly,
+        leave: () => window.close(),
+        watching,
+      }
+    }
+
     return {
       connected,
       resuming: hasIdentity && snapshot === null,
@@ -190,8 +226,9 @@ export function GameProvider({ children }: { children: ReactNode }) {
       cancelOrder,
       abate,
       leave,
+      watching: null,
     }
-  }, [connected, snapshot, hasIdentity])
+  }, [connected, snapshot, hasIdentity, watching])
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>
 }

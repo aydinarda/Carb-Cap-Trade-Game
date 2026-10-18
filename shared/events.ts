@@ -111,4 +111,9 @@ export interface SocketAuth {
   role?: 'player' | 'host'
   roomCode?: string
   token?: string
+  /**
+   * With a HOST token: watch this player's screen instead of the host's — read only. The socket
+   * receives that player's snapshots and may not act, as the player or as the host.
+   */
+  watch?: string
 }

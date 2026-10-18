@@ -329,6 +329,15 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                           <ConnectionDot connected={p.connected} />
                         )}
                         <span className="font-bold">{p.id}</span> {p.name}
+                        <a
+                          href={`/watch?player=${p.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Watch this company's own screen in a new tab (read only)"
+                          className="text-muted-foreground hover:text-accent transition-colors"
+                        >
+                          <Eye size={12} />
+                        </a>
                       </span>
                     </td>
                     <td className="py-2 pr-3">

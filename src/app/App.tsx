@@ -10,6 +10,8 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/host" element={<HostRoute />} />
+          {/* A company's own screen, read only, for the host (opened from the per-company table). */}
+          <Route path="/watch" element={<PlayerRoute />} />
           <Route path="*" element={<PlayerRoute />} />
         </Routes>
       </BrowserRouter>

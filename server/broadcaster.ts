@@ -7,7 +7,8 @@ import { hostSnapshot, playerSnapshot } from './views'
 export type IO = Server<ClientToServerEvents, ServerToClientEvents>
 
 export type AppSocket = Socket<ClientToServerEvents, ServerToClientEvents> & {
-  data: { role?: 'player' | 'host'; roomCode?: string; playerId?: string }
+  /** `watcher`: the host watching one player's screen (`watchId`), read only. */
+  data: { role?: 'player' | 'host' | 'watcher'; roomCode?: string; playerId?: string; watchId?: string }
 }
 
 /** Membership room. Kept for `io.socketsLeave` and as a stable socket.io-side grouping. */
@@ -140,6 +141,12 @@ export class Broadcaster {
   ) {
     if (socket.data.role === 'host') {
       socket.emit('session:snapshot', host ?? hostSnapshot(session))
+    } else if (socket.data.role === 'watcher') {
+      // Exactly what that player's own screen gets. It has no playerId, so every player action
+      // from it is refused, and it is not the host, so every host action is too.
+      if (socket.data.watchId && session.getPlayer(socket.data.watchId)) {
+        socket.emit('session:snapshot', playerSnapshot(session, socket.data.watchId))
+      }
     } else if (socket.data.playerId && session.getPlayer(socket.data.playerId)) {
       socket.emit('session:snapshot', playerSnapshot(session, socket.data.playerId))
     }

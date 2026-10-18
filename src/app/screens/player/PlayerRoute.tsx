@@ -1,4 +1,4 @@
-import { LogOut, ShieldAlert, ShieldCheck, User, WifiOff } from 'lucide-react'
+import { Eye, LogOut, ShieldAlert, ShieldCheck, User, WifiOff } from 'lucide-react'
 import type { PlayerSnapshot } from '@shared/types'
 import { useGame } from '../../net/GameContext'
 import { AnnouncementsPanel, PhaseBadge } from '../../components/game/cards'
@@ -11,7 +11,18 @@ import { TradeStageScreen } from './TradeStageScreen'
 import { YearSummaryScreen } from './YearSummaryScreen'
 
 export function PlayerRoute() {
-  const { playerSnapshot, resuming, connected, leave } = useGame()
+  const { playerSnapshot, resuming, connected, leave, watching } = useGame()
+
+  if (!playerSnapshot && watching) {
+    // Never the join screen here: joining would overwrite the host identity this page uses.
+    return (
+      <CenteredShell>
+        <p className="text-muted-foreground text-sm font-mono animate-pulse">
+          Connecting to {watching}… — open this page from the host screen of a running game.
+        </p>
+      </CenteredShell>
+    )
+  }
 
   if (!playerSnapshot) {
     if (resuming) {
@@ -81,13 +92,19 @@ export function PlayerRoute() {
               <User size={12} />
               {snap.you.name}
             </span>
-            <button
-              onClick={leave}
-              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive transition-colors font-mono"
-              title="Leave session"
-            >
-              <LogOut size={12} />
-            </button>
+            {watching ? (
+              <span className="flex items-center gap-1.5 text-xs font-mono text-accent border border-accent/40 bg-accent/10 rounded-full px-2 py-0.5">
+                <Eye size={12} /> watching — read only
+              </span>
+            ) : (
+              <button
+                onClick={leave}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive transition-colors font-mono"
+                title="Leave session"
+              >
+                <LogOut size={12} />
+              </button>
+            )}
           </div>
         </header>
         {/* Above the body, in every phase. A subsidy starting in two rounds changes what a

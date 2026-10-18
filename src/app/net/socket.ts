@@ -29,6 +29,16 @@ export function clearIdentity() {
   localStorage.removeItem(STORAGE_KEY)
 }
 
+/**
+ * On the read-only watch page (`/watch?player=P3`, opened from the host screen), the company
+ * being watched; null everywhere else. The page connects with the HOST identity stored by the
+ * host tab, so it must never change or clear that identity.
+ */
+export function watchTarget(): string | null {
+  if (typeof window === 'undefined' || window.location.pathname !== '/watch') return null
+  return new URLSearchParams(window.location.search).get('player')
+}
+
 let socket: AppSocket | null = null
 
 /**
@@ -61,6 +71,13 @@ function initialTransports(): ('websocket' | 'polling')[] {
  */
 function buildAuth(): SocketAuth {
   const identity = loadIdentity()
+  const watch = watchTarget()
+  if (watch) {
+    // Watching only works for the host of the room; anyone else gets no state at all.
+    return identity?.role === 'host'
+      ? { role: 'host', roomCode: identity.roomCode, token: identity.token, watch }
+      : {}
+  }
   return identity
     ? { role: identity.role, roomCode: identity.roomCode, token: identity.token }
     : {}

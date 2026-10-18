@@ -56,8 +56,14 @@ export function registerSockets(io: IO): Broadcaster {
       if (auth.role === 'host') {
         const session = store.findByHostToken(auth.token)
         if (session) {
-          appSocket.data.role = 'host'
           appSocket.data.roomCode = session.state.roomCode
+          // The host watching one player's screen (e.g. a bot's): that player's view, read only.
+          if (typeof auth.watch === 'string' && session.getPlayer(auth.watch)) {
+            appSocket.data.role = 'watcher'
+            appSocket.data.watchId = auth.watch
+          } else {
+            appSocket.data.role = 'host'
+          }
         }
       } else {
         const found = store.findByPlayerToken(auth.token)
