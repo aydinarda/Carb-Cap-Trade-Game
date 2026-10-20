@@ -185,6 +185,11 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
               ? `cover or pay ${penaltyRate}/t — the tonne is still owed after the fine`
               : 'banks into next year'
           }
+          footer={
+            snap.you.borrow ? (
+              <BorrowToggle borrow={snap.you.borrow} short={Math.max(0, gap)} penaltyRate={penaltyRate} />
+            ) : undefined
+          }
         />
         <StatCard
           label="Market price"
@@ -247,8 +252,6 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
         abateCost={coverByAbating}
         abateBlockedReason={abateBlockedReason}
       />
-
-      {snap.you.borrow && <BorrowOption borrow={snap.you.borrow} short={Math.max(0, gap)} />}
 
       {banked !== 0 && (
         <div
@@ -548,40 +551,55 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
 
 /** A compact figure inside a card — the abatement panel's three-up readout. */
 /**
- * "Use part of next year's share to cover a shortfall": selected by default every year. What is
- * borrowed is not fined, but it is owed next year — the screen says so, or the option reads as
- * free credits.
+ * "Borrow from next year's share", inside the gap card it answers to. Selected by default every
+ * year. It lights up while the company is short — green when it is covering the gap, amber when
+ * it is switched off and the gap goes to the fine — and sits quietly when there is nothing to
+ * cover. What is borrowed is not fined but owed next year; the line under it says so, or the
+ * option reads as free credits.
  */
-function BorrowOption({ borrow, short }: { borrow: BorrowView; short: number }) {
+function BorrowToggle({ borrow, short, penaltyRate }: { borrow: BorrowView; short: number; penaltyRate: number }) {
   const { setBorrow } = useGame()
   const [busy, setBusy] = useState(false)
-  const share = borrow.basis === 'auction' ? "next year's auction share" : "next year's free allocation"
+  const share = borrow.basis === 'auction' ? 'auction share' : 'free allocation'
   const toggle = async (on: boolean) => {
     setBusy(true)
     await setBorrow(on)
     setBusy(false)
   }
+  const room = borrow.room === null ? 'no limit' : `up to ${borrow.room.toLocaleString()} t`
+  const covers = borrow.room === null ? short : Math.min(short, borrow.room)
+  const detail =
+    short <= 0
+      ? `${room}, no penalty · owed next year`
+      : borrow.optIn
+        ? `covers ${covers.toLocaleString()} of your ${short.toLocaleString()} t gap · owed next year`
+        : `off — the gap is fined at ${penaltyRate}/t`
+  const glow = borrow.optIn ? 'rgba(99,244,91,0.45)' : 'rgba(255,179,26,0.45)'
   return (
-    <label className="rounded-xl border border-border bg-card/60 p-3 flex items-start gap-2.5 text-sm cursor-pointer">
+    <motion.label
+      className={cn(
+        'rounded-lg border px-2.5 py-2 flex items-start gap-2 cursor-pointer transition-colors',
+        short > 0
+          ? borrow.optIn
+            ? 'border-primary/50 bg-primary/10'
+            : 'border-accent/50 bg-accent/10'
+          : 'border-border/50 bg-transparent opacity-70',
+      )}
+      animate={short > 0 ? { boxShadow: [`0 0 0 0 ${glow}`, '0 0 0 8px rgba(0,0,0,0)'] } : { boxShadow: '0 0 0 0 rgba(0,0,0,0)' }}
+      transition={short > 0 ? { duration: 1.6, repeat: Infinity, ease: 'easeOut' } : { duration: 0.2 }}
+    >
       <Checkbox
         checked={borrow.optIn}
         disabled={busy}
         onCheckedChange={(v) => void toggle(v === true)}
         className="mt-0.5"
-        aria-label="Borrow from next year's share"
+        aria-label={`Borrow from next year's ${share}`}
       />
-      <span className="flex flex-col gap-0.5">
-        <span>
-          Use part of {share} to cover a shortfall{' '}
-          <span className="text-muted-foreground">(no penalty)</span>
-        </span>
-        <span className="text-[11px] font-mono text-muted-foreground">
-          {borrow.room === null ? 'no limit' : `up to ${borrow.room.toLocaleString()} t`}
-          {short > 0 && borrow.optIn && borrow.room !== null && ` · covers ${Math.min(short, borrow.room).toLocaleString()} of your ${short.toLocaleString()} t gap`}
-          {' · '}what you borrow is owed next year: buy it back at the auction or in the market
-        </span>
+      <span className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-xs text-foreground leading-snug">Borrow from next year&apos;s {share}</span>
+        <span className="text-[10px] font-mono text-muted-foreground leading-snug">{detail}</span>
       </span>
-    </label>
+    </motion.label>
   )
 }
 

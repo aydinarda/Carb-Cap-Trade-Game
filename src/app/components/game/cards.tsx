@@ -91,6 +91,7 @@ export function StatCard({
   hintTone,
   aside,
   emphasis = false,
+  footer,
 }: {
   label: string
   value: string | number
@@ -110,6 +111,8 @@ export function StatCard({
   aside?: ReactNode
   /** Tints the card's border and background with the tone, for the cards that lead a screen. */
   emphasis?: boolean
+  /** A control that belongs to this number, under a hairline at the bottom of the card. */
+  footer?: ReactNode
 }) {
   return (
     <div
@@ -145,6 +148,7 @@ export function StatCard({
           {hint}
         </span>
       )}
+      {footer && <div className="mt-2 pt-2 border-t border-border/60">{footer}</div>}
     </div>
   )
 }
