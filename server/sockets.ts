@@ -150,6 +150,14 @@ export function registerSockets(io: IO): Broadcaster {
       hostAction(broadcaster, socket, ack, (s) => s.advanceYear()))
     socket.on('host:endGame', (_p, ack) =>
       hostAction(broadcaster, socket, ack, (s) => s.endGame()))
+    // Only the host acts on the screening list: penalise (take back credits above the cap and
+    // release them to the market) or clear.
+    socket.on('host:screeningPenalize', ({ playerId }, ack) =>
+      hostAction(broadcaster, socket, ack, (s) => {
+        s.screeningPenalize(String(playerId))
+      }))
+    socket.on('host:screeningClear', ({ playerId }, ack) =>
+      hostAction(broadcaster, socket, ack, (s) => s.screeningClear(String(playerId))))
     socket.on('host:kickPlayer', ({ playerId }, ack) =>
       hostAction(broadcaster, socket, ack, (s) => s.kickPlayer(playerId)))
     socket.on('host:addBots', ({ botType, count }, ack) =>

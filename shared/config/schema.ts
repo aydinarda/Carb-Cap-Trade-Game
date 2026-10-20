@@ -23,6 +23,40 @@ export interface GameConfig {
   abatement: AbatementConfig
   scoring: ScoringConfig
   bots: BotsConfig
+  screening: ScreeningConfig
+}
+
+/**
+ * Market-cornering screening (shared/engine/screening.ts). At every round's close the engine
+ * flags companies that both concentrated supply and exploited it; they go on the instructor's
+ * list and are told they are under screening. Only the instructor can act on it.
+ */
+export interface ScreeningConfig {
+  enabled: boolean
+  /** Auction award above this × what it still had to cover counts as concentration. */
+  overNeed: number
+  /** An auction award below this share of the supply is never "concentrated". */
+  minAuctionShare: number
+  /** This share of the auction supply or more counts as concentration. */
+  auctionShare: number
+  /** This share of the credits in circulation (and > overNeed × its emission) counts too. */
+  heldShare: number
+  /** Reselling this share of what it acquired or more… */
+  resaleShare: number
+  /** …at this multiple of the reference or more counts as exploitation. */
+  resaleMarkup: number
+  /** Making this share of the round's sales or more… */
+  sellerShare: number
+  /** …while the price runs to this multiple of the reference counts too. */
+  spike: number
+  /** Rounds a company stays on the list after the last round it was flagged in. */
+  holdRounds: number
+  /**
+   * A penalty takes back what it holds above this × its planned emission, and the regulator
+   * offers it to the market at the lowest of the round's auction price, its recent prints and
+   * last round's close (never above the fine) — a price the cornering cannot have pushed up.
+   */
+  keepMultiple: number
 }
 
 /**

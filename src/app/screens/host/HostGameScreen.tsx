@@ -6,6 +6,7 @@ import {
   EyeOff,
   Flag,
   Landmark,
+  ScanSearch,
   SkipForward,
   Trophy,
 } from 'lucide-react'
@@ -291,6 +292,8 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
         </div>
       </div>
 
+      {snap.config.screeningEnabled && <ScreeningPanel snap={snap} />}
+
       {/* Per-player table (off by default: projector-friendly) */}
       <div className="rounded-xl border border-border bg-card/70 p-5">
         <button
@@ -484,6 +487,81 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
       )}
 
       <PlayerHistoryDialog snap={snap} playerId={historyId} onClose={() => setHistoryId(null)} />
+    </div>
+  )
+}
+
+/**
+ * The regulator's market-cornering screening list. The engine flags; only the instructor acts:
+ * Penalize takes back what the company holds above the cap and offers it to the market at a fair
+ * price (trade window only, so it can be bought); Clear takes it off the list.
+ */
+function ScreeningPanel({ snap }: { snap: HostSnapshot }) {
+  const { hostAction } = useGame()
+  const [busy, setBusy] = useState<string | null>(null)
+  const act = async (event: 'host:screeningPenalize' | 'host:screeningClear', playerId: string) => {
+    setBusy(playerId)
+    await hostAction(event, { playerId })
+    setBusy(null)
+  }
+  const active = snap.screening.filter((r) => r.active).length
+  return (
+    <div className="rounded-xl border border-accent/30 bg-card/70 p-5">
+      <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-muted-foreground mb-3">
+        <ScanSearch size={13} className="text-accent" />
+        Market screening · {active} under screening
+      </div>
+      {snap.screening.length === 0 ? (
+        <p className="text-xs text-muted-foreground font-mono">
+          No company flagged yet. A company is flagged at a round&apos;s close when it both took far more than it
+          needs (or a large share of the supply) and resold it dear or drove the price up. Market makers are exempt.
+        </p>
+      ) : (
+        <div className="flex flex-col divide-y divide-border">
+          {snap.screening.map((r) => (
+            <div key={r.id} className={cn('py-3 flex flex-wrap items-start justify-between gap-3', !r.active && 'opacity-60')}>
+              <div className="flex flex-col gap-1 min-w-0">
+                <span className="text-sm font-mono">
+                  <span className="font-bold">{r.id}</span> {r.name}{' '}
+                  <span className="text-xs text-muted-foreground">
+                    · {r.kind} · flagged {r.flaggedRounds}× · last Y{r.lastFlaggedYear} ·{' '}
+                    {r.status === 'cleared' ? 'cleared' : r.active ? (r.status === 'penalized' ? 'penalized' : 'under screening') : 'expired'}
+                    {r.penalized > 0 && ` · ${r.penalized.toLocaleString()} t taken back`}
+                  </span>
+                </span>
+                <ul className="list-disc pl-5 text-xs text-muted-foreground">
+                  {r.reasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+              {r.active && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy === r.id || snap.phase !== 'trade' || r.takeable <= 0}
+                    title={
+                      snap.phase !== 'trade'
+                        ? 'Only while the market is open, so the credits can be sold back'
+                        : r.takeable <= 0
+                          ? 'It holds nothing above the cap right now'
+                          : `Take back ${r.takeable.toLocaleString()} t and offer them to the market`
+                    }
+                    onClick={() => void act('host:screeningPenalize', r.id)}
+                    className="font-mono text-xs border-destructive/50 text-destructive hover:bg-destructive/10"
+                  >
+                    Penalize{snap.phase === 'trade' && r.takeable > 0 ? ` · ${r.takeable.toLocaleString()} t` : ''}
+                  </Button>
+                  <Button size="sm" variant="ghost" disabled={busy === r.id} onClick={() => void act('host:screeningClear', r.id)} className="font-mono text-xs">
+                    Clear
+                  </Button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

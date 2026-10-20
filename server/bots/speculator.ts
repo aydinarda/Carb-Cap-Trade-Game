@@ -51,6 +51,8 @@ export function auction(ctx: BotCtx): boolean {
   const { session, bot } = ctx
   const record = session.currentYearRecord()
   if (!record || record.year !== session.state.config.emissions.firstGameYear) return false
+  // Under screening a trader stays out of the auction altogether.
+  if (session.isUnderScreening(bot.id)) return false
   const P = priceCeiling(session)
   const cfg = session.state.config.bots.speculator
   // Anchor to the discovered price (not a static 0.5·P) so the clearing tracks the

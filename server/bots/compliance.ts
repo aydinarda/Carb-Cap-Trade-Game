@@ -116,7 +116,9 @@ export function trade(ctx: BotCtx): boolean {
   // the market during the year. It is not churn — the sell branch below only lifts bids above
   // `fair` or rests an ask above it, so the firm parts with the buffer at a profit or not at
   // all.
-  const buyTo = round1(planned * cfg.coverTarget - held)
+  // Under screening it buys what it needs and no buffer on top.
+  const coverTarget = session.isUnderScreening(bot.id) ? 1 : cfg.coverTarget
+  const buyTo = round1(planned * coverTarget - held)
   const sellFrom = round1(planned - held)
   const need = buyTo > cfg.minTradeSize ? buyTo : sellFrom
 
@@ -189,7 +191,8 @@ export function auction(ctx: BotCtx): boolean {
   const held = session.creditsHeld(bot.id)
   // Same buffer as the trade stage: bidding the bare residual is what made these firms
   // structurally incapable of ever holding a surplus.
-  const residual = round1(planned * cfg.coverTarget - held)
+  // Under screening it bids for what it needs and no buffer on top.
+  const residual = round1(planned * (session.isUnderScreening(bot.id) ? 1 : cfg.coverTarget) - held)
   if (residual <= 0) return false
   // Bid what the tonne is WORTH TO THIS FIRM, not what the market last paid.
   //

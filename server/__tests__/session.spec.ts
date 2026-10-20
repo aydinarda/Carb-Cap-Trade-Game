@@ -4,6 +4,7 @@ import { DEFAULT_GAME_CONFIG, resolveConfig, type DeepPartial, type GameConfig }
 const FIRST_GAME_YEAR = DEFAULT_GAME_CONFIG.emissions.firstGameYear
 import { CAP_MECHANISMS, clearAuction, cumulativeCapFactor, installCost, round1 } from '../../shared/engine'
 import { GameError, Session, SessionStore } from '../session'
+import { SCREENING_ID } from '../../shared/constants'
 import { hostSnapshot, playerSnapshot } from '../views'
 
 // Session is fully drivable without sockets; a numeric seed makes emission
@@ -772,6 +773,102 @@ function auctioningMechanismPool(s: Session): number {
   const total = s.state.players.reduce((a, p) => a + (p.emissions[baselineYear] ?? 0), 0)
   return CAP_MECHANISMS.auctioning.poolFor(s.state.players, s.state.currentYear + 1, s.state.config, total)
 }
+
+describe('market-cornering screening (only the host acts on it)', () => {
+  /**
+   * Year 1: Bob (Transport, small) wins 90% of the auction — far more than he needs — and resells
+   * 600 t to Alice at twice the clearing price. Flagged at the close.
+   */
+  const cornered = (over?: DeepPartial<GameConfig>) => {
+    const s = auctioning(1, over)
+    s.startYear()
+    const pool = s.currentYearRecord()!.regulatorPool
+    s.submitBid('P2', round1(pool * 0.9), 30)
+    s.submitBid('P1', round1(pool * 0.1), 30)
+    s.closeCapStage()
+    s.openTrade()
+    const price = round1(s.currentYearRecord()!.auctionPrice! * 2)
+    s.placeOrder('P2', 'sell', 600, price)
+    s.placeOrder('P1', 'buy', 600, price)
+    s.closeTrade()
+    return s
+  }
+
+  it('flags the cornering company at the close, tells it why, and lists it for the host', () => {
+    const s = cornered()
+    expect(s.isUnderScreening('P2')).toBe(true)
+    expect(s.isUnderScreening('P1')).toBe(false)
+    const notice = playerSnapshot(s, 'P2').you.screening!
+    expect(notice.reasons.join(' ')).toMatch(/auction supply/)
+    expect(notice.reasons.join(' ')).toMatch(/resold 600 t/)
+    expect(playerSnapshot(s, 'P1').you.screening).toBeNull()
+    const row = hostSnapshot(s).screening[0]
+    expect(row).toMatchObject({ id: 'P2', active: true, status: 'watch', flaggedRounds: 1 })
+  })
+
+  it('lets the host penalize during the trade window: credits above 1.3× need are taken and offered back', () => {
+    const s = cornered()
+    s.advanceYear()
+    const pool = s.currentYearRecord()!.regulatorPool
+    s.submitBid('P2', round1(pool * 0.9), 300) // corners again, so it holds far above the cap
+    s.closeCapStage()
+    expect(() => s.screeningPenalize('P2')).toThrow(/phase/i) // not before the market opens
+    s.openTrade()
+    const held = s.creditsHeld('P2')
+    const takeable = s.screeningTakeable('P2')
+    expect(takeable).toBeCloseTo(round1(held - 1.3 * s.plannedEmission('P2')), 1)
+    const { qty, price } = s.screeningPenalize('P2')
+    expect(qty).toBe(takeable)
+    expect(s.creditsHeld('P2')).toBeCloseTo(round1(held - qty), 1)
+    const rec = s.currentYearRecord()!
+    // Bob bid alone at 300, so the auction price is his own: the release is at the lowest fair
+    // price instead — here last round's close.
+    expect(rec.auctionPrice).toBe(300)
+    expect(price).toBe(Math.min(rec.auctionPrice!, s.previousMarketPrice()!, s.state.config.market.penaltyRate))
+    expect(price).toBeLessThan(rec.auctionPrice!)
+    const ask = rec.orders.find((o) => o.playerId === SCREENING_ID && o.status === 'open')
+    expect(ask).toMatchObject({ side: 'sell', remaining: qty, price })
+    expect(s.state.screening.P2.status).toBe('penalized')
+    expect(playerSnapshot(s, 'P2').you.screening!.penalized).toBe(qty)
+    // Someone buys it back: counted as the screening release, not as new supply.
+    s.placeOrder('P1', 'buy', 10, price)
+    expect(rec.screeningReleased).toBe(10)
+    expect(rec.reserveReleased).toBe(0)
+    expect(() => s.screeningPenalize('P1')).toThrow(/not under screening/)
+  })
+
+  it('refuses a penalty with nothing above the cap, and the host can clear', () => {
+    const s = cornered()
+    s.advanceYear()
+    s.closeCapStage()
+    s.openTrade()
+    // Bob sells everything he carried in, so nothing is left above the cap.
+    const carried = s.creditsHeld('P2')
+    s.placeOrder('P2', 'sell', carried, 40)
+    s.placeOrder('P1', 'buy', carried, 40)
+    expect(s.screeningTakeable('P2')).toBe(0)
+    expect(() => s.screeningPenalize('P2')).toThrow(/nothing to take back/)
+    s.screeningClear('P2')
+    expect(s.isUnderScreening('P2')).toBe(false)
+    expect(playerSnapshot(s, 'P2').you.screening).toBeNull()
+  })
+
+  it('expires after holdRounds clean rounds, and does nothing when switched off', () => {
+    const s = cornered()
+    s.advanceYear() // 1 round after the flag: still on the list
+    expect(s.isUnderScreening('P2')).toBe(true)
+    s.closeCapStage()
+    s.openTrade()
+    s.closeTrade()
+    s.advanceYear() // 2 rounds after: expired
+    expect(s.isUnderScreening('P2')).toBe(false)
+    const off = cornered({ screening: { enabled: false } })
+    expect(off.state.screening).toEqual({})
+    const lobby = auctioning()
+    lobby.updateSettings({ screeningEnabled: false })
+    expect(lobby.state.config.screening.enabled).toBe(false)
+  })
+})
 
 describe('updateSettings validation & precision', () => {
   it('stores capReductionFactor at fine precision (0.97 must not round to 1.0)', () => {

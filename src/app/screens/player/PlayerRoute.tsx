@@ -1,4 +1,4 @@
-import { Eye, LogOut, ShieldAlert, ShieldCheck, User, WifiOff } from 'lucide-react'
+import { Eye, LogOut, ScanSearch, ShieldAlert, ShieldCheck, User, WifiOff } from 'lucide-react'
 import type { PlayerSnapshot } from '@shared/types'
 import { useGame } from '../../net/GameContext'
 import { AnnouncementsPanel, PhaseBadge } from '../../components/game/cards'
@@ -110,6 +110,7 @@ export function PlayerRoute() {
         {/* Above the body, in every phase. A subsidy starting in two rounds changes what a
             company should bid at the auction, and the cap stage does not render the
             abatement card these used to live inside. */}
+        {snap.you.screening && <ScreeningBanner notice={snap.you.screening} />}
         <AnnouncementsPanel snap={snap} />
         {body}
       </div>
@@ -140,6 +141,32 @@ function ComplianceBadge({ snap }: { snap: PlayerSnapshot }) {
       {short ? <ShieldAlert size={12} /> : <ShieldCheck size={12} />}
       {short ? `Short ${gap}` : 'Compliant'}
     </span>
+  )
+}
+
+/**
+ * "You are under screening": the regulator's market-cornering screen flagged this company. It
+ * says why, and what the instructor may do about it — nothing happens automatically.
+ */
+function ScreeningBanner({ notice }: { notice: NonNullable<PlayerSnapshot['you']['screening']> }) {
+  return (
+    <div className="mb-4 rounded-xl border border-accent/50 bg-accent/10 p-4 flex gap-3">
+      <ScanSearch size={18} className="text-accent shrink-0 mt-0.5" />
+      <div className="flex flex-col gap-1 text-sm">
+        <strong className="text-accent">You are under screening</strong>
+        <span className="text-muted-foreground">The regulator is reviewing your trading for cornering the market:</span>
+        <ul className="list-disc pl-5 text-xs text-muted-foreground">
+          {notice.reasons.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+        <span className="text-xs text-muted-foreground">
+          The instructor may take back what you hold above {notice.keepMultiple}× your planned emission and
+          sell it to the market at a fair price.
+          {notice.penalized > 0 && <> {notice.penalized.toLocaleString()} t has been taken back so far.</>}
+        </span>
+      </div>
+    </div>
   )
 }
 

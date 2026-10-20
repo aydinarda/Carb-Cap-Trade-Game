@@ -349,4 +349,20 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       ceilingIncludesCarry: true,
     },
   },
+  // Thresholds chosen on simulated games (rl/screening.ipynb) so that ordinary hedging and
+  // profitable selling are not flagged: 1.5× the need (bots buy up to 1.1×–1.5× as a matter
+  // of course), resale of half of what was acquired, and both kinds of signal at once.
+  screening: {
+    enabled: true,
+    overNeed: 1.5,
+    minAuctionShare: 0.02,
+    auctionShare: 0.25,
+    heldShare: 0.15,
+    resaleShare: 0.5,
+    resaleMarkup: 1.2,
+    sellerShare: 0.3,
+    spike: 1.5,
+    holdRounds: 2,
+    keepMultiple: 1.3,
+  },
 }

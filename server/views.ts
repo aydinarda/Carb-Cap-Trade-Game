@@ -11,6 +11,8 @@ import {
 } from '../shared/engine'
 import type {
   BorrowView,
+  ScreeningNotice,
+  ScreeningRow,
   ClassAggregate,
   HostConfigView,
   HostSnapshot,
@@ -58,12 +60,47 @@ function borrowView(
   }
 }
 
+/** What a company under screening is told about it; null when it is not under screening. */
+function screeningNotice(session: Session, playerId: string): ScreeningNotice | null {
+  if (!session.isUnderScreening(playerId)) return null
+  const entry = session.state.screening[playerId]
+  return {
+    reasons: entry.reasons,
+    penalized: round1(entry.penalties.reduce((a, x) => a + x.qty, 0)),
+    keepMultiple: session.state.config.screening.keepMultiple,
+  }
+}
+
+/** The instructor's list: everyone ever flagged, those still under screening first, newest first. */
+function screeningRows(session: Session): ScreeningRow[] {
+  const rows: ScreeningRow[] = []
+  for (const [id, entry] of Object.entries(session.state.screening)) {
+    const p = session.getPlayer(id)
+    if (!p) continue
+    const active = session.isUnderScreening(id)
+    rows.push({
+      id,
+      name: p.name,
+      kind: p.botType ?? (p.agentModel ? 'RL agent' : 'student'),
+      lastFlaggedYear: entry.lastFlaggedYear,
+      flaggedRounds: entry.flaggedRounds,
+      reasons: entry.reasons,
+      status: entry.status,
+      active,
+      takeable: active && session.state.phase === 'trade' ? session.screeningTakeable(id) : 0,
+      penalized: round1(entry.penalties.reduce((a, x) => a + x.qty, 0)),
+    })
+  }
+  return rows.sort((a, b) => Number(b.active) - Number(a.active) || b.lastFlaggedYear - a.lastFlaggedYear)
+}
+
 /** The slice of the config the host panel renders. See HostConfigView for why it is narrow. */
 function hostConfigView(config: GameConfig): HostConfigView {
   return {
     penaltyRate: config.market.penaltyRate,
     borrowingEnabled: config.market.borrowing.enabled,
     borrowLimitFrac: config.market.borrowing.limitFrac,
+    screeningEnabled: config.screening.enabled,
     openingReferenceFraction: config.market.openingReferenceFraction,
     freeCreditRatio: config.allocation.freeCreditRatio,
     applyLRFToGrandfathering: config.allocation.applyLRFToGrandfathering,
@@ -326,6 +363,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
       freeAllocation: record?.freeAllocation[player.id] ?? null,
       auctionBid: record?.auctionBid[player.id] ?? null,
       borrow: borrowView(session, player, record),
+      screening: screeningNotice(session, player.id),
       auctionAward:
         record && record.auctionPrice !== null
           ? (record.regulatorGranted[player.id] ?? 0)
@@ -429,6 +467,7 @@ export function hostSnapshot(session: Session): HostSnapshot {
     capMode: state.capMode,
     phase: state.phase,
     currentYear: state.currentYear,
+    screening: screeningRows(session),
     regulatorPool: record?.regulatorPool ?? null,
     config: hostConfigView(state.config),
     classAggregate: classAggregate(session),

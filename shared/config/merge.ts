@@ -77,6 +77,14 @@ export function validateConfig(config: GameConfig): GameConfig {
   if (ref.missing !== 'renormalize' && ref.missing !== 'opening') {
     throw new ConfigError("bots.reference.missing must be 'renormalize' or 'opening'.")
   }
+  const sc = config.screening
+  for (const key of ['overNeed', 'resaleMarkup', 'spike', 'keepMultiple'] as const) {
+    if (!Number.isFinite(sc[key]) || sc[key] < 1) throw new ConfigError(`screening.${key} must be at least 1.`)
+  }
+  for (const key of ['minAuctionShare', 'auctionShare', 'heldShare', 'resaleShare', 'sellerShare'] as const) {
+    if (!Number.isFinite(sc[key]) || sc[key] < 0 || sc[key] > 1) throw new ConfigError(`screening.${key} must be between 0 and 1.`)
+  }
+  if (!Number.isInteger(sc.holdRounds) || sc.holdRounds < 1) throw new ConfigError('screening.holdRounds must be a whole number, 1 or more.')
   const push = config.bots.compliance.debtPush
   if (!Number.isFinite(push) || push < 0 || push > 10) {
     throw new ConfigError('bots.compliance.debtPush must be between 0 and 10.')

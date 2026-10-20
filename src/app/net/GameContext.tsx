@@ -59,6 +59,8 @@ interface GameContextValue {
       | 'host:advanceYear'
       | 'host:endGame'
       | 'host:kickPlayer'
+      | 'host:screeningPenalize'
+      | 'host:screeningClear'
       | 'host:addBots'
       | 'host:removeBot'
       | 'host:addAgents',

@@ -176,6 +176,11 @@ export interface YearRecord {
   borrowOptOut?: Record<string, true>
   /** Borrowing (when enabled): tonnes of each shortfall covered from next year's share, unfined. */
   borrowed?: Record<string, number>
+  /** Screening: credits the instructor took back from a company this year. */
+  confiscated?: Record<string, number>
+  /** Screening: of those, sold back into the market, and what they fetched. */
+  screeningReleased?: number
+  screeningRevenue?: number
   /** Auctioning mode: each company's sealed bid at the cap stage (one step, or a sweep). */
   auctionBid: Record<string, AuctionBid>
   /** Auctioning mode: uniform clearing price after the auction closes. */
@@ -241,6 +246,8 @@ export interface HostConfigView {
   borrowingEnabled: boolean
   /** Most a company may borrow, as a fraction of next year's share; null = no limit. */
   borrowLimitFrac: number | null
+  /** The market-cornering screen runs at every round's close. */
+  screeningEnabled: boolean
   /** Year-1 reference price as a fraction of the penalty, before anything has traded. */
   openingReferenceFraction: number
   /** Grandfathering free credits = this × Σbaseline. */
@@ -425,6 +432,46 @@ export interface GameState {
   energyCrisis: EnergyCrisis | null
   /** The interest-rate cut running or triggered, if the instructor has called one. */
   rateCut: RateCut | null
+  /** Companies the market-cornering screen has flagged, by player id. */
+  screening: Record<string, ScreeningEntry>
+}
+
+/** One company on the regulator's screening list. */
+export interface ScreeningEntry {
+  /** The last round (year) it was flagged in, and how many rounds it has been flagged. */
+  lastFlaggedYear: number
+  flaggedRounds: number
+  /** Why, from the last round it was flagged in. */
+  reasons: string[]
+  /** 'cleared' = the instructor took it off the list. */
+  status: 'watch' | 'penalized' | 'cleared'
+  /** Credits the instructor took back, and the price they were offered back to the market at. */
+  penalties: { year: number; qty: number; price: number }[]
+}
+
+/** What a company sees about its own screening. */
+export interface ScreeningNotice {
+  reasons: string[]
+  /** Tonnes the instructor has taken back from it so far, if any. */
+  penalized: number
+  /** A penalty takes back what it holds above this × its planned emission. */
+  keepMultiple: number
+}
+
+/** The instructor's screening list row. */
+export interface ScreeningRow {
+  id: string
+  name: string
+  kind: string
+  lastFlaggedYear: number
+  flaggedRounds: number
+  reasons: string[]
+  status: ScreeningEntry['status']
+  /** Whether it is still under screening (flagged within `screening.holdRounds`, not cleared). */
+  active: boolean
+  /** What a penalty would take back right now: holdings above keepMultiple × planned emission. */
+  takeable: number
+  penalized: number
 }
 
 // ---- Role-scoped views sent over the wire ----
@@ -462,6 +509,8 @@ export interface YouView {
   auctionBid: AuctionBid | null
   /** Borrowing from next year's share — null when the session has it switched off. */
   borrow: BorrowView | null
+  /** Set while this company is under the regulator's market-cornering screening. */
+  screening: ScreeningNotice | null
   /** Auctioning mode: credits won at the auction. */
   auctionAward: number | null
   /**
@@ -735,6 +784,8 @@ export interface HostSnapshot {
    * every immediate event, because they all land by the same rule.
    */
   shockLandsIn: number
+  /** The market-cornering screening list, newest flags first. */
+  screening: ScreeningRow[]
   /** This year's clearing price (null before the auction closes). */
   auctionPrice: number | null
   /** Previous settled year's discovered market price (VWAP) — a price signal. */

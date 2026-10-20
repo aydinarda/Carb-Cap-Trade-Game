@@ -1,6 +1,6 @@
 import { customAlphabet, nanoid } from 'nanoid'
 import { resolveConfig, type DeepPartial, type GameConfig } from '../shared/config'
-import { INDUSTRY_NAMES, RESERVE_ID, type Industry } from '../shared/constants'
+import { INDUSTRY_NAMES, RESERVE_ID, SCREENING_ID, type Industry } from '../shared/constants'
 import {
   buildMarketView,
   vwapOfLast,
@@ -32,6 +32,7 @@ import {
   unabatedFrom,
   type Rng,
 } from '../shared/engine'
+import { screenRound } from '../shared/engine/screening'
 import type {
   BotType,
   CapMode,
@@ -124,6 +125,7 @@ export class Session {
       techUnlocks: [],
       energyCrisis: null,
       rateCut: null,
+      screening: {},
     }
   }
 
@@ -210,6 +212,109 @@ export class Session {
     return !this.currentYearRecord()?.borrowOptOut?.[playerId]
   }
 
+  // ---- market-cornering screening ----
+
+  /** Flags this round's cornering (shared/engine/screening.ts) onto the instructor's list. */
+  private screenSettledRound(record: YearRecord) {
+    const cfg = this.state.config.screening
+    if (!cfg.enabled) return
+    const flags = screenRound(
+      {
+        companies: this.state.players.map((p) => ({
+          id: p.id,
+          exempt: p.botType === 'marketMaker',
+          planned: this.plannedFor(p, record.year),
+          freeAllocation: record.freeAllocation[p.id] ?? 0,
+          carriedIn: record.carriedIn[p.id] ?? 0,
+          auctionAward: this.usesAuction ? (record.regulatorGranted[p.id] ?? 0) : 0,
+        })),
+        pool: this.usesAuction ? record.regulatorPool : 0,
+        auctionPrice: record.auctionPrice,
+        previousClose: this.previousMarketPrice(),
+        trades: record.trades,
+      },
+      cfg,
+    )
+    for (const [id, reasons] of Object.entries(flags)) {
+      const before = this.state.screening[id]
+      this.state.screening[id] = {
+        lastFlaggedYear: record.year,
+        flaggedRounds: (before?.flaggedRounds ?? 0) + 1,
+        reasons,
+        status: 'watch',
+        penalties: before?.penalties ?? [],
+      }
+    }
+  }
+
+  /** Whether the company is under screening: flagged within `screening.holdRounds`, not cleared. */
+  isUnderScreening(playerId: string): boolean {
+    const entry = this.state.screening[playerId]
+    if (!entry || entry.status === 'cleared') return false
+    return this.state.currentYear - entry.lastFlaggedYear < this.state.config.screening.holdRounds
+  }
+
+  /** What a penalty would take back now: holdings above `keepMultiple` × its planned emission. */
+  screeningTakeable(playerId: string): number {
+    const keep = this.state.config.screening.keepMultiple * this.plannedEmission(playerId)
+    return round1(Math.max(0, this.creditsHeld(playerId) - keep))
+  }
+
+  /**
+   * The fair price taken-back credits are offered at: the LOWEST of this round's auction price,
+   * the market's recent prints and last round's close, and never above the fine. Any one of
+   * them may be what the cornering pushed up — a company bidding alone sets the auction price
+   * itself — so the regulator never sells at a price the manipulation could have made.
+   */
+  screeningReleasePrice(): number {
+    const record = this.currentYearRecord()!
+    const candidates = [
+      record.auctionPrice && record.auctionPrice > 0 ? record.auctionPrice : null,
+      meanOfLast(record.trades, this.state.config.market.referenceTrades),
+      this.previousMarketPrice(),
+    ].filter((x): x is number => x !== null && x > 0)
+    const fair = candidates.length ? Math.min(...candidates) : this.openingReference()
+    return round1(Math.min(fair, this.state.config.market.penaltyRate))
+  }
+
+  /**
+   * The instructor penalises a company under screening: it loses what it holds above
+   * `keepMultiple` × its planned emission, and the regulator offers those credits back to the
+   * market at a fair price. Only during the trade window, so they can actually be bought.
+   */
+  screeningPenalize(playerId: string): { qty: number; price: number } {
+    this.requirePhase('trade')
+    const entry = this.state.screening[playerId]
+    if (!entry || !this.isUnderScreening(playerId)) {
+      throw new GameError('NOT_SCREENED', 'This company is not under screening.')
+    }
+    const qty = this.screeningTakeable(playerId)
+    if (qty <= 0) {
+      throw new GameError(
+        'NOTHING_TO_TAKE',
+        `It holds no more than ${this.state.config.screening.keepMultiple}× its planned emission — there is nothing to take back.`,
+      )
+    }
+    const record = this.currentYearRecord()!
+    // Its own asks first, so taking credits back never leaves it offering tonnes it no longer has.
+    for (const order of record.orders.filter((o) => o.playerId === playerId && o.side === 'sell' && o.status === 'open')) {
+      this.cancelOrder(playerId, order.id)
+    }
+    record.confiscated = { ...record.confiscated, [playerId]: round1((record.confiscated?.[playerId] ?? 0) + qty) }
+    const price = this.screeningReleasePrice()
+    this.submitOrder(SCREENING_ID, 'sell', qty, price)
+    entry.status = 'penalized'
+    entry.penalties.push({ year: record.year, qty, price })
+    return { qty, price }
+  }
+
+  /** The instructor takes a company off the screening list. It is screened again if it repeats. */
+  screeningClear(playerId: string) {
+    const entry = this.state.screening[playerId]
+    if (!entry) throw new GameError('NOT_SCREENED', 'This company is not on the screening list.')
+    entry.status = 'cleared'
+  }
+
   /**
    * Select or clear "cover a shortfall from next year's share" for this year. Open until the
    * year settles; the option is selected again when the next year opens.
@@ -238,7 +343,8 @@ export class Session {
       (record.freeAllocation[playerId] ?? 0) +
         (record.regulatorGranted[playerId] ?? 0) +
         (record.carriedIn[playerId] ?? 0) +
-        tradedNet(record.trades, playerId),
+        tradedNet(record.trades, playerId) -
+        (record.confiscated?.[playerId] ?? 0),
     )
   }
 
@@ -775,6 +881,7 @@ export class Session {
     marketMakerInvFrac?: number
     borrowingEnabled?: boolean
     borrowLimitFrac?: number | null
+    screeningEnabled?: boolean
   }) {
     this.requirePhase('lobby', 'yearSummary')
     // Reject anything this method does not implement.
@@ -787,7 +894,7 @@ export class Session {
       'penaltyRate', 'openingReferenceFraction', 'freeCreditRatio', 'auctionCapRatio',
       'capReductionFactor', 'applyLRFToGrandfathering', 'benchmark', 'hybridFreeShare',
       'abatement', 'reserveEnabled', 'abatementLifetimeCap', 'abatementFixedCost',
-      'marketMakerInvFrac', 'borrowingEnabled', 'borrowLimitFrac',
+      'marketMakerInvFrac', 'borrowingEnabled', 'borrowLimitFrac', 'screeningEnabled',
     ])
     const unknown = Object.keys(settings).filter((k) => !KNOWN.has(k))
     if (unknown.length) {
@@ -818,6 +925,12 @@ export class Session {
         throw new GameError('BAD_SETTING', 'borrowingEnabled must be true or false.')
       }
       this.state.config.market.borrowing.enabled = settings.borrowingEnabled
+    }
+    if (settings.screeningEnabled !== undefined) {
+      if (typeof settings.screeningEnabled !== 'boolean') {
+        throw new GameError('BAD_SETTING', 'screeningEnabled must be true or false.')
+      }
+      this.state.config.screening.enabled = settings.screeningEnabled
     }
     if (settings.borrowLimitFrac !== undefined) {
       const v = settings.borrowLimitFrac
@@ -1319,6 +1432,7 @@ export class Session {
       // charged). It adjusts next year's holdings via carriedIn.
       player.bankedCredits = round1((held[player.id] ?? 0) - (record.realized[player.id] ?? 0))
     }
+    this.screenSettledRound(record)
     this.state.phase = 'yearSummary'
   }
 
@@ -1495,6 +1609,11 @@ export class Session {
     // thousands within a year. Catches both directions: the reserve's own marketable ask,
     // and a player's buy crossing a rung that was already resting.
     for (const t of trades) {
+      if (t.sellerId === SCREENING_ID) {
+        record.screeningReleased = round1((record.screeningReleased ?? 0) + t.qty)
+        record.screeningRevenue = round1((record.screeningRevenue ?? 0) + t.qty * t.price)
+        continue
+      }
       if (t.sellerId !== RESERVE_ID) continue
       record.reserveReleased = round1(record.reserveReleased + t.qty)
       record.reserveRevenue = round1(record.reserveRevenue + t.qty * t.price)

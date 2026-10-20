@@ -335,8 +335,10 @@ export function trySubmitSweep(
   const placement = bot.botType ? sweep.placement[bot.botType] : 'centred'
   let steps: { qty: number; price: number }[]
   if (placement === 'coverFirst') {
-    // The old bid whole on top; the banking extra on the steps below, thinning out downward.
-    const extra = qty * (bot.botType ? (sweep.bank[bot.botType] ?? 0) : 0)
+    // The old bid whole on top; the banking extra on the steps below, thinning out downward —
+    // none while it is under screening, when buying more than it needs is what it is told off for.
+    const bank = bot.botType && !session.isUnderScreening(bot.id) ? (sweep.bank[bot.botType] ?? 0) : 0
+    const extra = qty * bank
     steps = [{ qty: round1(qty), price: at(0) }, ...bankWeights(n).map((w, i) => ({ qty: round1(extra * w), price: at(-(i + 1)) }))]
   } else {
     const weights = sweepWeights(n, sweep.shape, skew)

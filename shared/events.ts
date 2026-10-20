@@ -63,6 +63,10 @@ export interface ClientToServerEvents {
   'host:closeTrade': (payload: Record<string, never>, ack: Ack) => void
   'host:advanceYear': (payload: Record<string, never>, ack: Ack) => void
   'host:endGame': (payload: Record<string, never>, ack: Ack) => void
+  /** Screening: take back what the company holds above the cap and release it to the market (trade only). */
+  'host:screeningPenalize': (payload: { playerId: string }, ack: Ack) => void
+  /** Screening: take the company off the list. */
+  'host:screeningClear': (payload: { playerId: string }, ack: Ack) => void
   'host:kickPlayer': (payload: { playerId: string }, ack: Ack) => void
   /** Lobby only: add N backend bots of one archetype (auctioning mode). */
   'host:addBots': (payload: { botType: BotType; count: number }, ack: Ack) => void

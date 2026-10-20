@@ -1,4 +1,4 @@
-import { RESERVE_ID } from '@shared/constants'
+import { RESERVE_ID, SCREENING_ID } from '@shared/constants'
 import { Activity, X } from 'lucide-react'
 import type { MarketView, Order, Trade } from '@shared/types'
 import { cn } from './theme'
@@ -106,7 +106,8 @@ function OrderRow({
   // Anonymised for players (only your own orders are labelled); host sees ids. The cost
   // containment reserve is never anonymised — the whole point of resting its ladder in the
   // book is that the class can SEE where the regulator is willing to sell.
-  const isReserve = order.playerId === RESERVE_ID
+  // The regulator's own offers: the reserve, and credits it took back from a screened company.
+  const isReserve = order.playerId === RESERVE_ID || order.playerId === SCREENING_ID
   const label = isReserve ? 'REGULATOR' : mine ? 'you' : anonymous ? '•' : order.playerId
   // The book's two sides carry the palette's two market hues: cyan is the buy side
   // everywhere in the game, amber the sell side. Your own resting order is framed in the

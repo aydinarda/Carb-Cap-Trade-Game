@@ -101,3 +101,10 @@ export const DEFAULT_ABATEMENT: Record<Industry, { a: number; b: number }> = {
  * player id, which is always `P${n}`.
  */
 export const RESERVE_ID = 'RESERVE'
+
+/**
+ * The regulator selling credits it took back from a screened company. Like the reserve, a bare
+ * id rather than a player — and a separate one, because those credits were already in
+ * circulation: counting their sale as reserve release would add them to the supply twice.
+ */
+export const SCREENING_ID = 'SCREENING'

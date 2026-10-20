@@ -765,3 +765,26 @@ describe('compliance pushes its market bids by the shortfall it carried in (bots
     expect(pushed!).toBeGreaterThan(plain!)
   })
 })
+
+describe('bots under market screening buy only what they need', () => {
+  const firm = (screened: boolean) => {
+    const s = new Session('auctioning', 2)
+    const bot = s.addBot('compliance')
+    s.addPlayer('Human', 'Transport')
+    s.startYear()
+    if (screened) {
+      s.state.screening[bot.id] = { lastFlaggedYear: s.state.currentYear, flaggedRounds: 1, reasons: ['test'], status: 'watch', penalties: [] }
+    }
+    compliance.auction(ctxFor(s, bot.id))
+    return { s, bid: s.currentYearRecord()!.auctionBid[bot.id], planned: s.plannedEmission(bot.id) }
+  }
+
+  it('a screened compliance firm bids its bare need — no buffer, no banking steps', () => {
+    const free = firm(false)
+    const watched = firm(true)
+    expect(free.bid.qty).toBeGreaterThan(watched.bid.qty)
+    expect(watched.bid.qty).toBeCloseTo(watched.planned, 0) // it holds nothing at an auctioning cap stage
+    expect(watched.bid.steps).toBeUndefined() // the banking steps are gone: a single bid
+    expect(free.bid.steps!.length).toBeGreaterThan(1)
+  })
+})

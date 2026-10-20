@@ -286,6 +286,27 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
           {config.borrowingEnabled ? 'on' : 'off'}
         </button>
       </div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs text-foreground">Market screening</div>
+          <div className="text-[10px] text-muted-foreground font-mono">
+            flags cornering at each round&apos;s close; only you can penalize
+          </div>
+        </div>
+        <button
+          onClick={() =>
+            void hostAction('host:updateSettings', { screeningEnabled: !config.screeningEnabled })
+          }
+          className={cn(
+            'shrink-0 text-[10px] font-mono uppercase tracking-wider border rounded-full px-3 py-1 transition-colors',
+            config.screeningEnabled
+              ? 'text-primary border-primary/40 bg-primary/10'
+              : 'text-muted-foreground border-border',
+          )}
+        >
+          {config.screeningEnabled ? 'on' : 'off'}
+        </button>
+      </div>
       {config.borrowingEnabled &&
         field(
           'Borrowing limit (× next year\'s share)',
