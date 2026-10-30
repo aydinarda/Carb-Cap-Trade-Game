@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { RlModelInfo } from '../../shared/types'
 import { RlAgentManager, type ModelSource } from '../rl/manager'
 import { getModel, listModels, modelFromFile, Policy, type LoadedModel } from '../rl/models'
-import { featuresFor, type RlMode } from '../rl/observe'
+import { featuresFor, type FeatureSet, type RlMode } from '../rl/observe'
 import { Session } from '../session'
 import { hostSnapshot } from '../views'
 
@@ -48,6 +48,12 @@ describe('RL model files', () => {
     )
     expect(model.policy).toBeNull()
     expect(model.info.error).toMatch(/drifted/)
+  })
+
+  it('runs a model trained on feature set 3, which also reads the screening notice', () => {
+    const model = zeroModel('screening-aware', 'hybrid', 3)
+    expect(model.info.error).toBeNull()
+    expect(model.featureSet).toBe(3)
   })
 })
 
@@ -122,8 +128,8 @@ describe('RL agents in a game', () => {
 })
 
 /** A valid model that always holds: zero weights, so its actions are all 0. */
-function zeroModel(id: string, mode: RlMode): LoadedModel {
-  const features = featuresFor(mode).map((f) => f.name)
+function zeroModel(id: string, mode: RlMode, set: FeatureSet = 1): LoadedModel {
+  const features = featuresFor(mode, set).map((f) => f.name)
   const n = features.length
   return modelFromFile(
     {

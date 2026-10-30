@@ -52,10 +52,12 @@ export interface Feature {
  *
  *   1  everything up to borrowing — the shipped hybrid models and the first versions
  *   2  + borrowing: whether it is on, the room, and whether the company has it selected
+ *   3  + screening: the "You are under screening" notice — whether it is shown, how many
+ *      reasons it gives, and what the instructor has taken back so far
  */
-export type FeatureSet = 1 | 2
-export const FEATURE_SETS: FeatureSet[] = [1, 2]
-export const LATEST_FEATURE_SET: FeatureSet = 2
+export type FeatureSet = 1 | 2 | 3
+export const FEATURE_SETS: FeatureSet[] = [1, 2, 3]
+export const LATEST_FEATURE_SET: FeatureSet = 3
 
 export interface Cell {
   value: number
@@ -257,6 +259,11 @@ function buildFeatures(): Feature[] {
   add('borrow', 'borrow_unlimited', 'you.borrow.room === null', undefined, 2)
   add('borrow', 'borrow_opted', 'you.borrow.optIn: the option is selected', undefined, 2)
 
+  // Set 3 — the market-cornering screening notice, as the trade screen shows it.
+  add('screening', 'screen_on', 'you.screening: "You are under screening" is shown', undefined, 3)
+  add('screening', 'screen_reasons', 'you.screening.reasons: how many (at most 5)', undefined, 3)
+  add('screening', 'screen_penalized', 'you.screening.penalized / baseline', undefined, 3)
+
   return out
 }
 
@@ -378,6 +385,10 @@ export function computeFeatures(snap: PlayerSnapshot, mem: Memory, step: StepKin
   put('borrow_room', borrow === null ? 0 : borrow.room === null ? 3 : clip(borrow.room / B, 0, 3), borrow?.room)
   bit('borrow_unlimited', borrow !== null && borrow.room === null)
   bit('borrow_opted', borrow?.optIn === true)
+  const notice = you.screening ?? null
+  bit('screen_on', notice !== null)
+  put('screen_reasons', notice ? notice.reasons.length / 5 : 0, notice?.reasons.length)
+  put('screen_penalized', div(notice?.penalized, B), notice?.penalized)
   const history = Object.keys(you.emissions)
     .map(Number)
     .filter((y) => y < year)

@@ -33,3 +33,6 @@ notes/
 # RL agent training — local only. Anchored to the root: the trained agents the host can add
 # live in server/rl/ and must be committed.
 /rl/
+
+# the local hand-off for coding agents (project map, open decisions, known problems)
+/CLAUDE.md
