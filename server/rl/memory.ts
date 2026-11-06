@@ -34,6 +34,13 @@ export interface YearMemory {
   investmentGap: number | null
   classMedianPoints: number | null
   classRealized: number | null
+  /**
+   * The round's profit as the year-summary screen lets a student work it out: what the round cost,
+   * plus what the bank gained, both marked at the round's own price (VWAP, else the auction price,
+   * else the last close), over baseline × penalty — the trainer's profit (rl/objectives.py) as it
+   * stands before the next round's price is known. Null when a number it needs was not on screen.
+   */
+  profit: number | null
 }
 
 export interface Memory {
@@ -53,6 +60,10 @@ export interface Memory {
    *  how long it lasts, but a student can count the rounds it has been up. */
   ratesSeenRounds: number
   ratesSeenYear: number | null
+  /** Every settled round's profit this game, summed, and summed squared — its mean and spread. */
+  profitSum: number
+  profitSqSum: number
+  profitCount: number
 }
 
 export function createMemory(): Memory {
@@ -66,7 +77,21 @@ export function createMemory(): Memory {
     priceYear: null,
     ratesSeenRounds: 0,
     ratesSeenYear: null,
+    profitSum: 0,
+    profitSqSum: 0,
+    profitCount: 0,
   }
+}
+
+/** A settled round's profit, from the year-summary screen (see `YearMemory.profit`). */
+function roundProfit(snap: PlayerSnapshot, baseline: number | null): number | null {
+  const st = snap.you.settlement
+  const net = snap.you.netPosition
+  const mark = snap.market?.vwap ?? snap.auctionPrice ?? snap.prevMarketPrice ?? null
+  if (!st || net === null || mark === null || !(baseline && baseline > 0) || !(snap.penaltyRate > 0)) return null
+  // `netPosition` is realized − held (positive = short), so the bank carried out is its negative;
+  // `banked` on the summary screen is what was carried IN.
+  return (-st.yearCost + mark * (-net - (snap.you.banked ?? 0))) / (baseline * snap.penaltyRate)
 }
 
 function median(values: number[]): number | null {
@@ -120,7 +145,14 @@ export function remember(mem: Memory, snap: PlayerSnapshot): void {
       investmentGap: own?.investmentGap ?? null,
       classMedianPoints: median(emitters.map((row) => row.points as number)),
       classRealized: snap.classAggregate?.totalRealized ?? null,
+      profit: roundProfit(snap, mem.baseline),
     })
+    const profit = mem.years[0].profit
+    if (profit !== null) {
+      mem.profitSum += profit
+      mem.profitSqSum += profit * profit
+      mem.profitCount += 1
+    }
     if (mem.years.length > MEMORY_YEARS) mem.years.length = MEMORY_YEARS
     return
   }

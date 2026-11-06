@@ -7,6 +7,7 @@ import { CapStageScreen } from './CapStageScreen'
 import { EmissionsRevealScreen } from './EmissionsRevealScreen'
 import { JoinScreen } from './JoinScreen'
 import { LobbyScreen } from './LobbyScreen'
+import { ReferendumPanel } from './ReferendumPanel'
 import { TradeStageScreen } from './TradeStageScreen'
 import { YearSummaryScreen } from './YearSummaryScreen'
 
@@ -112,6 +113,8 @@ export function PlayerRoute() {
             abatement card these used to live inside. */}
         {snap.you.screening && <ScreeningBanner notice={snap.you.screening} />}
         <AnnouncementsPanel snap={snap} />
+        {/* Above the year summary while the class talks and votes, and with its result after. */}
+        <ReferendumPanel snap={snap} />
         {body}
       </div>
     </div>

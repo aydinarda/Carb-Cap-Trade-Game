@@ -127,17 +127,22 @@ describe('endGame — surplus is stranded, debt still settles', () => {
     }
   })
 
-  it('still charges a leftover make-good debt', () => {
+  it('still charges a leftover make-good debt, and fines what no next year can be borrowed from', () => {
     const { s, before } = playOneYear(1)
     const debtors = s.state.players.filter((p) => before.get(p.id)!.banked < 0)
     expect(debtors.length).toBeGreaterThan(0)
     const finalPrice = s.state.config.market.penaltyRate // no trades, no auction
+    const p = s.state.config.market.penaltyRate
     s.endGame()
-    for (const p of debtors) {
-      const b = before.get(p.id)!
+    const record = s.state.years[FIRST_GAME_YEAR]
+    for (const d of debtors) {
+      const b = before.get(d.id)!
       // An obligation does not expire because the game stopped: defaulting in the final
-      // year must not be cheaper than defaulting in any other.
-      expect(p.score, p.id).toBe(round1(b.score - b.banked * finalPrice))
+      // year must not be cheaper than defaulting in any other. The shortfall that waited for
+      // next year's share has none to borrow from: fined in full, then bought back.
+      expect(record.borrowed![d.id]).toBe(0)
+      expect(record.borrowFined![d.id]).toBe(round1(-b.banked))
+      expect(d.score, d.id).toBe(round1(round1(b.score + round1(-b.banked * p)) - b.banked * finalPrice))
     }
   })
 
@@ -694,39 +699,99 @@ describe('borrowing from next year\'s share', () => {
     expect(s.borrowRooms().P1).toBeCloseTo(round1(0.5 * shares.P1), 1)
   })
 
-  it('waives the penalty on what is borrowed and still carries the whole shortfall as debt', () => {
+  /** The share each company has of the year that just opened: its auction pool, split by baseline. */
+  const openedShares = (s: Session) => {
+    const pool = s.currentYearRecord()!.regulatorPool
+    const baseline = (id: string) => s.getPlayer(id)!.emissions[s.state.config.emissions.baselineYear]
+    const total = s.state.players.reduce((a, p) => a + baseline(p.id), 0)
+    return (id: string) => round1((pool * baseline(id)) / total)
+  }
+
+  it('fines nothing at the close: the shortfall waits for next year\'s share, owed in full', () => {
     const plain = settleShort(auctioning(1, off))
     const s = auctioning(1, on())
-    let rooms: Record<string, number> = {}
-    const rec = settleShort(s, (x) => {
-      rooms = x.borrowRooms()
-    })
+    const rec = settleShort(s)
     for (const id of ['P1', 'P2']) {
       const short = rec.settlement![id].shortage
       expect(short).toBe(plain.settlement![id].shortage)
-      expect(rec.borrowed![id]).toBe(round1(Math.min(short, rooms[id])))
-      expect(rec.settlement![id].penaltyCost).toBe(round1((short - rec.borrowed![id]) * s.state.config.market.penaltyRate))
-      expect(rec.settlement![id].penaltyCost).toBeLessThan(plain.settlement![id].penaltyCost)
-      // The debt is the same: borrowing only removes the fine.
-      expect(s.state.players.find((p) => p.id === id)!.bankedCredits).toBe(-short)
+      expect(plain.settlement![id].penaltyCost).toBeGreaterThan(0)
+      expect(rec.settlement![id].penaltyCost).toBe(0)
+      expect(rec.borrowPending![id].short).toBe(short)
+      expect(rec.borrowed?.[id]).toBeUndefined()
+      // The debt is the same: borrowing only moves the fine, it never forgives the tonnes.
+      expect(s.getPlayer(id)!.bankedCredits).toBe(-short)
+      expect(playerSnapshot(s, id).you.borrow!.pending).toBe(short)
     }
   })
 
-  it('fines in full a company that cleared the option, and selects it again next year', () => {
+  it('decides when next year opens: its real share is borrowed, the rest is fined on that year\'s bill', () => {
+    const s = auctioning(1, on(0.05)) // a tight limit, so the room binds
+    const rec = settleShort(s)
+    const shorts = { P1: rec.settlement!.P1.shortage, P2: rec.settlement!.P2.shortage }
+    s.advanceYear()
+    const share = openedShares(s)
+    const next = s.currentYearRecord()!
+    const p = s.state.config.market.penaltyRate
+    for (const id of ['P1', 'P2'] as const) {
+      const room = round1(0.05 * share(id))
+      expect(rec.borrowed![id]).toBe(round1(Math.min(shorts[id], room)))
+      expect(rec.borrowFined![id]).toBe(round1(shorts[id] - rec.borrowed![id]))
+      expect(rec.borrowFined![id]).toBeGreaterThan(0)
+      expect(next.carriedPenalty![id]).toBe(round1(rec.borrowFined![id] * p))
+      expect(playerSnapshot(s, id).you.borrow!.lastYear).toEqual({
+        borrowed: rec.borrowed![id], fined: rec.borrowFined![id], fine: next.carriedPenalty![id],
+      })
+    }
+    expect(rec.borrowPending).toBeUndefined()
+    // The fine lands on this year's settlement, and so in its cost and the score.
+    s.closeCapStage()
+    s.openTrade()
+    s.closeTrade()
+    for (const id of ['P1', 'P2']) {
+      const st = s.state.years[FIRST_GAME_YEAR + 1].settlement![id]
+      expect(st.carriedPenaltyCost).toBe(next.carriedPenalty![id])
+      expect(st.yearCost).toBeCloseTo(st.abatementCost + st.purchaseCost - st.sellIncome + st.penaltyCost + st.carriedPenaltyCost, 1)
+    }
+  })
+
+  it('borrows less when next year\'s share turns out smaller than it looked', () => {
+    const run = (shrink: boolean) => {
+      const s = auctioning(1, on(0.05))
+      let estimate: Record<string, number> = {}
+      const rec = settleShort(s, (x) => {
+        estimate = x.borrowRooms()
+      })
+      if (shrink) s.updateSettings({ auctionCapRatio: s.state.config.allocation.auctionCapRatio / 2 })
+      s.advanceYear()
+      return { rec, estimate }
+    }
+    const as = run(false)
+    const cut = run(true)
+    expect(as.rec.borrowed!.P1).toBeCloseTo(Math.min(as.rec.settlement!.P1.shortage, as.estimate.P1), 0)
+    expect(cut.rec.borrowed!.P1).toBeLessThan(as.rec.borrowed!.P1)
+    expect(cut.rec.borrowFined!.P1).toBeGreaterThan(as.rec.borrowFined!.P1)
+  })
+
+  it('fines in full at the close a company that cleared the option, and selects it again next year', () => {
     const s = auctioning(1, on())
     const rec = settleShort(s, (x) => x.setBorrowOptIn('P1', false))
     expect(rec.borrowed!.P1).toBe(0)
     expect(rec.settlement!.P1.penaltyCost).toBe(round1(rec.settlement!.P1.shortage * s.state.config.market.penaltyRate))
-    expect(rec.borrowed!.P2).toBeGreaterThan(0)
+    expect(rec.borrowPending!.P1).toBeUndefined()
+    expect(rec.borrowPending!.P2).toBeDefined()
     s.advanceYear()
+    expect(rec.borrowed!.P2).toBeGreaterThan(0)
     expect(s.borrowOptedIn('P1')).toBe(true)
   })
 
   it('with no limit, borrows the whole shortfall', () => {
     const s = auctioning(1, on(null))
     const rec = settleShort(s)
-    expect(rec.borrowed!.P1).toBe(rec.settlement!.P1.shortage)
     expect(rec.settlement!.P1.penaltyCost).toBe(0)
+    s.advanceYear()
+    expect(rec.borrowed!.P1).toBe(rec.settlement!.P1.shortage)
+    expect(rec.borrowFined!.P1).toBe(0)
+    expect(s.currentYearRecord()!.carriedPenalty!.P1).toBe(0)
   })
 
   it('gives a pure-trader bot no room', () => {

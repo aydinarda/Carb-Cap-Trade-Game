@@ -184,6 +184,34 @@ export function validateConfig(config: GameConfig): GameConfig {
   ) {
     throw new ConfigError('emissions.rateCut.demandIncrease must be in (0, 0.5].')
   }
+  // The same bound as the crisis, for the same reason, and per sector as well.
+  const nuclear = config.emissions.nuclear
+  const shockStep = (x: number) => Number.isFinite(x) && x > 0 && x <= 0.5
+  if (!shockStep(nuclear.magnitude)) throw new ConfigError('emissions.nuclear.magnitude must be in (0, 0.5].')
+  for (const [industry, m] of Object.entries(nuclear.sectorMagnitude)) {
+    if (!INDUSTRY_NAMES.includes(industry as (typeof INDUSTRY_NAMES)[number])) {
+      throw new ConfigError(`emissions.nuclear.sectorMagnitude: unknown sector "${industry}".`)
+    }
+    if (!shockStep(m as number)) throw new ConfigError(`emissions.nuclear.sectorMagnitude.${industry} must be in (0, 0.5].`)
+  }
+  if (!Number.isInteger(nuclear.leadRounds) || nuclear.leadRounds < 0 || nuclear.leadRounds > 3) {
+    throw new ConfigError('emissions.nuclear.leadRounds must be an integer in [0, 3].')
+  }
+  const freeCut = config.allocation.freeCut
+  if (!Number.isFinite(freeCut.factor) || freeCut.factor < 0 || freeCut.factor >= 1) {
+    throw new ConfigError('allocation.freeCut.factor must be in [0, 1).')
+  }
+  if (!Number.isInteger(freeCut.leadRounds) || freeCut.leadRounds < 0 || freeCut.leadRounds > 3) {
+    throw new ConfigError('allocation.freeCut.leadRounds must be an integer in [0, 3].')
+  }
+  const referendum = config.market.referendum
+  if (!Number.isFinite(referendum.borrowLimitFrac) || referendum.borrowLimitFrac < 0 || referendum.borrowLimitFrac > 1) {
+    throw new ConfigError('market.referendum.borrowLimitFrac must be in [0, 1].')
+  }
+  for (const key of ['chatSeconds', 'voteSeconds'] as const) {
+    const v = referendum[key]
+    if (!Number.isFinite(v) || v < 0 || v > 600) throw new ConfigError(`market.referendum.${key} must be in [0, 600].`)
+  }
 
   for (const industry of INDUSTRY_NAMES) {
     positive(config.allocation.benchmark[industry], `allocation.benchmark.${industry}`)

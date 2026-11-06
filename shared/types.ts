@@ -124,10 +124,29 @@ export interface PlayerSettlement {
   purchaseCost: number
   /** Cash earned selling in the market. */
   sellIncome: number
-  /** shortage × penaltyRate. */
+  /** shortage × penaltyRate, on the part fined THIS year (not borrowed, nothing pending). */
   penaltyCost: number
-  /** abatementCost + purchaseCost − sellIncome + penaltyCost. */
+  /**
+   * Last year's shortfall that this year's share could not cover, fined when this year opened
+   * (`Session.resolveBorrowing`). 0 when there was none.
+   */
+  carriedPenaltyCost: number
+  /** abatementCost + purchaseCost − sellIncome + penaltyCost + carriedPenaltyCost. */
   yearCost: number
+}
+
+/** A shortfall waiting for next year's share, with what resolving it needs from the year it was in. */
+export interface BorrowPending {
+  /** Realized − held, tonnes. */
+  short: number
+  /** Planned − held: what the leaderboard ledger scores (the dice removed). */
+  plannedShort: number
+  /** The year's planned emission — the base of a voted borrowing cap. */
+  planned: number
+  /** The year's price, at which the ledger already valued the shortfall as borrowed. */
+  refPrice: number
+  /** The penalty rate in force that year. */
+  penaltyRate: number
 }
 
 export interface YearRecord {
@@ -156,6 +175,12 @@ export interface YearRecord {
    * makes "the crisis starts now" honest without letting it rewrite history.
    */
   emissionFactor: number
+  /**
+   * The nuclear closure's share of that multiplier, by sector: `1 + m` for a sector in the round
+   * the closure lands, 1 otherwise. Stamped with `emissionFactor` and for the same reason; absent
+   * in a game without a closure. See `Session.sectorFactorFor`.
+   */
+  sectorEmissionFactor?: Partial<Record<Industry, number>>
   /** Continuous order-book market: resting/filled orders and executed trades. */
   orders: Order[]
   trades: Trade[]
@@ -174,8 +199,23 @@ export interface YearRecord {
    * out selected every year, so an absent id is opted in.
    */
   borrowOptOut?: Record<string, true>
-  /** Borrowing (when enabled): tonnes of each shortfall covered from next year's share, unfined. */
+  /**
+   * Borrowing (when enabled): tonnes of this year's shortfall covered from next year's share,
+   * unfined. Decided when next year OPENS — the share is only known then — so filled in at that
+   * moment (`Session.resolveBorrowing`), or at the end of the game, when there is no next share.
+   */
   borrowed?: Record<string, number>
+  /** Of this year's shortfall, the tonnes next year's share could not cover — fined when it opened. */
+  borrowFined?: Record<string, number>
+  /**
+   * The shortfalls waiting for next year's share: the companies that kept borrowing selected and
+   * ended the year short. Removed once resolved.
+   */
+  borrowPending?: Record<string, BorrowPending>
+  /** This year's fines for LAST year's unborrowed shortfall, charged when this year opened (€). */
+  carriedPenalty?: Record<string, number>
+  /** The leaderboard ledger's share of those: (fine − last year's price) × the planned unborrowed tonnes. */
+  carriedDecision?: Record<string, number>
   /** Screening: credits the instructor took back from a company this year. */
   confiscated?: Record<string, number>
   /** Screening: of those, sold back into the market, and what they fetched. */
@@ -294,6 +334,17 @@ export interface HostConfigView {
   rateCutRounds: number
   rateCutInvestmentDiscount: number
   rateCutDemandIncrease: number
+  /** Nuclear closure: the class-wide step, the sectors with their own, and its lead time. */
+  nuclearMagnitude: number
+  nuclearSectorMagnitude: Partial<Record<Industry, number>>
+  nuclearLeadRounds: number
+  /** Hybrid free allocation cut: the factor on every free share, and its lead time. */
+  freeCutFactor: number
+  freeCutLeadRounds: number
+  /** Borrowing referendum: the cap it proposes (× planned emission) and its two clocks. */
+  referendumBorrowLimitFrac: number
+  referendumChatSeconds: number
+  referendumVoteSeconds: number
   /** Cost containment reserve: whether it is armed, and the ladder it would release on. */
   reserveEnabled: boolean
   reserveSteps: { triggerPrice: number; cumulativeFraction: number }[]
@@ -413,6 +464,105 @@ export interface RateCut {
  */
 export type RateCutNotice = Omit<RateCut, 'investmentDiscount' | 'demandIncrease'>
 
+/**
+ * Nuclear plants are closing — see `emissions.nuclear` in the config. Every company emits
+ * `magnitude` more from `fromYear` on, a sector in `sectorMagnitude` its own figure instead.
+ * Permanent: one step up, never back down. Not covert: the class is told both numbers.
+ */
+export interface NuclearClosure {
+  /** Round the closure was announced in. */
+  announcedIn: number
+  /** First round emissions are raised. */
+  fromYear: number
+  magnitude: number
+  sectorMagnitude: Partial<Record<Industry, number>>
+}
+
+/**
+ * Hybrid only: from `fromYear` on every sector's free share is multiplied by `factor`, for good.
+ * The cap does not move, so the cut is sold at the auction instead — see `allocation.freeCut`.
+ */
+export interface FreeAllocationCut {
+  announcedIn: number
+  fromYear: number
+  factor: number
+}
+
+export type VoteChoice = 'yes' | 'no'
+
+/** One line of the referendum chat. `from` is a player id, or 'host' for the instructor. */
+export interface ChatMessage {
+  id: number
+  from: string
+  name: string
+  text: string
+  /** Server time, epoch ms. */
+  at: number
+}
+
+/** What a referendum asks. One kind so far: cap borrowing at `frac` × planned emission. */
+export interface ReferendumProposal {
+  kind: 'borrowLimit'
+  frac: number
+}
+
+export interface ReferendumResult {
+  approved: boolean
+  yes: number
+  no: number
+  /** Companies that could vote (emitters); the rest of them abstained. */
+  eligible: number
+}
+
+/**
+ * A referendum on a rule change, held in a year summary (`Session.openReferendum`): a chat stage,
+ * then a vote stage, each on its own clock, then closed with its result. A simple majority of
+ * the votes cast carries it; a tie keeps the rules as they are. One company, one vote; pure-trader
+ * bots have no emissions and no vote.
+ */
+export interface Referendum {
+  id: number
+  /** The year summary it was held in. */
+  year: number
+  proposal: ReferendumProposal
+  stage: 'chat' | 'vote' | 'closed'
+  chatSeconds: number
+  voteSeconds: number
+  /** When the current stage ends, epoch ms; null once closed. */
+  stageEndsAt: number | null
+  chat: ChatMessage[]
+  votes: Record<string, VoteChoice>
+  result: ReferendumResult | null
+  /** The first round the rule applies to if it passes. */
+  appliesFrom: number
+}
+
+/** A borrowing cap the class voted in: at most `frac` × planned emission, from `fromYear` on. */
+export interface BorrowLimitRule {
+  frac: number
+  fromYear: number
+}
+
+/** A referendum as a screen shows it. */
+export interface ReferendumView {
+  id: number
+  year: number
+  proposal: ReferendumProposal
+  stage: Referendum['stage']
+  chatSeconds: number
+  voteSeconds: number
+  /** Time left in the current stage when the snapshot was built; null once closed. */
+  remainingMs: number | null
+  chat: ChatMessage[]
+  result: ReferendumResult | null
+  appliesFrom: number
+  /** Player screens: this company's vote, and whether it may vote at all. */
+  myVote?: VoteChoice | null
+  canVote?: boolean
+  /** Host screen: the count while the vote is open. Players see the result only. */
+  live?: { yes: number; no: number; eligible: number }
+}
+
 export interface GameState {
   roomCode: string
   seed: number
@@ -432,6 +582,14 @@ export interface GameState {
   energyCrisis: EnergyCrisis | null
   /** The interest-rate cut running or triggered, if the instructor has called one. */
   rateCut: RateCut | null
+  /** Nuclear plants closing, if the instructor has announced it. Permanent once it lands. */
+  nuclearClosure: NuclearClosure | null
+  /** Hybrid: the free allocation cut, if the instructor has announced it. Permanent. */
+  freeAllocationCut: FreeAllocationCut | null
+  /** The referendum running, or the last one held (kept, closed, so screens can show its result). */
+  referendum: Referendum | null
+  /** The borrowing cap the class voted in, if one passed. */
+  borrowLimitRule: BorrowLimitRule | null
   /** Companies the market-cornering screen has flagged, by player id. */
   screening: Record<string, ScreeningEntry>
 }
@@ -491,10 +649,17 @@ export interface BorrowView {
   basis: 'auction' | 'free'
   /** Whether the option is selected this year (it starts out selected). */
   optIn: boolean
-  /** Most it may borrow this year, in tonnes; null = no limit. */
+  /**
+   * Most it may borrow for this year's shortfall, in tonnes, as next year's share looks NOW; null =
+   * no limit, or already decided. An estimate: the share is only known when next year opens.
+   */
   room: number | null
-  /** Tonnes borrowed when this year settled; null until then. */
+  /** This year's shortfall waiting for next year's share (after settlement, until next year opens). */
+  pending: number | null
+  /** Tonnes of this year's shortfall borrowed, once next year opened; null until then. */
   borrowed: number | null
+  /** How LAST year's shortfall came out when this year opened: borrowed, fined (t) and the fine (€). */
+  lastYear: { borrowed: number; fined: number; fine: number } | null
 }
 
 /** What a player knows about themself in the current year. */
@@ -637,6 +802,14 @@ export interface PlayerSnapshot {
    * headline and works the rest out from its own numbers.
    */
   rateCut: RateCutNotice | null
+  /** Nuclear plants closing, announced or in force. */
+  nuclearClosure: NuclearClosure | null
+  /** Hybrid: the free allocation cut, announced or in force. */
+  freeAllocationCut: FreeAllocationCut | null
+  /** The borrowing cap the class voted in, if one passed. */
+  borrowLimitRule: BorrowLimitRule | null
+  /** The referendum running, or the last one held. */
+  referendum: ReferendumView | null
   /**
    * The multiplier on what a retrofit costs THIS round: every discount in force, composed.
    *
@@ -777,6 +950,11 @@ export interface HostSnapshot {
   energyCrisis: EnergyCrisis | null
   /** The rate cut running or just ended, mechanics included — the host sees everything. */
   rateCut: RateCut | null
+  nuclearClosure: NuclearClosure | null
+  freeAllocationCut: FreeAllocationCut | null
+  borrowLimitRule: BorrowLimitRule | null
+  /** The referendum running or last held, with the live count while the vote is open. */
+  referendum: ReferendumView | null
   /**
    * The round a shock triggered right now would open in — this one, or the next if this
    * round's emissions are already drawn. Computed by the server rather than inferred from

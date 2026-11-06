@@ -5,6 +5,7 @@
 import {
   ANNOUNCEMENT_FACTS,
   ANNOUNCEMENT_KEYS,
+  ANNOUNCEMENT_KEYS_V4,
   ANNOUNCEMENT_STATES,
   announcements,
   type AnnouncementKey,
@@ -54,9 +55,18 @@ export interface Feature {
  *   2  + borrowing: whether it is on, the room, and whether the company has it selected
  *   3  + screening: the "You are under screening" notice — whether it is shown, how many
  *      reasons it gives, and what the instructor has taken back so far
+ *   4  + the messages added 2026-11-01: nuclear plants closing, the hybrid free allocation cut
+ *      and a voted borrowing cap — their state and the numbers they state. The cap itself was
+ *      already visible in set 2's `borrow_room`.
+ *      + the profit or loss (2026-11-06): the last round's, its square, and this game's mean
+ *      profit and mean squared profit — together the spread of the profits, the risk the
+ *      character's ρ weighs.
+ *
+ * `LATEST_FEATURE_SET` stays 3 until a model is trained on 4: it is what a model file that
+ * names no set is checked against (server/rl/models.ts).
  */
-export type FeatureSet = 1 | 2 | 3
-export const FEATURE_SETS: FeatureSet[] = [1, 2, 3]
+export type FeatureSet = 1 | 2 | 3 | 4
+export const FEATURE_SETS: FeatureSet[] = [1, 2, 3, 4]
 export const LATEST_FEATURE_SET: FeatureSet = 3
 
 export interface Cell {
@@ -263,6 +273,22 @@ function buildFeatures(): Feature[] {
   add('screening', 'screen_on', 'you.screening: "You are under screening" is shown', undefined, 3)
   add('screening', 'screen_reasons', 'you.screening.reasons: how many (at most 5)', undefined, 3)
   add('screening', 'screen_penalized', 'you.screening.penalized / baseline', undefined, 3)
+
+  // Set 4 — the later announcements, by the same recipe as the first four.
+  for (const key of ANNOUNCEMENT_KEYS_V4) {
+    for (const state of ANNOUNCEMENT_STATES) {
+      add('events', `ev_${key}_${state}`, `announcements(): ${key} is ${state}`, undefined, 4)
+    }
+  }
+  for (const key of ANNOUNCEMENT_KEYS_V4) {
+    for (const fact of ANNOUNCEMENT_FACTS[key]) {
+      add('events', eventFeatureName(key, fact), `announcements(): ${key} facts.${fact}`, undefined, 4)
+    }
+  }
+  add('memory', 'last_profit', "year-summary: the round's profit / (baseline × penalty)", undefined, 4)
+  add('memory', 'last_profit_sq', 'last_profit squared', undefined, 4)
+  add('memory', 'profit_mean', "this game's settled rounds: mean profit", undefined, 4)
+  add('memory', 'profit_sq_mean', "this game's settled rounds: mean squared profit", undefined, 4)
 
   return out
 }
@@ -527,7 +553,7 @@ export function computeFeatures(snap: PlayerSnapshot, mem: Memory, step: StepKin
 
   // --- events: exactly what the announcement text states --------------------------------
   const items = announcements(snap)
-  for (const key of ANNOUNCEMENT_KEYS) {
+  for (const key of [...ANNOUNCEMENT_KEYS, ...ANNOUNCEMENT_KEYS_V4]) {
     const item = items.find((a) => a.key === key)
     for (const state of ANNOUNCEMENT_STATES) bit(`ev_${key}_${state}`, item?.state === state)
     for (const fact of ANNOUNCEMENT_FACTS[key]) {
@@ -584,6 +610,15 @@ export function computeFeatures(snap: PlayerSnapshot, mem: Memory, step: StepKin
   const priceMove = lastPrice !== null && mem.prevDecisionPrice !== null ? lastPrice - mem.prevDecisionPrice : null
   put('price_change_last_decision', div(priceMove, P), priceMove)
   put('ev_rates_seen_rounds', mem.ratesSeenRounds / 20, mem.ratesSeenRounds)
+  // Set 4: the profit or loss. Clipped like the other money features, so one wild round cannot
+  // dominate the input; the raw value is kept for the table view.
+  const lastProfit = last?.profit ?? null
+  put('last_profit', lastProfit === null ? 0 : clip(lastProfit, -5, 5), lastProfit)
+  put('last_profit_sq', lastProfit === null ? 0 : clip(lastProfit * lastProfit, 0, 25), lastProfit === null ? null : lastProfit * lastProfit)
+  const profitMean = mem.profitCount > 0 ? mem.profitSum / mem.profitCount : null
+  const profitSqMean = mem.profitCount > 0 ? mem.profitSqSum / mem.profitCount : null
+  put('profit_mean', profitMean === null ? 0 : clip(profitMean, -5, 5), profitMean)
+  put('profit_sq_mean', profitSqMean === null ? 0 : clip(profitSqMean, 0, 25), profitSqMean)
 
   return cells
 }

@@ -44,6 +44,9 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     finalPriceFallbackFraction: 1,
     // Up to the whole of next year's share, as EU-ETS allowed within a trading period.
     borrowing: { enabled: true, limitFrac: 1 },
+    // A cap of 7% of a company's planned emission if the class votes it in; a minute to talk
+    // it over, fifteen seconds to vote.
+    referendum: { borrowLimitFrac: 0.07, chatSeconds: 60, voteSeconds: 15 },
     // The last ten prints of the previous year — where the market closed, not its yearly mean.
     referenceTrades: 10,
   },
@@ -73,6 +76,9 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     // depends on whether it answers the shock by investing or by buying — which is the
     // decision the event exists to force, and the reason neither number is announced.
     rateCut: { rounds: 2, investmentDiscount: 0.07, demandIncrease: 0.08 },
+    // Five percent more for every company, seven for Power & Utilities, which loses the
+    // plants; announced a round ahead so covering early is an option (designed 2026-11-01).
+    nuclear: { magnitude: 0.05, sectorMagnitude: { 'Power & Utilities': 0.07 }, leadRounds: 1 },
   },
   allocation: {
     // Grandfathering opens at the class's full baseline rather than 80% of it. The scarcity
@@ -106,6 +112,8 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       'Manufacturing & Chemicals': 0,
       Transport: 0,
     },
+    // Half of every free share, for good, a round after it is announced (hybrid only).
+    freeCut: { factor: 0.5, leadRounds: 1 },
     // The regulator will not sell more than 10% under what a tonne last traded at.
     auctionReserveFrac: 0.9,
     /**

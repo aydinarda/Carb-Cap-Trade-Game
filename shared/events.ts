@@ -1,5 +1,5 @@
 import type { Industry } from './constants'
-import type { BotType, CapMode, OrderSide, PlayerProfile, Snapshot } from './types'
+import type { BotType, CapMode, OrderSide, PlayerProfile, Snapshot, VoteChoice } from './types'
 
 export type Ack<T = unknown> = (
   response: ({ ok: true } & T) | { ok: false; error: string; code?: string },
@@ -57,6 +57,17 @@ export interface ClientToServerEvents {
    * only; neither magnitude leaves the host snapshot.
    */
   'host:announceRateCut': (payload: { cancel?: boolean }, ack: Ack) => void
+  /** Nuclear plants closing (permanent emission step), or withdraw it before it lands. */
+  'host:announceNuclear': (payload: { cancel?: boolean }, ack: Ack) => void
+  /** Hybrid only: halve every free share for good, or withdraw it before it is issued. */
+  'host:announceFreeCut': (payload: { cancel?: boolean }, ack: Ack) => void
+  /** Put a borrowing cap to the class (year summary): chat, then vote, each on a clock. */
+  'host:openReferendum': (
+    payload: { frac?: number; chatSeconds?: number; voteSeconds?: number },
+    ack: Ack,
+  ) => void
+  /** The instructor's line in the referendum chat, signed "Regulator". */
+  'host:referendumChat': (payload: { text: string }, ack: Ack) => void
   'host:startYear': (payload: Record<string, never>, ack: Ack) => void
   'host:closeCapStage': (payload: Record<string, never>, ack: Ack) => void
   'host:openTrade': (payload: Record<string, never>, ack: Ack) => void
@@ -98,6 +109,8 @@ export interface ClientToServerEvents {
   'player:cancelOrder': (payload: { orderId: string }, ack: Ack) => void
   /** Trade stage: invest to cut emissions by a fraction (0..1) of the expected. */
   'player:abate': (payload: { fraction: number }, ack: Ack) => void
+  'player:chat': (payload: { text: string }, ack: Ack) => void
+  'player:vote': (payload: { choice: VoteChoice }, ack: Ack) => void
 }
 
 export interface ServerToClientEvents {

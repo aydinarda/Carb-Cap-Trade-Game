@@ -45,8 +45,20 @@ function hostAction(
   }
 }
 
+/** How often the referendum clock moves stages on. The screens run their bars down locally. */
+const REFERENDUM_TICK_MS = 250
+
 export function registerSockets(io: IO): Broadcaster {
   const broadcaster = new Broadcaster(io)
+
+  // The referendum's clock: chat → vote → closed, in every room that has one running. Here
+  // rather than in `index.ts` so the play and table servers, which reuse these sockets, run it too.
+  setInterval(() => {
+    const now = Date.now()
+    for (const session of store.activeSessions()) {
+      if (session.referendumTick(now)) broadcaster.flushNow(session)
+    }
+  }, REFERENDUM_TICK_MS).unref()
 
   io.use((socket, next) => {
     // Reconnect path: map handshake token back to an identity
@@ -138,6 +150,23 @@ export function registerSockets(io: IO): Broadcaster {
         if (cancel) s.cancelRateCut()
         else s.announceRateCut()
       }))
+    socket.on('host:announceNuclear', ({ cancel }, ack) =>
+      hostAction(broadcaster, socket, ack, (s) => {
+        if (cancel) s.cancelNuclear()
+        else s.announceNuclear()
+      }))
+    socket.on('host:announceFreeCut', ({ cancel }, ack) =>
+      hostAction(broadcaster, socket, ack, (s) => {
+        if (cancel) s.cancelFreeCut()
+        else s.announceFreeCut()
+      }))
+    socket.on('host:openReferendum', ({ frac, chatSeconds, voteSeconds }, ack) =>
+      hostAction(broadcaster, socket, ack, (s) => {
+        const num = (x: unknown) => (x === undefined || x === null ? undefined : Number(x))
+        s.openReferendum({ frac: num(frac), chatSeconds: num(chatSeconds), voteSeconds: num(voteSeconds) })
+      }))
+    socket.on('host:referendumChat', ({ text }, ack) =>
+      hostAction(broadcaster, socket, ack, (s) => s.postChat('host', String(text ?? ''))))
     socket.on('host:startYear', (_p, ack) =>
       hostAction(broadcaster, socket, ack, (s) => s.startYear()))
     socket.on('host:closeCapStage', (_p, ack) =>
@@ -145,7 +174,12 @@ export function registerSockets(io: IO): Broadcaster {
     socket.on('host:openTrade', (_p, ack) =>
       hostAction(broadcaster, socket, ack, (s) => s.openTrade()))
     socket.on('host:closeTrade', (_p, ack) =>
-      hostAction(broadcaster, socket, ack, (s) => s.closeTrade()))
+      hostAction(broadcaster, socket, ack, (s) => {
+        // RL agents take the abatement decision they would otherwise have reached only after their
+        // last trade slot — the host may close the market before that.
+        agents.finishWindow(s)
+        s.closeTrade()
+      }))
     socket.on('host:advanceYear', (_p, ack) =>
       hostAction(broadcaster, socket, ack, (s) => s.advanceYear()))
     socket.on('host:endGame', (_p, ack) =>
@@ -227,6 +261,14 @@ export function registerSockets(io: IO): Broadcaster {
       playerAction(ack, (s, pid) => s.cancelOrder(pid, String(orderId))))
     socket.on('player:abate', ({ fraction }, ack) =>
       playerAction(ack, (s, pid) => s.setAbatement(pid, Number(fraction))))
+    // The referendum: everyone should see a line or a vote at once, not on the next coalesced flush.
+    socket.on('player:chat', ({ text }, ack) =>
+      playerAction(ack, (s, pid) => {
+        s.postChat(pid, String(text ?? ''))
+        broadcaster.flushNow(s)
+      }))
+    socket.on('player:vote', ({ choice }, ack) =>
+      playerAction(ack, (s, pid) => s.castVote(pid, choice)))
 
     socket.on('disconnect', () => {
       broadcaster.leave(socket)

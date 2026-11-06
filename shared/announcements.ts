@@ -13,7 +13,7 @@ import type { PlayerSnapshot } from './types'
  * literally in `title` or `detail`. That is what keeps the covert rate cut covert for the agent
  * too: its message states no number, so its `facts` is empty. `rl/__tests__/rl.spec.ts` pins it.
  */
-export type AnnouncementKey = 'crisis' | 'rates' | 'subsidy' | 'tech'
+export type AnnouncementKey = 'crisis' | 'rates' | 'subsidy' | 'tech' | 'nuclear' | 'freeCut' | 'borrowRule'
 export type AnnouncementState = 'pending' | 'active' | 'past'
 
 export interface Announcement {
@@ -24,7 +24,13 @@ export interface Announcement {
   facts: Record<string, number>
 }
 
+/**
+ * The first four, in the order observation sets 1–3 are built from — part of every shipped
+ * model's feature list, so never extended. Later messages go in `ANNOUNCEMENT_KEYS_V4`.
+ */
 export const ANNOUNCEMENT_KEYS: AnnouncementKey[] = ['crisis', 'rates', 'subsidy', 'tech']
+/** Added 2026-11-01 (nuclear closure, free allocation cut, a voted borrowing cap); set 4 appends them. */
+export const ANNOUNCEMENT_KEYS_V4: AnnouncementKey[] = ['nuclear', 'freeCut', 'borrowRule']
 export const ANNOUNCEMENT_STATES: AnnouncementState[] = ['pending', 'active', 'past']
 
 /**
@@ -37,6 +43,9 @@ export const ANNOUNCEMENT_FACTS: Record<AnnouncementKey, string[]> = {
   rates: [],
   subsidy: ['discount_pct', 'from_round', 'rounds_to_start', 'rounds_left', 'until_round'],
   tech: ['cap_pct', 'from_round'],
+  nuclear: ['magnitude_pct', 'from_round'],
+  freeCut: ['cut_pct', 'from_round'],
+  borrowRule: ['limit_pct', 'from_round'],
 }
 
 export function announcements(snap: PlayerSnapshot): Announcement[] {
@@ -169,6 +178,74 @@ export function announcements(snap: PlayerSnapshot): Announcement[] {
         facts: { cap_pct: pct },
       })
     }
+  }
+
+  // Permanent, like the breakthrough: announced, then active for good. The number is THIS
+  // company's — Power & Utilities loses the plants and carries more of the gap.
+  const n = snap.nuclearClosure
+  if (n) {
+    const pct = Math.round((n.sectorMagnitude[snap.you.industry] ?? n.magnitude) * 100)
+    out.push(
+      year < n.fromYear
+        ? {
+            key: 'nuclear',
+            title: 'Nuclear plants are closing',
+            detail: `Fossil plants will fill the gap: your emissions rise ${pct}% from round ${n.fromYear}, for good.`,
+            state: 'pending',
+            facts: { magnitude_pct: pct, from_round: n.fromYear },
+          }
+        : {
+            key: 'nuclear',
+            title: 'Nuclear plants closed',
+            detail: `Fossil plants fill the gap: your emissions are ${pct}% higher since round ${n.fromYear}, for good.`,
+            state: 'active',
+            facts: { magnitude_pct: pct, from_round: n.fromYear },
+          },
+    )
+  }
+
+  const f = snap.freeAllocationCut
+  if (f) {
+    const pct = Math.round((1 - f.factor) * 100)
+    out.push(
+      year < f.fromYear
+        ? {
+            key: 'freeCut',
+            title: `Free allocation cut by ${pct}% from round ${f.fromYear}`,
+            detail: 'The cap is unchanged: what is no longer given away is sold at the auction.',
+            state: 'pending',
+            facts: { cut_pct: pct, from_round: f.fromYear },
+          }
+        : {
+            key: 'freeCut',
+            title: `Free allocation cut by ${pct}%`,
+            detail: `In force since round ${f.fromYear}: the cut is sold at the auction.`,
+            state: 'active',
+            facts: { cut_pct: pct, from_round: f.fromYear },
+          },
+    )
+  }
+
+  const b = snap.borrowLimitRule
+  if (b) {
+    const pct = Math.round(b.frac * 1000) / 10
+    out.push(
+      year < b.fromYear
+        ? {
+            key: 'borrowRule',
+            title: `Borrowing capped at ${pct}% of emissions from round ${b.fromYear}`,
+            detail: 'The class voted it in. A shortfall beyond the cap is fined that round.',
+            state: 'pending',
+            facts: { limit_pct: pct, from_round: b.fromYear },
+          }
+        : {
+            key: 'borrowRule',
+            title: `Borrowing capped at ${pct}% of emissions`,
+            detail: `Voted in, in force since round ${b.fromYear}. A shortfall beyond the cap is fined that round.`,
+            state: 'active',
+            facts: { limit_pct: pct, from_round: b.fromYear },
+          },
+    )
   }
 
   return out

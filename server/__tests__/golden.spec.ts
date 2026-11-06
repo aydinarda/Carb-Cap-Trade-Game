@@ -148,6 +148,7 @@ describe('golden — grandfathering', () => {
         "settlement": {
           "P1": {
             "abatementCost": 5627,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 0,
             "sellIncome": 480,
@@ -156,6 +157,7 @@ describe('golden — grandfathering', () => {
           },
           "P2": {
             "abatementCost": 0,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 0,
             "sellIncome": 0,
@@ -164,6 +166,7 @@ describe('golden — grandfathering', () => {
           },
           "P3": {
             "abatementCost": 6114.4,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 480,
             "sellIncome": 0,
@@ -227,6 +230,7 @@ describe('golden — grandfathering', () => {
         "settlement": {
           "P1": {
             "abatementCost": 6888.7,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 0,
             "sellIncome": 480,
@@ -235,6 +239,7 @@ describe('golden — grandfathering', () => {
           },
           "P2": {
             "abatementCost": 0,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 0,
             "sellIncome": 0,
@@ -243,6 +248,7 @@ describe('golden — grandfathering', () => {
           },
           "P3": {
             "abatementCost": 12698.8,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 480,
             "sellIncome": 0,
@@ -326,6 +332,7 @@ describe('golden — benchmarking', () => {
         "settlement": {
           "P1": {
             "abatementCost": 5627,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 0,
             "sellIncome": 480,
@@ -334,6 +341,7 @@ describe('golden — benchmarking', () => {
           },
           "P2": {
             "abatementCost": 0,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 0,
             "sellIncome": 0,
@@ -342,6 +350,7 @@ describe('golden — benchmarking', () => {
           },
           "P3": {
             "abatementCost": 6114.4,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 480,
             "sellIncome": 0,
@@ -405,6 +414,7 @@ describe('golden — benchmarking', () => {
         "settlement": {
           "P1": {
             "abatementCost": 6888.7,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 0,
             "sellIncome": 480,
@@ -413,6 +423,7 @@ describe('golden — benchmarking', () => {
           },
           "P2": {
             "abatementCost": 0,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 0,
             "sellIncome": 0,
@@ -421,6 +432,7 @@ describe('golden — benchmarking', () => {
           },
           "P3": {
             "abatementCost": 12698.8,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 480,
             "sellIncome": 0,
@@ -508,6 +520,7 @@ describe('golden — auctioning', () => {
         "settlement": {
           "P1": {
             "abatementCost": 5627,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 40500,
             "sellIncome": 480,
@@ -516,6 +529,7 @@ describe('golden — auctioning', () => {
           },
           "P2": {
             "abatementCost": 0,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 13500,
             "sellIncome": 0,
@@ -524,6 +538,7 @@ describe('golden — auctioning', () => {
           },
           "P3": {
             "abatementCost": 6114.4,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 31980,
             "sellIncome": 0,
@@ -591,6 +606,7 @@ describe('golden — auctioning', () => {
         "settlement": {
           "P1": {
             "abatementCost": 6888.7,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 49500,
             "sellIncome": 480,
@@ -599,6 +615,7 @@ describe('golden — auctioning', () => {
           },
           "P2": {
             "abatementCost": 0,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 0,
             "sellIncome": 0,
@@ -607,6 +624,7 @@ describe('golden — auctioning', () => {
           },
           "P3": {
             "abatementCost": 12698.8,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 38980,
             "sellIncome": 0,
@@ -697,12 +715,13 @@ describe('golden — hybrid', () => {
         "regulatorPool": 1514.3,
         "score": {
           "P1": 54647,
-          "P2": 5140,
+          "P2": 0,
           "P3": 40380.9,
         },
         "settlement": {
           "P1": {
             "abatementCost": 5627,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 49500,
             "sellIncome": 480,
@@ -711,14 +730,16 @@ describe('golden — hybrid', () => {
           },
           "P2": {
             "abatementCost": 0,
-            "penaltyCost": 5140,
+            "carriedPenaltyCost": 0,
+            "penaltyCost": 0,
             "purchaseCost": 0,
             "sellIncome": 0,
             "shortage": 188.8,
-            "yearCost": 5140,
+            "yearCost": 0,
           },
           "P3": {
             "abatementCost": 6114.4,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 34266.5,
             "sellIncome": 0,
@@ -780,12 +801,13 @@ describe('golden — hybrid', () => {
         "regulatorPool": 1461.4,
         "score": {
           "P1": 110555.7,
-          "P2": 29650,
+          "P2": 5140,
           "P3": 84436.7,
         },
         "settlement": {
           "P1": {
             "abatementCost": 6888.7,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 49500,
             "sellIncome": 480,
@@ -794,14 +816,16 @@ describe('golden — hybrid', () => {
           },
           "P2": {
             "abatementCost": 0,
-            "penaltyCost": 24510,
+            "carriedPenaltyCost": 5140,
+            "penaltyCost": 0,
             "purchaseCost": 0,
             "sellIncome": 0,
             "shortage": 377.7,
-            "yearCost": 24510,
+            "yearCost": 5140,
           },
           "P3": {
             "abatementCost": 12698.8,
+            "carriedPenaltyCost": 0,
             "penaltyCost": 0,
             "purchaseCost": 31357,
             "sellIncome": 0,

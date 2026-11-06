@@ -4,14 +4,17 @@ import type { Industry } from '@shared/constants'
 import type {
   CapMode,
   EnergyCrisis,
+  FreeAllocationCut,
   HostConfigView,
   HostSnapshot,
+  NuclearClosure,
   RateCut,
   SubsidyWindow,
   TechUnlock,
 } from '@shared/types'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
+import { ChatInput, ChatLog, proposalText, ResultLine, stageLabel, StageClock } from '../../components/game/referendum'
 import { cn, MODE_LABELS } from '../../components/game/theme'
 import { useGame } from '../../net/GameContext'
 
@@ -810,6 +813,229 @@ export function RateCutPanel({
           exercise, so don't explain it to the room.
         </p>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Nuclear plants closing — permanent, unlike the energy crisis: one step up and no step back
+ * down. Announced ahead, so the class can cover or abate before it bites; withdrawable only
+ * until it lands.
+ */
+export function NuclearPanel({
+  closure,
+  currentYear,
+  config,
+}: {
+  closure: NuclearClosure | null
+  currentYear: number
+  config: HostConfigView
+}) {
+  const { hostAction } = useGame()
+  const [busy, setBusy] = useState(false)
+  const pct = (x: number) => Math.round(x * 100)
+  const sectors = Object.entries(config.nuclearSectorMagnitude)
+    .map(([industry, m]) => `${industry} +${pct(m ?? 0)}%`)
+    .join(', ')
+
+  const act = async (cancel: boolean) => {
+    setBusy(true)
+    const ok = await hostAction('host:announceNuclear', cancel ? { cancel: true } : {})
+    setBusy(false)
+    if (ok) toast.success(cancel ? 'Nuclear closure withdrawn' : 'Nuclear closure announced')
+  }
+
+  const landed = closure !== null && currentYear >= closure.fromYear
+  return (
+    <div className="flex flex-col gap-3">
+      {closure ? (
+        <div
+          className={cn(
+            'rounded-lg border px-3 py-2 text-xs font-mono',
+            'border-destructive/50 bg-destructive/10 text-destructive',
+          )}
+        >
+          <div className="font-bold">
+            {landed ? 'IN FORCE' : 'ANNOUNCED'} · emissions +{pct(closure.magnitude)}%
+            {Object.entries(closure.sectorMagnitude).map(([i, m]) => ` · ${i} +${pct(m ?? 0)}%`)}
+          </div>
+          <div className="text-muted-foreground mt-0.5">
+            {landed ? `Since round ${closure.fromYear} — for good` : `From round ${closure.fromYear}, for good`}
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11px] text-muted-foreground font-mono">
+          Carbon-free baseload leaves the grid for good and fossil plants fill the gap. Every
+          company emits {pct(config.nuclearMagnitude)}% more{sectors ? ` (${sectors})` : ''}, from{' '}
+          {config.nuclearLeadRounds === 0 ? 'this round' : `${config.nuclearLeadRounds} round(s) after the announcement`}.
+          Unlike the energy crisis it never steps back down.
+        </p>
+      )}
+      {!closure && (
+        <Button onClick={() => void act(false)} disabled={busy} variant="destructive" className="font-bold w-full">
+          Announce closure
+        </Button>
+      )}
+      {closure && !landed && (
+        <Button variant="outline" onClick={() => void act(true)} disabled={busy} className="font-mono text-xs">
+          Withdraw before it lands
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The hybrid free allocation cut: every free share × the configured factor, for good, from the
+ * next allocation on. The cap does not move, so the cut is sold at the auction instead. Off in
+ * every other mode — there is no auction there for it to go to.
+ */
+export function FreeCutPanel({
+  cut,
+  currentYear,
+  capMode,
+  config,
+}: {
+  cut: FreeAllocationCut | null
+  currentYear: number
+  capMode: CapMode | null
+  config: HostConfigView
+}) {
+  const { hostAction } = useGame()
+  const [busy, setBusy] = useState(false)
+  const pct = Math.round((1 - config.freeCutFactor) * 100)
+  const hybrid = capMode === 'hybrid'
+
+  const act = async (cancel: boolean) => {
+    setBusy(true)
+    const ok = await hostAction('host:announceFreeCut', cancel ? { cancel: true } : {})
+    setBusy(false)
+    if (ok) toast.success(cancel ? 'Free allocation cut withdrawn' : 'Free allocation cut announced')
+  }
+
+  const inForce = cut !== null && currentYear >= cut.fromYear
+  return (
+    <div className="flex flex-col gap-3">
+      {cut ? (
+        <div className="rounded-lg border px-3 py-2 text-xs font-mono border-insight/50 bg-insight/10 text-insight">
+          <div className="font-bold">
+            {inForce ? 'IN FORCE' : 'ANNOUNCED'} · free allocation −{Math.round((1 - cut.factor) * 100)}%
+          </div>
+          <div className="text-muted-foreground mt-0.5">
+            {inForce ? `Since round ${cut.fromYear}` : `From round ${cut.fromYear}`} · the cut is sold at the auction
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11px] text-muted-foreground font-mono">
+          {hybrid
+            ? `Every sector's free share is cut by ${pct}%, for good, from the next allocation. The cap does not move: what is no longer given away is sold at the auction.`
+            : 'Hybrid mode only — under this mode there is no auction for the cut to go to.'}
+        </p>
+      )}
+      {!cut && (
+        <Button onClick={() => void act(false)} disabled={busy || !hybrid} className="font-bold w-full">
+          Cut free allocation
+        </Button>
+      )}
+      {cut && !inForce && (
+        <Button variant="outline" onClick={() => void act(true)} disabled={busy} className="font-mono text-xs">
+          Withdraw before it is issued
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The borrowing referendum, from the host's side: set the cap and the two clocks, open it in a
+ * year summary, follow the chat (and speak in it, as "Regulator") and the live count. Next year
+ * stays locked until the vote closes.
+ */
+export function ReferendumHostPanel({ snap }: { snap: HostSnapshot }) {
+  const { hostAction } = useGame()
+  const { config } = snap
+  const [frac, setFrac] = useState(String(Math.round(config.referendumBorrowLimitFrac * 1000) / 10))
+  const [chatSeconds, setChatSeconds] = useState(String(config.referendumChatSeconds))
+  const [voteSeconds, setVoteSeconds] = useState(String(config.referendumVoteSeconds))
+  const [busy, setBusy] = useState(false)
+  const r = snap.referendum
+  const open = r !== null && r.stage !== 'closed'
+  const canOpen = snap.phase === 'yearSummary' && config.borrowingEnabled && !open
+
+  const start = async () => {
+    setBusy(true)
+    const ok = await hostAction('host:openReferendum', {
+      frac: Number(frac) / 100,
+      chatSeconds: Number(chatSeconds),
+      voteSeconds: Number(voteSeconds),
+    })
+    setBusy(false)
+    if (ok) toast.success('Referendum open — discussion first, then the vote')
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {snap.borrowLimitRule && (
+        <div className="rounded-lg border px-3 py-2 text-xs font-mono border-primary/50 bg-primary/10 text-primary">
+          <div className="font-bold">
+            BORROWING CAPPED · {Math.round(snap.borrowLimitRule.frac * 1000) / 10}% of planned emission
+          </div>
+          <div className="text-muted-foreground mt-0.5">Voted in · from round {snap.borrowLimitRule.fromYear}</div>
+        </div>
+      )}
+
+      {r && (open || r.year === snap.currentYear) ? (
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-mono">
+            <span className="font-bold">{stageLabel(r.stage)}</span>
+            {r.live && r.stage === 'vote' && (
+              <span className="text-muted-foreground">
+                {' '}· {r.live.yes} yes · {r.live.no} no · {r.live.eligible - r.live.yes - r.live.no} not yet
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] font-mono text-muted-foreground">{proposalText(r.proposal, r.appliesFrom)}</p>
+          {open && <StageClock view={r} />}
+          <ChatLog messages={r.chat} empty="No messages yet." />
+          {r.stage === 'chat' && <ChatInput onSend={(text) => hostAction('host:referendumChat', { text })} />}
+          {r.result && <ResultLine result={r.result} appliesFrom={r.appliesFrom} />}
+        </div>
+      ) : (
+        <p className="text-[11px] text-muted-foreground font-mono">
+          Put a borrowing cap to the class in a year summary: they talk it over, then vote. One
+          company, one vote; bots and agents vote by their own borrowing record. If it passes, no
+          company may borrow more than the cap × its planned emission from the next round.
+        </p>
+      )}
+
+      {!open && (
+        <div className="flex items-end gap-2">
+          {[
+            ['Cap % of emissions', frac, setFrac],
+            ['Chat s', chatSeconds, setChatSeconds],
+            ['Vote s', voteSeconds, setVoteSeconds],
+          ].map(([label, value, set]) => (
+            <div key={label as string} className="flex flex-col gap-1 w-24">
+              <label className="text-[10px] font-mono uppercase text-muted-foreground">{label as string}</label>
+              <Input
+                type="number"
+                min={0}
+                value={value as string}
+                onChange={(e) => (set as (v: string) => void)(e.target.value)}
+                className="font-mono"
+              />
+            </div>
+          ))}
+          <Button onClick={() => void start()} disabled={busy || !canOpen} className="font-bold flex-1">
+            Open referendum
+          </Button>
+        </div>
+      )}
+      {!open && !canOpen && (
+        <p className="text-[10px] font-mono text-muted-foreground">
+          {config.borrowingEnabled ? 'Opens in a year summary.' : 'Borrowing is switched off in this game.'}
+        </p>
+      )}
     </div>
   )
 }

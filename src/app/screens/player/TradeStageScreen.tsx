@@ -566,14 +566,18 @@ function BorrowToggle({ borrow, short, penaltyRate }: { borrow: BorrowView; shor
     await setBorrow(on)
     setBusy(false)
   }
-  const room = borrow.room === null ? 'no limit' : `up to ${borrow.room.toLocaleString()} t`
+  // An estimate: the room is next year's share, which is only known when next year opens.
+  const room = borrow.room === null ? 'no limit' : `about ${borrow.room.toLocaleString()} t`
   const covers = borrow.room === null ? short : Math.min(short, borrow.room)
+  const last = borrow.lastYear && borrow.lastYear.fined > 0
+    ? ` · last year ${borrow.lastYear.fined.toLocaleString()} t did not fit this year's share: fined ${borrow.lastYear.fine.toLocaleString()}`
+    : ''
   const detail =
-    short <= 0
-      ? `${room}, no penalty · owed next year`
+    (short <= 0
+      ? `${room}, no penalty · owed next year · settled when next year opens`
       : borrow.optIn
-        ? `covers ${covers.toLocaleString()} of your ${short.toLocaleString()} t gap · owed next year`
-        : `off — the gap is fined at ${penaltyRate}/t`
+        ? `should cover about ${covers.toLocaleString()} of your ${short.toLocaleString()} t gap · owed next year · what next year's share can't cover is fined when it opens`
+        : `off — the gap is fined at ${penaltyRate}/t`) + last
   const glow = borrow.optIn ? 'rgba(99,244,91,0.45)' : 'rgba(255,179,26,0.45)'
   return (
     <motion.label

@@ -136,6 +136,17 @@ export interface MarketConfig {
     limitFrac: number | null
   }
   /**
+   * The borrowing referendum the instructor can call in a year summary (`Session.openReferendum`):
+   * the class talks for `chatSeconds`, then votes for `voteSeconds`. If it passes, from the next
+   * round on no company may borrow more than `borrowLimitFrac` of its planned emission; whatever
+   * a shortfall exceeds that by is fined that round, as any shortfall beyond the room already is.
+   */
+  referendum: {
+    borrowLimitFrac: number
+    chatSeconds: number
+    voteSeconds: number
+  }
+  /**
    * How many of the PREVIOUS year's closing prints the next year's reference price averages
    * over, volume-weighted.
    *
@@ -216,6 +227,20 @@ export interface EmissionsConfig {
     /** Share expected emissions rise by, from the demand the cheap credit creates. */
     demandIncrease: number
   }
+  /**
+   * Nuclear plants closing: carbon-free baseload leaves the grid for good and fossil plants fill
+   * the gap. Every company emits `magnitude` more from the round it lands in, a sector listed in
+   * `sectorMagnitude` its own figure instead — Power & Utilities carries the grid.
+   *
+   * PERMANENT, unlike the energy crisis: one step up, no step back down. Announced
+   * `leadRounds` ahead so the class can cover or abate before it bites. It composes with the
+   * other demand shocks through the same telescoping level (`Session.emissionLevel`).
+   */
+  nuclear: {
+    magnitude: number
+    sectorMagnitude: Partial<Record<Industry, number>>
+    leadRounds: number
+  }
 }
 
 export interface ReserveStep {
@@ -294,6 +319,17 @@ export interface AllocationConfig {
    * instead of loosening it. See `shared/engine/hybrid.ts`.
    */
   hybridFreeShare: Record<Industry, number>
+  /**
+   * The free allocation cut the instructor can announce under hybrid (`Session.announceFreeCut`):
+   * from `leadRounds` ahead on, every sector's free share is multiplied by `factor`, for good.
+   * The cap does not move, so what is no longer given away is sold at the auction instead —
+   * the shift from free allocation to auctioning the EU ETS made in Phase 3. Hybrid only:
+   * under grandfathering or benchmarking there is no auction for the cut to go to.
+   */
+  freeCut: {
+    factor: number
+    leadRounds: number
+  }
   /**
    * Auction reserve price, as a fraction of the reference (the previous round's closing
    * price). The regulator sells nothing below it.

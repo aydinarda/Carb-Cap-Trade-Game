@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { RlModelInfo } from '../../shared/types'
 import { RlAgentManager, type ModelSource } from '../rl/manager'
@@ -9,9 +12,32 @@ import { hostSnapshot } from '../views'
 const f32 = (xs: number[]) => Buffer.from(new Float32Array(xs).buffer).toString('base64')
 const f64 = (xs: number[]) => Buffer.from(new Float64Array(xs).buffer).toString('base64')
 
+/**
+ * The models these tests load: one valid zero-weight model per mode, written to a temporary folder
+ * and served through `RL_MODELS_DIR`, so the tests never depend on which trained models happen to
+ * ship in server/rl/models (none, after the 2026-11-06 clean-up).
+ */
+const MODELS_DIR = mkdtempSync(path.join(tmpdir(), 'rl-server-models-'))
+for (const mode of ['grandfathering', 'benchmarking', 'auctioning', 'hybrid'] as RlMode[]) {
+  const features = featuresFor(mode, 1).map((f) => f.name)
+  const n = features.length
+  writeFileSync(
+    path.join(MODELS_DIR, `sifir-${mode}.json`),
+    JSON.stringify({
+      format: 1, id: `sifir-${mode}`, label: 'sifir', mode, features,
+      env: { round_seconds: 30, agent_every_seconds: 2 },
+      normalizer: { mean: f64(new Array(n).fill(0)), var: f64(new Array(n).fill(1)), clip: 10, epsilon: 0 },
+      layers: [{ in: n, out: 4, activation: 'linear', weight: f32(new Array(n * 4).fill(0)), bias: f32([0, 0, 0, 0]) }],
+      check: { obs: [new Array(n).fill(0)], action: [[0, 0, 0, 0]] },
+      log_std: [-1, -1, -1, -1],
+    }),
+  )
+}
+process.env.RL_MODELS_DIR = MODELS_DIR
+
 function usableHybrid(): RlModelInfo {
   const model = listModels().find((m) => m.error === null && m.mode === 'hybrid')
-  if (!model) throw new Error('no usable hybrid model in server/rl/models')
+  if (!model) throw new Error('no usable hybrid model in the test models folder')
   return model
 }
 
@@ -115,6 +141,47 @@ describe('RL agents in a game', () => {
     s.advanceYear()
     run(1_000)
     expect(stats()).toMatchObject({ bids: 2, errors: 0 })
+  })
+
+  it('takes its abatement decision when the host closes the market early, and only once', () => {
+    const manager = new RlAgentManager()
+    const s = new Session('hybrid', 3)
+    s.addPlayer('Alice', 'Heavy Materials')
+    s.addBot('compliance')
+    s.addBot('marketMaker')
+    manager.add(s, usableHybrid().id)
+    let now = 0
+    const run = (ms: number) => {
+      const end = now + ms
+      while (now < end) {
+        now += 250
+        manager.tick(now)
+      }
+    }
+    const stats = () => manager.statsFor(s)[0].stats
+
+    s.startYear()
+    run(1_000)
+    s.closeCapStage()
+    s.openTrade()
+    run(9_000) // a short market: 4 of the 15 slots
+    expect(stats()).toMatchObject({ trades: 4, abatements: 0 })
+    expect(manager.finishWindow(s)).toBe(true)
+    expect(stats()).toMatchObject({ trades: 4, abatements: 1, errors: 0 })
+    expect(manager.finishWindow(s)).toBe(false) // already decided this year
+    run(5_000)
+    expect(stats().trades).toBe(4) // nothing more once it has abated
+    s.closeTrade()
+
+    // A full window: the agent abates after its last slot, and the close adds nothing.
+    s.advanceYear()
+    run(1_000)
+    s.closeCapStage()
+    s.openTrade()
+    run(31_000)
+    expect(stats()).toMatchObject({ trades: 19, abatements: 2 })
+    expect(manager.finishWindow(s)).toBe(false)
+    expect(stats().abatements).toBe(2)
   })
 
   it('stops playing once kicked from the lobby', () => {

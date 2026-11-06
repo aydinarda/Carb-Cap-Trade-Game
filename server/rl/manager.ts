@@ -212,6 +212,34 @@ export class RlAgentManager {
     }
   }
 
+  /**
+   * The market is about to close: every agent that has not made this year's abatement decision
+   * makes it now, on the screen as it stands. The host decides when the market closes and the agent
+   * cannot know it, so tying the decision to the agent's last trade (as `step` does) would skip it
+   * whenever the window is shorter than the agent's 15 slots. In training the abatement is likewise
+   * the decision that comes after the window. Called right before `Session.closeTrade`. True if any
+   * agent decided.
+   */
+  finishWindow(session: Session): boolean {
+    const room = this.roomOf(session)
+    if (!room || session.state.phase !== 'trade') return false
+    const { currentYear: year, capMode } = session.state
+    let decided = false
+    for (const agent of room.agents) {
+      if (!session.state.players.includes(agent.player) || capMode !== agent.mode) continue
+      if (agent.window?.year === year && agent.window.done) continue
+      agent.window = { year, count: agent.window?.year === year ? agent.window.count : 0, nextAt: Infinity, done: true }
+      try {
+        this.decide(session, agent, 'abate')
+        decided = true
+      } catch (error) {
+        agent.stats.errors += 1
+        console.error(`RL agent ${agent.player.name} in ${session.state.roomCode}:`, error)
+      }
+    }
+    return decided
+  }
+
   private roomOf(session: Session): Room | undefined {
     const room = this.rooms.get(session.state.roomCode)
     return room && room.session === session ? room : undefined
@@ -279,6 +307,8 @@ export class RlAgentManager {
       agent.settledYear = year
       remember(agent.memory, playerSnapshot(session, agent.player.id))
     }
+    // A referendum's vote: by the shared rule, as the bots do — no model has learnt to vote.
+    if (phase === 'yearSummary') return session.castRuleVotes([agent.player.id])
     return false
   }
 

@@ -28,6 +28,7 @@ export function settleYear(
   abatementCost: Record<string, number>,
   rates: { penaltyRate: number },
   borrowed: Record<string, number> = {},
+  carriedPenalty: Record<string, number> = {},
 ): {
   settlement: Record<string, PlayerSettlement>
 } {
@@ -38,13 +39,15 @@ export function settleYear(
     const purchCost = round1(purchaseCost[id] ?? 0)
     const sellIncomeVal = round1(sellIncome[id] ?? 0)
     const penaltyCost = round1(Math.max(0, shortage - (borrowed[id] ?? 0)) * rates.penaltyRate)
+    const carried = round1(carriedPenalty[id] ?? 0)
     settlement[id] = {
       shortage,
       abatementCost: abateCost,
       purchaseCost: purchCost,
       sellIncome: sellIncomeVal,
       penaltyCost,
-      yearCost: round1(abateCost + purchCost - sellIncomeVal + penaltyCost),
+      carriedPenaltyCost: carried,
+      yearCost: round1(abateCost + purchCost - sellIncomeVal + penaltyCost + carried),
     }
   }
   return { settlement }

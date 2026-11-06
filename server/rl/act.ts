@@ -18,7 +18,9 @@ import { heldCredits, type StepKind } from './observe'
  *   a1  side: < −⅓ sell, > ⅓ buy, otherwise no order; at the abatement step, for a model that
  *       decides it (feature set 2), > 0 keeps "borrow from next year's share" selected
  *   a2  size: 0 … 1.5 × the shortfall (never less than 5% of planned emissions as the base)
- *   a3  price: reference × e^(0.5·a3), clipped to [0.5, 2 × penalty]
+ *   a3  price: reference × e^(0.5·a3), clipped to [0.5, 2 × penalty]; the reference is the
+ *       last trade, else this round's VWAP, else last round's close, else `openingFraction` ×
+ *       penalty — the bots' opening anchor (`market.openingReferenceFraction`, 25 €)
  *
  * The numbers in that table are `DEFAULT_DECODE`. A trained version may carry its own — they
  * are part of what the policy learned against, so a model is only ever decoded with the
@@ -37,6 +39,12 @@ export interface DecodeParams {
   priceFloor: number
   /** Highest price quoted, as a multiple of the penalty rate. */
   priceCap: number
+  /**
+   * The reference before anything has traded (round one), as a share of the penalty rate. The
+   * bots' opening anchor, so both start the game from the same price: 0.25 × 100 = 25 €. It was
+   * 0.5 (50 €) until 2026-11-06; models trained before then quoted round one off 50 €.
+   */
+  openingFraction: number
 }
 
 export const DEFAULT_DECODE: DecodeParams = {
@@ -46,6 +54,7 @@ export const DEFAULT_DECODE: DecodeParams = {
   priceSpread: 0.5,
   priceFloor: 0.5,
   priceCap: 2,
+  openingFraction: 0.25,
 }
 
 /** Fills in defaults and refuses anything unknown or out of range — the values arrive as JSON. */
@@ -57,6 +66,7 @@ export function resolveDecode(partial: Partial<DecodeParams> | undefined): Decod
   if (!(p.sizeScale > 0) || !(p.sizeFloor >= 0)) throw new Error('decode.sizeScale must be > 0 and sizeFloor ≥ 0')
   if (!(p.priceSpread > 0)) throw new Error('decode.priceSpread must be > 0')
   if (!(p.priceFloor > 0) || !(p.priceCap > 0)) throw new Error('decode.priceFloor and priceCap must be > 0')
+  if (!(p.openingFraction > 0 && p.openingFraction <= 2)) throw new Error('decode.openingFraction must be in (0, 2]')
   return p
 }
 
@@ -79,6 +89,12 @@ export type Intent =
 const clip = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
 const round1 = (x: number) => Math.round(x * 10) / 10
 
+/** The price an order is set around, from the screen: see a3 above. */
+export function referencePrice(snap: PlayerSnapshot, params: DecodeParams = DEFAULT_DECODE): number {
+  const P = snap.penaltyRate > 0 ? snap.penaltyRate : 100
+  return snap.market?.lastPrice ?? snap.market?.vwap ?? snap.prevMarketPrice ?? params.openingFraction * P
+}
+
 export function decode(
   action: readonly number[],
   snap: PlayerSnapshot,
@@ -94,7 +110,7 @@ export function decode(
   const P = snap.penaltyRate > 0 ? snap.penaltyRate : 100
   const planned = you.plannedEmission
   const gap = planned - heldCredits(snap)
-  const reference = snap.market?.lastPrice ?? snap.market?.vwap ?? snap.prevMarketPrice ?? 0.5 * P
+  const reference = referencePrice(snap, params)
   const price = round1(clip(reference * Math.exp(params.priceSpread * a[3]), params.priceFloor, params.priceCap * P))
   const size = (base: number) =>
     round1(((a[2] + 1) / 2) * params.sizeScale * Math.max(base, params.sizeFloor * planned))

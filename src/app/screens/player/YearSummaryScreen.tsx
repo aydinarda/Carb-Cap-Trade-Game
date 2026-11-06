@@ -11,8 +11,9 @@ export function YearSummaryScreen({ snap }: { snap: PlayerSnapshot }) {
   const agg = snap.classAggregate
   // Carry after this year = held − realized = −netPosition. + banked, − make-good debt.
   const carry = snap.you.netPosition !== null ? r1(-snap.you.netPosition) : 0
-  // Tonnes of this year's shortfall covered from next year's share — owed, but not fined.
-  const borrowed = snap.you.borrow?.borrowed ?? 0
+  // This year's shortfall waiting for next year's share: how much of it is borrowed (unfined) and
+  // how much is fined is decided when next year opens and its share is known.
+  const pending = snap.you.borrow?.pending ?? 0
   const share = snap.you.borrow?.basis === 'auction' ? "next year's auction share" : "next year's free allocation"
 
   return (
@@ -54,15 +55,16 @@ export function YearSummaryScreen({ snap }: { snap: PlayerSnapshot }) {
               <AlertTriangle size={15} className="shrink-0" />
               <span>
                 <strong>Make-good debt {carry}</strong>.{' '}
-                {borrowed > 0 && (
+                {pending > 0 && !ended && (
                   <>
-                    {r1(borrowed)} t of it borrowed from {share} — not fined.{' '}
+                    {r1(pending)} t waits for {share}: what it covers is borrowed, not fined; the rest is fined
+                    when next year opens.{' '}
                   </>
                 )}
                 {ended
-                  ? 'Bought back at the final market price.'
-                  : borrowed >= -carry
-                    ? 'Repay it next year: buy it back at the auction or in the market.'
+                  ? 'Fined where nothing could be borrowed, and bought back at the final market price.'
+                  : pending > 0
+                    ? 'Either way it is owed: buy it back at the auction or in the market.'
                     : "Carried into next year on top of the penalty — cover it or you'll be fined again."}
               </span>
             </>

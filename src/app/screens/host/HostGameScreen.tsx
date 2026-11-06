@@ -27,6 +27,9 @@ import { cn } from '../../components/game/theme'
 import { useGame } from '../../net/GameContext'
 import {
   EnergyCrisisPanel,
+  FreeCutPanel,
+  NuclearPanel,
+  ReferendumHostPanel,
   ModePicker,
   RateCutPanel,
   SettingsPanel,
@@ -51,6 +54,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
   const [historyId, setHistoryId] = useState<string | null>(null)
   const agg = snap.classAggregate
   const next = NEXT_ACTION[snap.phase]
+  const referendumOpen = snap.referendum !== null && snap.referendum.stage !== 'closed'
   const submittedPct =
     snap.players.length > 0 ? (agg.submittedCount / snap.players.length) * 100 : 0
   const requests = agg.totalRegulatorRequests ?? 0
@@ -123,7 +127,13 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           )}
         </div>
         {next && (
-          <Button onClick={() => void run(next.event)} disabled={busy} className="font-bold">
+          <Button
+            onClick={() => void run(next.event)}
+            // The server refuses to move on while the class is still talking or voting.
+            disabled={busy || referendumOpen}
+            title={referendumOpen ? 'Wait for the referendum to close' : undefined}
+            className="font-bold"
+          >
             {snap.phase === 'yearSummary' ? <SkipForward size={15} /> : <ArrowRight size={15} />}
             {next.label(snap.currentYear)}
           </Button>
@@ -132,6 +142,7 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
           <Button
             variant="outline"
             onClick={() => void hostAction('host:endGame')}
+            disabled={referendumOpen}
             className="font-mono text-xs"
           >
             <Flag size={13} /> End game
@@ -481,6 +492,42 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
                 demandIncrease={snap.config.rateCutDemandIncrease}
                 landsIn={snap.shockLandsIn}
               />
+            </div>
+
+            {/* Permanent, unlike the crisis beside it — announced ahead, never lifted. */}
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+              <div className="text-xs font-bold text-foreground mb-1">Nuclear plants close</div>
+              <div className="text-[11px] font-mono text-muted-foreground mb-3">
+                Emissions +{Math.round(snap.config.nuclearMagnitude * 100)}% class-wide
+                {Object.entries(snap.config.nuclearSectorMagnitude).map(
+                  ([industry, m]) => ` · ${industry} +${Math.round((m ?? 0) * 100)}%`,
+                )}{' '}
+                · permanent
+              </div>
+              <NuclearPanel closure={snap.nuclearClosure} currentYear={snap.currentYear} config={snap.config} />
+            </div>
+
+            <div className="rounded-lg border border-insight/30 bg-insight/5 p-4">
+              <div className="text-xs font-bold text-foreground mb-1">Free allocation cut</div>
+              <div className="text-[11px] font-mono text-muted-foreground mb-3">
+                Free shares −{Math.round((1 - snap.config.freeCutFactor) * 100)}% · moved to the auction · hybrid only
+              </div>
+              <FreeCutPanel
+                cut={snap.freeAllocationCut}
+                currentYear={snap.currentYear}
+                capMode={snap.capMode}
+                config={snap.config}
+              />
+            </div>
+
+            {/* Not an event but a vote: the class decides. Spans the row — it carries a chat. */}
+            <div className="rounded-lg border border-accent/40 bg-accent/5 p-4 lg:col-span-2">
+              <div className="text-xs font-bold text-foreground mb-1">Borrowing referendum</div>
+              <div className="text-[11px] font-mono text-muted-foreground mb-3">
+                Cap borrowing at {Math.round(snap.config.referendumBorrowLimitFrac * 1000) / 10}% of planned
+                emission · {snap.config.referendumChatSeconds}s discussion, {snap.config.referendumVoteSeconds}s vote
+              </div>
+              <ReferendumHostPanel snap={snap} />
             </div>
           </div>
         </div>

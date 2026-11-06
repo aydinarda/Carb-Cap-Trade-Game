@@ -21,6 +21,7 @@ describe('settleYear (cost ledger)', () => {
       purchaseCost: 400,
       sellIncome: 0,
       penaltyCost: 0,
+      carriedPenaltyCost: 0,
       yearCost: 400,
     })
     expect(settlement.P2.yearCost).toBe(0)
@@ -35,6 +36,7 @@ describe('settleYear (cost ledger)', () => {
       purchaseCost: 0,
       sellIncome: 0,
       penaltyCost: 800,
+      carriedPenaltyCost: 0,
       yearCost: 800,
     })
   })
@@ -48,6 +50,7 @@ describe('settleYear (cost ledger)', () => {
       purchaseCost: 0,
       sellIncome: 400,
       penaltyCost: 0,
+      carriedPenaltyCost: 0,
       yearCost: -400,
     })
   })

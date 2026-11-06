@@ -40,12 +40,14 @@ export function realizeYear(
   year: number,
   abatement: Record<string, number> = {},
   volatility: number = DEFAULT_GAME_CONFIG.emissions.volatility,
-  levelFactor = 1,
+  levelFactor: number | ((player: Player) => number) = 1,
 ): Record<string, number> {
   const realized: Record<string, number> = {}
-  const level = Math.max(0, levelFactor)
+  // One factor for the class, or one per company (a shock that hits sectors differently).
+  const levelOf = typeof levelFactor === 'function' ? levelFactor : () => levelFactor
   for (const player of players) {
     const r = Math.max(0, Math.min(1, abatement[player.id] ?? 0))
+    const level = Math.max(0, levelOf(player))
     const mean = expectedEmission(player, year) * (1 - r) * level
     const draw = rng.normal(mean, volatility * mean)
     realized[player.id] = round1(Math.max(0, draw))

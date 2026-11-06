@@ -21,6 +21,7 @@ import type {
   PlayerHistoryYear,
   PlayerSnapshot,
   PublicPlayerInfo,
+  ReferendumView,
 } from '../shared/types'
 import { listModels } from './rl/models'
 import type { Session } from './session'
@@ -50,13 +51,23 @@ function borrowView(
   record: Session['state']['years'][number] | null | undefined,
 ): BorrowView | null {
   if (!session.borrowingEnabled || !record || isPureTrader(player)) return null
-  const settled = record.borrowed !== undefined
-  const room = settled ? null : session.borrowRooms()[player.id]
+  // Decided only when next year opens (`Session.resolveBorrowing`); until then the room is an
+  // estimate and a settled shortfall is pending.
+  const decided = record.borrowed?.[player.id]
+  const pending = record.borrowPending?.[player.id]
+  const room = decided !== undefined ? null : session.borrowRooms()[player.id]
+  const prev = session.state.years[record.year - 1]
+  const fined = prev?.borrowFined?.[player.id]
   return {
     basis: session.borrowBasis,
     optIn: session.borrowOptedIn(player.id),
     room: room === undefined || room === null || room === Infinity ? null : room,
-    borrowed: settled ? (record.borrowed?.[player.id] ?? 0) : null,
+    pending: pending ? pending.short : null,
+    borrowed: decided ?? null,
+    lastYear:
+      fined === undefined
+        ? null
+        : { borrowed: prev?.borrowed?.[player.id] ?? 0, fined, fine: record.carriedPenalty?.[player.id] ?? 0 },
   }
 }
 
@@ -122,9 +133,52 @@ function hostConfigView(config: GameConfig): HostConfigView {
     rateCutRounds: config.emissions.rateCut.rounds,
     rateCutInvestmentDiscount: config.emissions.rateCut.investmentDiscount,
     rateCutDemandIncrease: config.emissions.rateCut.demandIncrease,
+    nuclearMagnitude: config.emissions.nuclear.magnitude,
+    nuclearSectorMagnitude: { ...config.emissions.nuclear.sectorMagnitude },
+    nuclearLeadRounds: config.emissions.nuclear.leadRounds,
+    freeCutFactor: config.allocation.freeCut.factor,
+    freeCutLeadRounds: config.allocation.freeCut.leadRounds,
+    referendumBorrowLimitFrac: config.market.referendum.borrowLimitFrac,
+    referendumChatSeconds: config.market.referendum.chatSeconds,
+    referendumVoteSeconds: config.market.referendum.voteSeconds,
     reserveEnabled: config.allocation.reserve.enabled,
     reserveSteps: config.allocation.reserve.steps.map((s) => ({ ...s })),
   }
+}
+
+/**
+ * The referendum as a screen shows it. A player sees the chat, its own vote and, once closed,
+ * the result; the host also sees the count while the vote is open. Time left is computed here,
+ * from the server's clock, and the screen runs its bar down from it.
+ */
+export function referendumView(session: Session, viewer: string | null, now = Date.now()): ReferendumView | null {
+  const r = session.state.referendum
+  if (!r) return null
+  const view: ReferendumView = {
+    id: r.id,
+    year: r.year,
+    proposal: { ...r.proposal },
+    stage: r.stage,
+    chatSeconds: r.chatSeconds,
+    voteSeconds: r.voteSeconds,
+    remainingMs: r.stageEndsAt === null ? null : Math.max(0, r.stageEndsAt - now),
+    chat: r.chat.map((m) => ({ ...m })),
+    result: r.result ? { ...r.result } : null,
+    appliesFrom: r.appliesFrom,
+  }
+  if (viewer === null) {
+    const voters = session.referendumVoters()
+    const votes = voters.map((id) => r.votes[id])
+    view.live = {
+      yes: votes.filter((v) => v === 'yes').length,
+      no: votes.filter((v) => v === 'no').length,
+      eligible: voters.length,
+    }
+  } else {
+    view.myVote = r.votes[viewer] ?? null
+    view.canVote = session.referendumVoters().includes(viewer)
+  }
+  return view
 }
 
 function publicRoster(session: Session): PublicPlayerInfo[] {
@@ -323,6 +377,10 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
           toYear: state.rateCut.toYear,
         }
       : null,
+    nuclearClosure: state.nuclearClosure,
+    freeAllocationCut: state.freeAllocationCut,
+    borrowLimitRule: state.borrowLimitRule,
+    referendum: referendumView(session, playerId),
     // Every discount in force, composed into the one number the preview may multiply by —
     // which is also how a covert discount reaches the client without its magnitude doing so.
     abatementCostFactor: session.installCostFactor(state.currentYear),
@@ -478,6 +536,10 @@ export function hostSnapshot(session: Session): HostSnapshot {
     energyCrisis: state.energyCrisis,
     // The host, and only the host, sees the rate cut's two arms.
     rateCut: state.rateCut,
+    nuclearClosure: state.nuclearClosure,
+    freeAllocationCut: state.freeAllocationCut,
+    borrowLimitRule: state.borrowLimitRule,
+    referendum: referendumView(session, null),
     shockLandsIn: session.nextShockRound(),
     auctionPrice: record?.auctionPrice ?? null,
     prevMarketPrice: session.previousMarketPrice(),

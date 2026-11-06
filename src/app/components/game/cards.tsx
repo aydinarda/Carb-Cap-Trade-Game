@@ -329,7 +329,7 @@ export function SettlementCard({
   settlement: PlayerSettlement
   scoreTotal: number
 }) {
-  const noPenalty = settlement.penaltyCost === 0
+  const noPenalty = settlement.penaltyCost === 0 && settlement.carriedPenaltyCost === 0
   return (
     <div
       className={cn(
@@ -366,6 +366,12 @@ export function SettlementCard({
           Sold: income{' '}
           <span className="text-primary">{settlement.sellIncome.toLocaleString()}</span>
         </span>
+        {settlement.carriedPenaltyCost > 0 && (
+          <span>
+            Last year&apos;s shortfall not covered by this year&apos;s share: penalty{' '}
+            <span className="text-destructive">{settlement.carriedPenaltyCost.toLocaleString()}</span>
+          </span>
+        )}
         <span>
           Shortage: <span className="text-foreground">{settlement.shortage}</span> tCO₂ → penalty{' '}
           <span className={noPenalty ? 'text-primary' : 'text-destructive'}>

@@ -25,6 +25,10 @@ export function stepBots(
   runtimeFor: (playerId: string) => BotRuntime,
 ): boolean {
   const phase = session.state.phase
+  // A referendum's vote: the bots vote by the shared rule, and say nothing in the chat.
+  if (phase === 'yearSummary') {
+    return session.castRuleVotes(session.state.players.filter((p) => p.isBot).map((p) => p.id))
+  }
   if (phase !== 'cap' && phase !== 'trade') return false
   // Under a free-allocation mode there is no primary auction to bid into, so the bots
   // only work the order book once the market opens.

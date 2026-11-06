@@ -5,6 +5,7 @@ import {
   buildMarketView,
   vwapOfLast,
   cancelOrder,
+  canVote,
   CAP_MECHANISMS,
   clearAuction,
   MAX_SWEEP_STEPS,
@@ -26,7 +27,9 @@ import {
   reservePot,
   realizeYear,
   round1,
+  ruleVote,
   settleYear,
+  tally,
   tradedCash,
   tradedNet,
   unabatedFrom,
@@ -37,8 +40,12 @@ import type {
   BotType,
   CapMode,
   EnergyCrisis,
+  FreeAllocationCut,
   GameState,
+  NuclearClosure,
   RateCut,
+  Referendum,
+  VoteChoice,
   TechUnlock,
   Order,
   OrderSide,
@@ -74,6 +81,11 @@ const roomCodeAlphabet = customAlphabet('ABCDEFGHJKMNPQRSTUVWXYZ23456789', 4)
 function inWindow(w: { fromYear: number; toYear: number } | null, year: number): boolean {
   return w !== null && year >= w.fromYear && year <= w.toYear
 }
+
+/** The referendum chat: longest message, shortest gap between two from one sender, lines kept. */
+export const CHAT_MAX_CHARS = 280
+export const CHAT_MIN_GAP_MS = 2000
+export const CHAT_KEEP = 200
 
 export class GameError extends Error {
   constructor(
@@ -125,6 +137,10 @@ export class Session {
       techUnlocks: [],
       energyCrisis: null,
       rateCut: null,
+      nuclearClosure: null,
+      freeAllocationCut: null,
+      referendum: null,
+      borrowLimitRule: null,
       screening: {},
     }
   }
@@ -132,6 +148,27 @@ export class Session {
   private get mechanism() {
     if (!this.state.capMode) throw new GameError('NO_MODE', 'No cap mode selected.')
     return CAP_MECHANISMS[this.state.capMode]
+  }
+
+  /**
+   * The config a year is allocated under: the session's own, with the hybrid free shares cut
+   * once a free allocation cut is in force. The cap is untouched, so the hybrid pool
+   * (`cap − free`) grows by exactly what the cut takes away.
+   */
+  allocationConfig(year: number): GameConfig {
+    const config = this.state.config
+    const cut = this.state.freeAllocationCut
+    if (this.state.capMode !== 'hybrid' || !cut || year < cut.fromYear) return config
+    const shares = config.allocation.hybridFreeShare
+    return {
+      ...config,
+      allocation: {
+        ...config.allocation,
+        hybridFreeShare: Object.fromEntries(
+          Object.entries(shares).map(([industry, share]) => [industry, share * cut.factor]),
+        ) as typeof shares,
+      },
+    }
   }
 
   currentYearRecord(): YearRecord | null {
@@ -183,27 +220,86 @@ export class Session {
    * its next free allocation. Pure-trader bots emit nothing and have no share.
    */
   nextYearShares(): Record<string, number> {
-    const { config, players } = this.state
+    const { players } = this.state
     const next = this.state.currentYear + 1
+    const config = this.allocationConfig(next)
+    return this.splitShares(
+      this.borrowBasis === 'auction' ? this.mechanism.poolFor(players, next, config, this.totalBaseline()) : 0,
+      this.borrowBasis === 'auction' ? {} : this.mechanism.allocate(players, next, this.state.freeCreditLimit ?? 0, config),
+    )
+  }
+
+  /** Each company's share of a year from that year's auction pool (by baseline) or its free allocation. */
+  private splitShares(pool: number, allocation: Record<string, number>): Record<string, number> {
+    const { config, players } = this.state
     if (this.borrowBasis === 'auction') {
-      const pool = this.mechanism.poolFor(players, next, config, this.totalBaseline())
       const baseline = (p: Player) => (isPureTrader(p) ? 0 : (p.emissions[config.emissions.baselineYear] ?? 0))
       const total = players.reduce((a, p) => a + baseline(p), 0)
       return Object.fromEntries(players.map((p) => [p.id, total > 0 ? round1((pool * baseline(p)) / total) : 0]))
     }
-    const allocation = this.mechanism.allocate(players, next, this.state.freeCreditLimit ?? 0, config)
     return Object.fromEntries(players.map((p) => [p.id, isPureTrader(p) ? 0 : round1(allocation[p.id] ?? 0)]))
   }
 
-  /** The most each company may borrow this year: the limit × its share (Infinity with no limit). */
+  /**
+   * Decides last year's waiting shortfalls, now that the year they borrow from has opened and its
+   * share is known (the user's rule, 2026-11-06): the room is the limit × this year's real share
+   * (and no more than a voted cap × last year's planned emission); that much is borrowed, unfined;
+   * the rest is fined now, on this year's bill (`carriedPenalty`), and stays owed like any debt.
+   * With no next year — the game is over — nothing can be borrowed and it is all fined at once.
+   */
+  private resolveBorrowing(prev: YearRecord | undefined, next: { record: YearRecord; pool: number; allocation: Record<string, number> } | null) {
+    if (!prev?.borrowPending) return
+    const { limitFrac } = this.state.config.market.borrowing
+    const rule = this.state.borrowLimitRule
+    const shares = next ? this.splitShares(next.pool, next.allocation) : {}
+    prev.borrowed ??= {}
+    prev.borrowFined ??= {}
+    if (next) {
+      next.record.carriedPenalty = {}
+      next.record.carriedDecision = {}
+    }
+    for (const [id, w] of Object.entries(prev.borrowPending)) {
+      let room = next ? (limitFrac === null ? Infinity : round1(limitFrac * (shares[id] ?? 0))) : 0
+      if (rule && prev.year >= rule.fromYear) room = Math.min(room, round1(rule.frac * w.planned))
+      const borrowed = round1(Math.min(w.short, room))
+      const fined = round1(w.short - borrowed)
+      prev.borrowed[id] = borrowed
+      prev.borrowFined[id] = fined
+      const fine = round1(fined * w.penaltyRate)
+      // The ledger valued the whole planned shortfall at last year's price; what turns out
+      // unborrowed is scored at the fine instead, as it always was.
+      const decision = round1(Math.max(0, w.plannedShort - room) * (w.penaltyRate - w.refPrice))
+      if (next) {
+        next.record.carriedPenalty![id] = fine
+        next.record.carriedDecision![id] = decision
+      } else {
+        const player = this.getPlayer(id)
+        if (player) {
+          player.score = round1(player.score + fine)
+          player.decisionScore = round1(player.decisionScore + decision)
+        }
+      }
+    }
+    delete prev.borrowPending
+  }
+
+  /**
+   * The most each company may borrow this year: the limit × its share (Infinity with no limit),
+   * and no more than the voted cap × its planned emission once a borrowing referendum passed.
+   * Whatever a shortfall exceeds the room by is fined at settlement, as it always was.
+   */
   borrowRooms(): Record<string, number> {
     const { limitFrac } = this.state.config.market.borrowing
     const shares = this.nextYearShares()
+    const year = this.state.currentYear
+    const rule = this.state.borrowLimitRule
+    const capped = rule !== null && year >= rule.fromYear
     return Object.fromEntries(
-      this.state.players.map((p) => [
-        p.id,
-        !this.borrowingEnabled || isPureTrader(p) ? 0 : limitFrac === null ? Infinity : round1(limitFrac * (shares[p.id] ?? 0)),
-      ]),
+      this.state.players.map((p) => {
+        if (!this.borrowingEnabled || isPureTrader(p)) return [p.id, 0]
+        const room = limitFrac === null ? Infinity : round1(limitFrac * (shares[p.id] ?? 0))
+        return [p.id, capped ? Math.min(room, round1(rule!.frac * this.plannedFor(p, year))) : room]
+      }),
     )
   }
 
@@ -637,6 +733,98 @@ export class Session {
   }
 
   /**
+   * Announce that nuclear plants are closing: from `leadRounds` after this round (or the round
+   * a shock would land in now, with no lead), every company emits `nuclear.magnitude` more, a
+   * sector listed in `nuclear.sectorMagnitude` its own figure — for good. Once per game: the
+   * plants close once.
+   */
+  announceNuclear(): NuclearClosure {
+    if (this.state.nuclearClosure) {
+      throw new GameError('ALREADY_ANNOUNCED', 'The nuclear closure has already been announced.')
+    }
+    const { magnitude, sectorMagnitude, leadRounds } = this.state.config.emissions.nuclear
+    const current = this.state.currentYear
+    this.state.nuclearClosure = {
+      announcedIn: current,
+      fromYear: leadRounds === 0 ? this.nextShockRound() : current + leadRounds,
+      magnitude,
+      sectorMagnitude: { ...sectorMagnitude },
+    }
+    this.restampOpenYear()
+    return this.state.nuclearClosure
+  }
+
+  /**
+   * Withdraw the closure before it lands. Once its round's emissions are drawn the step is in
+   * the emission history for good, and there is nothing to withdraw.
+   */
+  cancelNuclear() {
+    const closure = this.state.nuclearClosure
+    if (!closure) return
+    if (this.yearRealized(closure.fromYear) || this.state.currentYear > closure.fromYear) {
+      throw new GameError('PERMANENT', 'The plants have closed: the closure can no longer be withdrawn.')
+    }
+    this.state.nuclearClosure = null
+    this.restampOpenYear()
+  }
+
+  /**
+   * Announce the hybrid free allocation cut: every sector's free share × `freeCut.factor`, for
+   * good, from `leadRounds` after this round — never before the next allocation, since this
+   * round's has already been issued. Hybrid only: elsewhere there is no auction for the cut to
+   * go to, and the event is off.
+   */
+  announceFreeCut(): FreeAllocationCut {
+    if (this.state.capMode !== 'hybrid') {
+      throw new GameError('WRONG_MODE', 'The free allocation cut applies to the hybrid mode only.')
+    }
+    if (this.state.freeAllocationCut) {
+      throw new GameError('ALREADY_ANNOUNCED', 'The free allocation cut has already been announced.')
+    }
+    const { factor, leadRounds } = this.state.config.allocation.freeCut
+    const current = this.state.currentYear
+    const nextAllocation = this.state.years[current] ? current + 1 : current
+    this.state.freeAllocationCut = {
+      announcedIn: current,
+      fromYear: Math.max(nextAllocation, current + leadRounds),
+      factor,
+    }
+    return this.state.freeAllocationCut
+  }
+
+  /** Withdraw the cut before the first allocation it reaches is issued. */
+  cancelFreeCut() {
+    const cut = this.state.freeAllocationCut
+    if (!cut) return
+    if (this.state.years[cut.fromYear]) {
+      throw new GameError('PERMANENT', 'The cut is in force: it can no longer be withdrawn.')
+    }
+    this.state.freeAllocationCut = null
+  }
+
+  /** The nuclear closure's level for a sector in a round: 1 + its step from `fromYear` on, else 1. */
+  private nuclearLevel(year: number, industry: Industry): number {
+    const closure = this.state.nuclearClosure
+    if (!closure || year < closure.fromYear) return 1
+    return 1 + (closure.sectorMagnitude[industry] ?? closure.magnitude)
+  }
+
+  /**
+   * The closure's increment for a sector in a round — `1 + m` in the round it lands, 1 in every
+   * other — by the same telescoping as `emissionFactorFor`: expectations walk off last year's
+   * realized emission, so the step is taken once and then carried, never compounded.
+   */
+  sectorFactorFor(year: number, industry: Industry): number {
+    return this.nuclearLevel(year, industry) / this.nuclearLevel(year - 1, industry)
+  }
+
+  /** The closure's increments for every sector in a round, or undefined in a game without one. */
+  private sectorFactors(year: number): Partial<Record<Industry, number>> | undefined {
+    if (!this.state.nuclearClosure) return undefined
+    return Object.fromEntries(INDUSTRY_NAMES.map((i) => [i, this.sectorFactorFor(year, i)])) as Partial<Record<Industry, number>>
+  }
+
+  /**
    * The level the class's emissions sit at in a round, against their own trend: the product
    * of every demand shock running in it. 1 when nothing is.
    *
@@ -691,6 +879,9 @@ export class Session {
     const record = this.currentYearRecord()
     if (!record || this.yearRealized(record.year)) return
     record.emissionFactor = this.emissionFactorFor(record.year)
+    const sectors = this.sectorFactors(record.year)
+    if (sectors) record.sectorEmissionFactor = sectors
+    else delete record.sectorEmissionFactor
   }
 
   /**
@@ -1117,11 +1308,12 @@ export class Session {
       player.abatementEmbedded = player.abatementInForce
       player.abatementInForce = player.abatementCommitted
     }
+    const allocationConfig = this.allocationConfig(year)
     const freeAllocation = mechanism.allocate(
       this.state.players,
       year,
       this.state.freeCreditLimit!,
-      this.state.config,
+      allocationConfig,
     )
     // The primary supply, if this mechanism sells one at all. Only auctioning does
     // today; the free-allocation modes issue nothing beyond the allocation above, so
@@ -1129,7 +1321,7 @@ export class Session {
     const pool = mechanism.poolFor(
       this.state.players,
       year,
-      this.state.config,
+      allocationConfig,
       this.totalBaseline(),
     )
     // Carry each company's banked surplus / make-good debt into this year's holdings.
@@ -1147,6 +1339,7 @@ export class Session {
       // declares or lifts a crisis before this year's emissions are drawn. Read back by
       // `plannedFor`, so a settled year can always explain the level it was drawn at.
       emissionFactor: this.emissionFactorFor(year),
+      ...(this.state.nuclearClosure ? { sectorEmissionFactor: this.sectorFactors(year) } : {}),
       orders: [],
       trades: [],
       // Not empty, and not reset: capacity is permanent, so the year opens with whatever
@@ -1186,6 +1379,7 @@ export class Session {
     }
     record.primaryPrice = mechanism.primaryPrice(record, this.state.config, this.openingReference())
     this.seedTraderBots(record, mechanism.usesAuction)
+    this.resolveBorrowing(this.state.years[year - 1], { record, pool, allocation: freeAllocation })
     this.state.years[year] = record
     this.state.phase = 'cap'
   }
@@ -1296,9 +1490,9 @@ export class Session {
         ]),
       ),
       this.state.config.emissions.volatility,
-      // The energy crisis, taken from the record rather than recomputed, so the draw is
+      // The demand shocks, taken from the record rather than recomputed, so the draw is
       // centred on exactly the number `plannedFor` has been telling the class all round.
-      record.emissionFactor,
+      (p) => record.emissionFactor * (record.sectorEmissionFactor?.[p.industry] ?? 1),
     )
     for (const player of this.state.players) {
       player.emissions[record.year] = record.realized[player.id]
@@ -1320,10 +1514,13 @@ export class Session {
     const refPrice =
       buildMarketView(record.orders, record.trades).vwap ??
       (record.auctionPrice || this.previousMarketPrice() || penaltyRate)
-    // Borrowing: each company's room this year, if it kept the option selected.
+    // Borrowing: a company that kept the option selected is not fined for its shortfall now —
+    // it waits for next year's share, which is only known when next year opens
+    // (`resolveBorrowing`). Without the option, or with borrowing off, it is fined now.
     const borrowing = this.borrowingEnabled
-    const rooms = borrowing ? this.borrowRooms() : {}
-    const roomOf = (id: string) => (borrowing && this.borrowOptedIn(id) ? (rooms[id] ?? 0) : 0)
+    const defers = (p: Player) => borrowing && !isPureTrader(p) && this.borrowOptedIn(p.id)
+    const waiting: Record<string, number> = {}
+    const pending: NonNullable<YearRecord['borrowPending']> = {}
     for (const player of this.state.players) {
       held[player.id] = this.creditsHeld(player.id)
       const { buyCash, sellCash } = tradedCash(record.trades, player.id)
@@ -1372,16 +1569,29 @@ export class Session {
       // the emission that was planned for rather than the one that was drawn. See
       // `Player.decisionScore` — this is what the leaderboard scores.
       const plannedShort = Math.max(0, this.plannedFor(player, record.year) - held[player.id])
-      // Whatever of it the company may borrow is not fined — but it is owed, so the ledger
-      // values it at this year's reference price, the price the benchmark covers those tonnes
-      // at. Borrowing then never beats the benchmark (the tonnes are not free, not even in the
+      // Whatever of it the company borrows is not fined — but it is owed, so the ledger values
+      // it at this year's reference price, the price the benchmark covers those tonnes at.
+      // Borrowing then never beats the benchmark (the tonnes are not free, not even in the
       // final year), and its whole advantage is the fine it avoids. Next year the debt sits in
       // both the company's holdings and the benchmark's endowment, so it cancels there.
-      const plannedBorrowed = Math.min(plannedShort, roomOf(player.id))
+      // How much is borrowed is only known when next year opens: until then all of it is
+      // valued as borrowed, and `resolveBorrowing` charges the fine on what was not.
+      const deferred = defers(player)
       decisionCost[player.id] = round1(
         abateSpend + purchaseCost[player.id] - sellIncome[player.id] +
-          (plannedShort - plannedBorrowed) * penaltyRate + plannedBorrowed * refPrice,
+          plannedShort * (deferred ? refPrice : penaltyRate) + (record.carriedDecision?.[player.id] ?? 0),
       )
+      const short = Math.max(0, (record.realized[player.id] ?? 0) - held[player.id])
+      if (deferred && short > 0) {
+        waiting[player.id] = short
+        pending[player.id] = {
+          short: round1(short),
+          plannedShort: round1(plannedShort),
+          planned: this.plannedFor(player, record.year),
+          refPrice,
+          penaltyRate,
+        }
+      }
       investGap[player.id] = investmentGap({
         spec: this.state.config.abatement.sectors[player.industry],
         price: refPrice,
@@ -1401,18 +1611,14 @@ export class Session {
         costFactor: this.installCostFactor(record.year),
       })
     }
-    let borrowed: Record<string, number> = {}
     if (borrowing) {
-      borrowed = Object.fromEntries(
-        this.state.players.map((p) => {
-          const short = Math.max(0, (record.realized[p.id] ?? 0) - (held[p.id] ?? 0))
-          return [p.id, round1(Math.min(short, roomOf(p.id)))]
-        }),
-      )
-      record.borrowed = borrowed
+      // Decided now for everyone with nothing waiting: nothing borrowed. The rest when next year opens.
+      record.borrowed = Object.fromEntries(this.state.players.filter((p) => !(p.id in pending)).map((p) => [p.id, 0]))
+      if (Object.keys(pending).length) record.borrowPending = pending
     }
     const { settlement } = settleYear(
-      record.realized, held, purchaseCost, sellIncome, abateCost, { penaltyRate }, borrowed,
+      record.realized, held, purchaseCost, sellIncome, abateCost, { penaltyRate }, waiting,
+      record.carriedPenalty ?? {},
     )
     record.settlement = settlement
     // Kept on the record so a completed year can still explain its own score.
@@ -1427,9 +1633,9 @@ export class Session {
         player.investmentGapTotal + (investGap[player.id] ?? 0),
       )
       player.decisionScore = round1(player.decisionScore + (decisionCost[player.id] ?? 0))
-      // EU-ETS carry: the year's net position rolls forward — surplus is banked,
-      // an uncovered shortfall becomes a make-good debt (on top of the penalty just
-      // charged). It adjusts next year's holdings via carriedIn.
+      // EU-ETS carry: the year's net position rolls forward — surplus is banked, an uncovered
+      // shortfall becomes a make-good debt (borrowed or fined, it is owed). It adjusts next
+      // year's holdings via carriedIn.
       player.bankedCredits = round1((held[player.id] ?? 0) - (record.realized[player.id] ?? 0))
     }
     this.screenSettledRound(record)
@@ -1438,7 +1644,151 @@ export class Session {
 
   advanceYear() {
     this.requirePhase('yearSummary')
+    this.requireNoReferendum()
     this.openYear(this.state.currentYear + 1)
+  }
+
+  // ---- the borrowing referendum ----
+
+  /** The referendum still talking or voting, if there is one. */
+  get activeReferendum(): Referendum | null {
+    const r = this.state.referendum
+    return r && r.stage !== 'closed' ? r : null
+  }
+
+  private requireNoReferendum() {
+    if (this.activeReferendum) {
+      throw new GameError('REFERENDUM_OPEN', 'A referendum is running — wait for the vote to close.')
+    }
+  }
+
+  /** Companies that may vote: everyone with emissions. */
+  referendumVoters(): string[] {
+    return this.state.players.filter(canVote).map((p) => p.id)
+  }
+
+  /**
+   * Put a borrowing cap to the class, in a year summary: talk for `chatSeconds`, then vote for
+   * `voteSeconds` (`referendumTick` moves the stages on the clock). If it passes, from the next
+   * round no company may borrow more than `frac` × its planned emission. A 0-second chat opens
+   * the vote at once; a 0-second vote stays open until `closeReferendum` (the training world
+   * casts every vote, then closes it).
+   */
+  openReferendum(opts: { frac?: number; chatSeconds?: number; voteSeconds?: number } = {}, now = Date.now()): Referendum {
+    this.requirePhase('yearSummary')
+    if (!this.borrowingEnabled) {
+      throw new GameError('WRONG_MODE', 'Borrowing is switched off in this session.')
+    }
+    this.requireNoReferendum()
+    const cfg = this.state.config.market.referendum
+    const frac = opts.frac ?? cfg.borrowLimitFrac
+    const chatSeconds = opts.chatSeconds ?? cfg.chatSeconds
+    const voteSeconds = opts.voteSeconds ?? cfg.voteSeconds
+    if (!Number.isFinite(frac) || frac < 0 || frac > 1) {
+      throw new GameError('BAD_REFERENDUM', 'The borrowing cap must be between 0% and 100% of emissions.')
+    }
+    for (const seconds of [chatSeconds, voteSeconds]) {
+      if (!Number.isFinite(seconds) || seconds < 0 || seconds > 600) {
+        throw new GameError('BAD_REFERENDUM', 'Chat and vote times must be between 0 and 600 seconds.')
+      }
+    }
+    const year = this.state.currentYear
+    this.state.referendum = {
+      id: (this.state.referendum?.id ?? 0) + 1,
+      year,
+      proposal: { kind: 'borrowLimit', frac },
+      stage: 'chat',
+      chatSeconds,
+      voteSeconds,
+      stageEndsAt: now + chatSeconds * 1000,
+      chat: [],
+      votes: {},
+      result: null,
+      appliesFrom: year + 1,
+    }
+    if (chatSeconds === 0) this.startVote(now)
+    return this.state.referendum
+  }
+
+  private startVote(now: number) {
+    const r = this.state.referendum!
+    r.stage = 'vote'
+    r.stageEndsAt = now + r.voteSeconds * 1000
+  }
+
+  /** A line in the referendum chat, from a player or from the host ('host'). Open only while talking. */
+  postChat(from: string, text: string, now = Date.now()) {
+    const r = this.activeReferendum
+    if (!r || r.stage !== 'chat') throw new GameError('CHAT_CLOSED', 'The chat is open only before the vote.')
+    const clean = String(text ?? '').trim()
+    if (!clean) throw new GameError('BAD_CHAT', 'Write something first.')
+    if (clean.length > CHAT_MAX_CHARS) throw new GameError('BAD_CHAT', `Keep it under ${CHAT_MAX_CHARS} characters.`)
+    let name = 'Regulator'
+    if (from !== 'host') {
+      const player = this.getPlayer(from)
+      if (!player) throw new GameError('NO_PLAYER', 'Player not found.')
+      name = player.name
+    }
+    const last = [...r.chat].reverse().find((m) => m.from === from)
+    if (last && now - last.at < CHAT_MIN_GAP_MS) {
+      throw new GameError('TOO_FAST', 'Wait a moment before sending another message.')
+    }
+    r.chat.push({ id: (r.chat[r.chat.length - 1]?.id ?? 0) + 1, from, name, text: clean, at: now })
+    if (r.chat.length > CHAT_KEEP) r.chat.splice(0, r.chat.length - CHAT_KEEP)
+  }
+
+  /** A company's vote; it may change its mind until the vote closes. */
+  castVote(playerId: string, choice: VoteChoice) {
+    const r = this.activeReferendum
+    if (!r || r.stage !== 'vote') throw new GameError('VOTE_CLOSED', 'Voting is not open.')
+    const player = this.getPlayer(playerId)
+    if (!player || !canVote(player)) throw new GameError('NO_VOTE', 'This company has no vote.')
+    if (choice !== 'yes' && choice !== 'no') throw new GameError('BAD_VOTE', 'Vote yes or no.')
+    r.votes[playerId] = choice
+  }
+
+  /**
+   * Votes for every one of `playerIds` that may vote and has not, by the shared rule
+   * (`ruleVote`: against a cap it has been borrowing above on average). What bots, simulated
+   * students and RL agents do — they vote, they do not chat. True if anyone voted.
+   */
+  castRuleVotes(playerIds: readonly string[]): boolean {
+    const r = this.activeReferendum
+    if (!r || r.stage !== 'vote') return false
+    const voters = new Set(this.referendumVoters())
+    let voted = false
+    for (const id of playerIds) {
+      if (!voters.has(id) || r.votes[id] !== undefined) continue
+      r.votes[id] = ruleVote(this.state, id, r.proposal.frac)
+      voted = true
+    }
+    return voted
+  }
+
+  /** Moves the referendum on its clock. True when something changed (the screens need a push). */
+  referendumTick(now = Date.now()): boolean {
+    const r = this.activeReferendum
+    if (!r || r.stageEndsAt === null || now < r.stageEndsAt) return false
+    if (r.stage === 'chat') {
+      this.startVote(now)
+      return true
+    }
+    if (r.voteSeconds === 0) return false
+    this.closeReferendum()
+    return true
+  }
+
+  /** Counts the votes; a pass sets the borrowing cap from the next round on. */
+  closeReferendum(): Referendum | null {
+    const r = this.activeReferendum
+    if (!r) return null
+    r.result = tally(r, this.referendumVoters())
+    r.stage = 'closed'
+    r.stageEndsAt = null
+    if (r.result.approved && r.proposal.kind === 'borrowLimit') {
+      this.state.borrowLimitRule = { frac: r.proposal.frac, fromYear: r.appliesFrom }
+    }
+    return r
   }
 
   /** Marks the room as alive right now. Called from every socket entry point. */
@@ -1447,6 +1797,9 @@ export class Session {
   }
 
   endGame() {
+    this.requireNoReferendum()
+    // A shortfall still waiting for next year's share has none to borrow from: fined in full.
+    this.resolveBorrowing(this.currentYearRecord() ?? undefined, null)
     // The carry closes ASYMMETRICALLY, and deliberately so.
     //
     // A leftover SURPLUS is stranded: unsold allowances are simply worth nothing when the
@@ -1761,7 +2114,10 @@ export class Session {
     // actually drawn at however the crisis window has moved since. The live computation is
     // the fallback for a year that has not opened yet — including the call `openYear` itself
     // makes while sizing the reserve, before the record it is building has been stored.
-    const factor = this.state.years[year]?.emissionFactor ?? this.emissionFactorFor(year)
+    const stamped = this.state.years[year]
+    const factor =
+      (stamped?.emissionFactor ?? this.emissionFactorFor(year)) *
+      (stamped ? (stamped.sectorEmissionFactor?.[player.industry] ?? 1) : this.sectorFactorFor(year, player.industry))
     return round1(
       expected *
         (1 - incrementalFraction(player.abatementInForce, player.abatementEmbedded)) *

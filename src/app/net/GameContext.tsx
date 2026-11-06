@@ -8,7 +8,7 @@ import {
 } from 'react'
 import { toast } from 'sonner'
 import type { Industry } from '@shared/constants'
-import type { CapMode, HostSnapshot, OrderSide, PlayerSnapshot, Snapshot } from '@shared/types'
+import type { CapMode, HostSnapshot, OrderSide, PlayerSnapshot, Snapshot, VoteChoice } from '@shared/types'
 import {
   clearIdentity,
   getSocket,
@@ -52,6 +52,10 @@ interface GameContextValue {
       | 'host:announceTech'
       | 'host:announceEnergyCrisis'
       | 'host:announceRateCut'
+      | 'host:announceNuclear'
+      | 'host:announceFreeCut'
+      | 'host:openReferendum'
+      | 'host:referendumChat'
       | 'host:startYear'
       | 'host:closeCapStage'
       | 'host:openTrade'
@@ -74,6 +78,10 @@ interface GameContextValue {
   placeOrder: (side: OrderSide, qty: number, price: number) => Promise<boolean>
   cancelOrder: (orderId: string) => Promise<boolean>
   abate: (fraction: number) => Promise<boolean>
+  /** A line in the referendum chat (open only before the vote). */
+  sendChat: (text: string) => Promise<boolean>
+  /** This company's vote in the referendum; it may change it until the vote closes. */
+  vote: (choice: VoteChoice) => Promise<boolean>
   leave: () => void
   /** The company being watched on the read-only watch page; null when playing or hosting. */
   watching: string | null
@@ -175,6 +183,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
       playerRequest('player:placeOrder', { side, qty, price })
     const cancelOrder = (orderId: string) => playerRequest('player:cancelOrder', { orderId })
     const abate = (fraction: number) => playerRequest('player:abate', { fraction })
+    const sendChat = (text: string) => playerRequest('player:chat', { text })
+    const vote = (choice: VoteChoice) => playerRequest('player:vote', { choice })
 
     const leave = () => {
       clearIdentity()
@@ -207,6 +217,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
         placeOrder: readOnly,
         cancelOrder: readOnly,
         abate: readOnly,
+        sendChat: readOnly,
+        vote: readOnly,
         leave: () => window.close(),
         watching,
       }
@@ -227,6 +239,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
       placeOrder,
       cancelOrder,
       abate,
+      sendChat,
+      vote,
       leave,
       watching: null,
     }
