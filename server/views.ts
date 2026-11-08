@@ -1,5 +1,5 @@
 import type { GameConfig } from '../shared/config'
-import { INDUSTRY_NAMES, type Industry } from '../shared/constants'
+import { INDUSTRY_NAMES, forSector, type Industry } from '../shared/constants'
 import {
   benchmarkFor,
   buildMarketView,
@@ -353,7 +353,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     currentYear: state.currentYear,
     playerCount: state.players.length,
     roster: publicRoster(session),
-    abatement: state.config.abatement.sectors[player.industry],
+    abatement: forSector(state.config.abatement.sectors, player.industry) ?? null,
     // Per company, not per class: a breakthrough may be held by some and not others.
     abatementLifetimeCap: session.lifetimeCapFor(player.id),
     // What the slider may reach THIS round. Sent alongside the lifetime cap rather than
@@ -403,7 +403,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
         : null,
     sectorAverage:
       session.freeAllocationBasis === 'benchmark'
-        ? sectorAverages(state.config)[player.industry]
+        ? (forSector(sectorAverages(state.config), player.industry) ?? null)
         : null,
     prevMarketPrice: session.previousMarketPrice(),
     market:

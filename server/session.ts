@@ -1,6 +1,15 @@
 import { customAlphabet, nanoid } from 'nanoid'
 import { resolveConfig, type DeepPartial, type GameConfig } from '../shared/config'
-import { INDUSTRY_NAMES, RESERVE_ID, SCREENING_ID, type Industry } from '../shared/constants'
+import {
+  INDUSTRY_NAMES,
+  MARKET_MAKER_SECTOR,
+  RESERVE_ID,
+  SCREENING_ID,
+  forSector,
+  isIndustry,
+  type Industry,
+  type Sector,
+} from '../shared/constants'
 import {
   buildMarketView,
   vwapOfLast,
@@ -62,7 +71,7 @@ const BOT_LABELS: Record<BotType, string> = {
 }
 
 /** Near-zero emission history for pure-trader bots (financial players). */
-function flatTinyHistory(industry: Industry, config: GameConfig): PlayerProfile {
+function flatTinyHistory(industry: Sector, config: GameConfig): PlayerProfile {
   const emissions: Record<number, number> = {}
   const { historyYears, traderHistoryLevel } = config.emissions
   for (let y = 1; y <= historyYears; y++) emissions[y] = traderHistoryLevel
@@ -802,11 +811,14 @@ export class Session {
     this.state.freeAllocationCut = null
   }
 
-  /** The nuclear closure's level for a sector in a round: 1 + its step from `fromYear` on, else 1. */
-  private nuclearLevel(year: number, industry: Industry): number {
+  /**
+   * The nuclear closure's level for a sector in a round: 1 + its step from `fromYear` on, else 1.
+   * Always 1 for the market-maker sector: it has no production for the closure to push up.
+   */
+  private nuclearLevel(year: number, sector: Sector): number {
     const closure = this.state.nuclearClosure
-    if (!closure || year < closure.fromYear) return 1
-    return 1 + (closure.sectorMagnitude[industry] ?? closure.magnitude)
+    if (!closure || year < closure.fromYear || !isIndustry(sector)) return 1
+    return 1 + (closure.sectorMagnitude[sector] ?? closure.magnitude)
   }
 
   /**
@@ -814,8 +826,8 @@ export class Session {
    * other — by the same telescoping as `emissionFactorFor`: expectations walk off last year's
    * realized emission, so the step is taken once and then carried, never compounded.
    */
-  sectorFactorFor(year: number, industry: Industry): number {
-    return this.nuclearLevel(year, industry) / this.nuclearLevel(year - 1, industry)
+  sectorFactorFor(year: number, sector: Sector): number {
+    return this.nuclearLevel(year, sector) / this.nuclearLevel(year - 1, sector)
   }
 
   /** The closure's increments for every sector in a round, or undefined in a game without one. */
@@ -1016,10 +1028,13 @@ export class Session {
   addBot(botType: BotType, industry?: Industry): Player {
     this.requirePhase('lobby')
     this.requireRoom()
-    const ind = industry ?? INDUSTRY_NAMES[Math.floor(this.rng.uniform(0, INDUSTRY_NAMES.length))]
+    const drawn = industry ?? INDUSTRY_NAMES[Math.floor(this.rng.uniform(0, INDUSTRY_NAMES.length))]
+    // A market maker sits in its own sector, not an industry. The draw above still runs for it
+    // so the seeded stream, and with it every later bot and student, stays where it was.
+    const ind: Sector = botType === 'marketMaker' ? MARKET_MAKER_SECTOR : drawn
     const isEmitter = botType === 'compliance' || botType === 'noise'
     const profile = isEmitter
-      ? generateHistoryForIndustry(ind, this.rng, this.state.config.emissions)
+      ? generateHistoryForIndustry(drawn, this.rng, this.state.config.emissions)
       : flatTinyHistory(ind, this.state.config)
     const n = this.state.players.filter((p) => p.botType === botType).length + 1
     const player: Player = {
@@ -1492,7 +1507,7 @@ export class Session {
       this.state.config.emissions.volatility,
       // The demand shocks, taken from the record rather than recomputed, so the draw is
       // centred on exactly the number `plannedFor` has been telling the class all round.
-      (p) => record.emissionFactor * (record.sectorEmissionFactor?.[p.industry] ?? 1),
+      (p) => record.emissionFactor * (forSector(record.sectorEmissionFactor ?? {}, p.industry) ?? 1),
     )
     for (const player of this.state.players) {
       player.emissions[record.year] = record.realized[player.id]
@@ -1592,8 +1607,10 @@ export class Session {
           penaltyRate,
         }
       }
-      investGap[player.id] = investmentGap({
-        spec: this.state.config.abatement.sectors[player.industry],
+      // A market maker has no production and no abatement curve, so no investment to judge.
+      const spec = forSector(this.state.config.abatement.sectors, player.industry)
+      investGap[player.id] = !spec ? 0 : investmentGap({
+        spec,
         price: refPrice,
         unabated: this.unabatedFor(player, record.year),
         committedBefore: record.abatement[player.id] ?? 0,
@@ -2056,6 +2073,8 @@ export class Session {
     }
     const player = this.getPlayer(playerId)
     if (!player) throw new GameError('NO_PLAYER', 'Player not found.')
+    const spec = forSector(this.state.config.abatement.sectors, player.industry)
+    if (!spec) throw new GameError('NO_ABATEMENT', 'A market maker has no production to abate.')
     const record = this.currentYearRecord()!
     // Two decimals, not one. `round1` here meant the stored fraction snapped to 10% steps,
     // which was survivable when the range was 0-100% but leaves only three usable choices
@@ -2075,7 +2094,7 @@ export class Session {
         this.unabatedFor(player, record.year),
         from,
         target,
-        cfg.sectors[player.industry],
+        spec,
         cfg.fixedCostPerTonneBaseline * this.baselineFor(player),
       ) * this.installCostFactor(record.year),
     )
@@ -2117,7 +2136,7 @@ export class Session {
     const stamped = this.state.years[year]
     const factor =
       (stamped?.emissionFactor ?? this.emissionFactorFor(year)) *
-      (stamped ? (stamped.sectorEmissionFactor?.[player.industry] ?? 1) : this.sectorFactorFor(year, player.industry))
+      (stamped ? (forSector(stamped.sectorEmissionFactor ?? {}, player.industry) ?? 1) : this.sectorFactorFor(year, player.industry))
     return round1(
       expected *
         (1 - incrementalFraction(player.abatementInForce, player.abatementEmbedded)) *

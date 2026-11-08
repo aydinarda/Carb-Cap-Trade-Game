@@ -1,7 +1,7 @@
 import { AlertTriangle, Bot, ChevronRight, Gavel, Leaf, Trophy } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { announcements } from '@shared/announcements'
-import type { Industry } from '@shared/constants'
+import type { Sector } from '@shared/constants'
 import type {
   CapMode,
   LeaderboardRow,
@@ -12,7 +12,7 @@ import type {
 } from '@shared/types'
 import { BOT_LABELS, cn, INDUSTRY_META, MODE_LABELS } from './theme'
 
-export function IndustryBadge({ industry, size = 'md' }: { industry: Industry; size?: 'sm' | 'md' }) {
+export function IndustryBadge({ industry, size = 'md' }: { industry: Sector; size?: 'sm' | 'md' }) {
   const meta = INDUSTRY_META[industry]
   return (
     <span

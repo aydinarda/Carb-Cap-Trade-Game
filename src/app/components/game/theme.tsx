@@ -1,6 +1,6 @@
-import { Factory, FlaskConical, Truck, Zap } from 'lucide-react'
+import { ArrowLeftRight, Factory, FlaskConical, Truck, Zap } from 'lucide-react'
 import type { ReactNode } from 'react'
-import type { Industry } from '@shared/constants'
+import type { Sector } from '@shared/constants'
 import type { CapMode } from '@shared/types'
 
 export function cn(...classes: (string | boolean | undefined)[]) {
@@ -38,11 +38,14 @@ export const PALETTE = {
 // Each is darkened against the new, darker background (#021910) so a badge sits on the
 // surface rather than glowing off it. Industry identity is never colour-alone — every badge
 // pairs the hue with an icon and a label.
-export const INDUSTRY_META: Record<Industry, { icon: ReactNode; color: string }> = {
+// The market-maker sector (bots only, never on the join screen) takes the muted foreground:
+// it is not a fifth industry, so it should not compete with the four for attention.
+export const INDUSTRY_META: Record<Sector, { icon: ReactNode; color: string }> = {
   'Power & Utilities': { icon: <Zap size={14} />, color: '#d99a1f' },
   'Heavy Materials': { icon: <Factory size={14} />, color: '#d1703a' },
   'Manufacturing & Chemicals': { icon: <FlaskConical size={14} />, color: '#3fb0e0' },
   Transport: { icon: <Truck size={14} />, color: '#4cc244' },
+  MM: { icon: <ArrowLeftRight size={14} />, color: PALETTE.mutedForeground },
 }
 
 /** Non-categorical chart colors: measures, not identities. */

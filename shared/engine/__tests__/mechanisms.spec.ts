@@ -4,13 +4,15 @@ import {
   DEFAULT_BENCHMARK,
   INDUSTRY_NAMES,
   SECTOR_AVERAGE_EMISSIONS,
+  type Industry,
 } from '../../constants'
 import type { Player } from '../../types'
 import { CAP_MECHANISMS } from '../index'
 import { resolveConfig } from '../../config'
 import { DEFAULT_CONFIG, XLSX_PLAYERS } from './fixtures'
 
-const players = XLSX_PLAYERS.map((f) => f.player)
+// Every fixture company is in an industry (none is a market maker).
+const players = XLSX_PLAYERS.map((f) => f.player as Player & { industry: Industry })
 
 /** A pure-trader bot: a financial player with no activity level to benchmark. */
 function traderBot(id: string): Player {

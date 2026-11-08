@@ -1,5 +1,5 @@
 import type { GameConfig } from './config/schema'
-import type { Industry } from './constants'
+import type { Industry, Sector } from './constants'
 import type { AbatementSpec } from './engine/abatementModels'
 import type { AuctionBid } from './engine/auction'
 
@@ -17,7 +17,7 @@ export type Phase =
   | 'ended'
 
 export interface PlayerProfile {
-  industry: Industry
+  industry: Sector
   /** Absolute year -> tCO2. Years 1..10 are generated history; 11+ are realized. */
   emissions: Record<number, number>
 }
@@ -637,7 +637,7 @@ export interface ScreeningRow {
 export interface PublicPlayerInfo {
   id: string
   name: string
-  industry: Industry
+  industry: Sector
   connected: boolean
   isBot?: boolean
   botType?: BotType
@@ -666,7 +666,7 @@ export interface BorrowView {
 export interface YouView {
   id: string
   name: string
-  industry: Industry
+  industry: Sector
   emissions: Record<number, number>
   score: number
   freeAllocation: number | null
@@ -717,7 +717,7 @@ export interface YouView {
 export interface LeaderboardRow {
   id: string
   name: string
-  industry: Industry
+  industry: Sector
   /** Raw cumulative cost. */
   score: number
   /**
@@ -753,8 +753,9 @@ export interface PlayerSnapshot {
   playerCount: number
   roster: PublicPlayerInfo[]
   /** This player's sector MAC curve, for the live abatement-cost preview. The client
-   *  evaluates it with the same shared functions the server settles with. */
-  abatement: AbatementSpec
+   *  evaluates it with the same shared functions the server settles with. Null for a market
+   *  maker, which has no production to abate (only the host's watch view ever shows one). */
+  abatement: AbatementSpec | null
   /** Most of its un-abated emissions this company may EVER cut — the slider's ceiling, and
    *  a lifetime budget rather than a per-year limit. The server clamps to the same number,
    *  so this is a UI affordance, not the enforcement. */
