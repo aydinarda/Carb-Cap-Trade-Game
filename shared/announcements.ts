@@ -1,3 +1,4 @@
+import { forSector } from './constants'
 import type { PlayerSnapshot } from './types'
 
 /**
@@ -184,7 +185,7 @@ export function announcements(snap: PlayerSnapshot): Announcement[] {
   // company's — Power & Utilities loses the plants and carries more of the gap.
   const n = snap.nuclearClosure
   if (n) {
-    const pct = Math.round((n.sectorMagnitude[snap.you.industry] ?? n.magnitude) * 100)
+    const pct = Math.round((forSector(n.sectorMagnitude, snap.you.industry) ?? n.magnitude) * 100)
     out.push(
       year < n.fromYear
         ? {

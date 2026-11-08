@@ -10,6 +10,7 @@ import {
   syncQuote,
   trySubmitSweep,
 } from './helpers'
+import { forSector } from '../../shared/constants'
 import type { BotCtx } from './types'
 
 /**
@@ -26,7 +27,9 @@ export function trade(ctx: BotCtx): boolean {
   if (rng.next() < cfg.skipRate) return false
   const P = priceCeiling(session)
   const minPrice = session.state.config.bots.minPrice
-  const coeff = session.state.config.abatement.sectors[bot.industry]
+  // An emitter is always in an industry; only a market maker has no curve, and it never gets here.
+  const coeff = forSector(session.state.config.abatement.sectors, bot.industry)
+  if (!coeff) return false
   const mv = ctx.market
   const anchor = anchorValue(mv, referencePrice(session))
   const rStar = optimalAbatement(coeff, anchor)

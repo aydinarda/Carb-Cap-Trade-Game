@@ -29,6 +29,9 @@ const r1 = (n: number) => Math.round(n * 10) / 10
 export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   const { placeOrder, cancelOrder, abate } = useGame()
   const abatementSpec = snap.abatement
+  // A market maker has no production and so no curve. Only the host's watch view ever shows
+  // one, and the abatement panel steps aside for it.
+  const canAbate = abatementSpec !== null
   // A plant cannot switch itself off, and this is a budget for the WHOLE game, not per
   // year. The server clamps to this too — the fallback covers a client running ahead of a
   // backend that does not send the field yet.
@@ -55,6 +58,8 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   const installed = snap.you.abatementCommitted ?? 0
   const fixedCost = snap.you.abatementFixedCost ?? 0
   const banked = snap.you.banked ?? 0
+  // What reaching fraction `f` of the un-abated base costs on this company's curve.
+  const costTo = (f: number) => (abatementSpec ? abatementCost(unabated, f, abatementSpec) : 0)
 
   const [abateFrac, setAbateFrac] = useState(installed)
   const [side, setSide] = useState<OrderSide>('buy')
@@ -73,10 +78,7 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   // drift from the charge — and so a scenario on a non-linear MAC curve previews correctly.
   // Only the NEW slice is charged, and the retrofit fee is charged again for this step.
   const stepping = abateFrac > installed
-  const variableCost = r1(
-    abatementCost(unabated, abateFrac, abatementSpec) -
-      abatementCost(unabated, installed, abatementSpec),
-  )
+  const variableCost = r1(costTo(abateFrac) - costTo(installed))
   // Every discount in force, as ONE number from the server. This used to re-derive the
   // subsidy from its window here, which was a second copy of a pricing rule — and a copy that
   // could not be told about a discount the class is not shown. `abatementCostFactor` is what
@@ -90,7 +92,7 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   // unannounced one only gets the neutral marker, because a quote that silently fails to add
   // up reads as a broken panel rather than as something to be curious about.
   const discounted = stepping && abateCost < fullCost
-  const nextTonneCost = r1(marginalCost(abateFrac, abatementSpec))
+  const nextTonneCost = abatementSpec ? r1(marginalCost(abateFrac, abatementSpec)) : null
   // What this year's emissions would be once the pending capacity comes online.
   const nextYearEmission = r1(unabated * (1 - abateFrac))
   // Tonnes the pending step would actually remove, per year, from next year on.
@@ -107,18 +109,16 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
   // The level that would cut `gap` tonnes a year off the un-abated base. Above the lifetime
   // cap there is no such level, and saying so beats quoting a price for an illegal move.
   const fracToCloseGap = unabated > 0 ? installed + gap / unabated : Infinity
-  const abateEnough = short && fracToCloseGap <= maxAbate
+  const abateEnough = short && canAbate && fracToCloseGap <= maxAbate
   const coverByAbating = abateEnough
-    ? r1(
-        fixedCost +
-          abatementCost(unabated, fracToCloseGap, abatementSpec) -
-          abatementCost(unabated, installed, abatementSpec),
-      )
+    ? r1(fixedCost + costTo(fracToCloseGap) - costTo(installed))
     : null
   // Naming WHICH ceiling blocked it is the difference between "buy credits, you are out of
   // options" and "buy credits this year, then build more next year" — two different plans.
   const abateBlockedReason = short && !abateEnough
-    ? pacedByRound
+    ? !canAbate
+      ? 'a market maker has no production to abate'
+      : pacedByRound
       ? `not enough headroom — ${Math.round(maxAbate * 100)}% is this round's limit`
       : `not enough headroom — capped at ${Math.round(maxAbate * 100)}%`
     : undefined
@@ -207,20 +207,24 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
         />
         <StatCard
           label="Next-tonne abatement cost"
-          value={nextTonneCost}
-          unit="per tCO₂"
+          value={nextTonneCost ?? '—'}
+          unit={nextTonneCost !== null ? 'per tCO₂' : undefined}
           tone="good"
           emphasis
           icon={<Leaf size={12} />}
           hint={
-            marketPrice === null
-              ? 'no market price to compare with yet'
-              : nextTonneCost <= marketPrice
-                ? `cheaper than the market by ${r1(marketPrice - nextTonneCost)}`
-                : `dearer than the market by ${r1(nextTonneCost - marketPrice)}`
+            nextTonneCost === null
+              ? 'a market maker has no production to abate'
+              : marketPrice === null
+                ? 'no market price to compare with yet'
+                : nextTonneCost <= marketPrice
+                  ? `cheaper than the market by ${r1(marketPrice - nextTonneCost)}`
+                  : `dearer than the market by ${r1(nextTonneCost - marketPrice)}`
           }
           hintTone={
-            marketPrice !== null ? (nextTonneCost <= marketPrice ? 'good' : 'accent') : undefined
+            marketPrice !== null && nextTonneCost !== null
+              ? nextTonneCost <= marketPrice ? 'good' : 'accent'
+              : undefined
           }
         />
         {/* A NEGATIVE holding is not a holding — it is last year's make-good debt showing
@@ -301,6 +305,17 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
       {/* --- the three actions, side by side ------------------------------------- */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
         {/* Cut emissions */}
+        {!canAbate ? (
+          <section className="rounded-xl border border-border bg-card p-4 flex flex-col gap-2">
+            <h2 className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider">
+              <Leaf size={12} />
+              Cut emissions (abatement)
+            </h2>
+            <p className="text-[11px] font-mono text-muted-foreground">
+              A market maker has no production, so there is nothing to abate.
+            </p>
+          </section>
+        ) : (
         <section className="rounded-xl border border-primary/30 bg-primary/5 p-4 flex flex-col gap-3">
           <header className="flex items-baseline justify-between gap-2">
             <h2 className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider">
@@ -352,7 +367,7 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
 
           <div className="grid grid-cols-3 gap-2">
             <MiniStat label="Cut amount" value={cutAmount} unit="tCO₂" />
-            <MiniStat label="Next-tonne cost" value={nextTonneCost} unit="per t" />
+            <MiniStat label="Next-tonne cost" value={nextTonneCost ?? 0} unit="per t" />
             <MiniStat
               label="Total cost est."
               value={abateCost}
@@ -400,6 +415,7 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
             </Button>
           </div>
         </section>
+        )}
 
         {/* Order ticket */}
         <section className="rounded-xl border border-border bg-card p-4 flex flex-col gap-3">

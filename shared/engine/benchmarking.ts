@@ -1,4 +1,5 @@
 import type { GameConfig } from '../config/schema'
+import { forSector } from '../constants'
 import type { Player } from '../types'
 import type { CapMechanism } from './capMechanism'
 import { round1 } from './rng'
@@ -22,7 +23,7 @@ export function benchmarkFor(player: Player, targetYear: number, config: GameCon
   // Pure-trader bots have no activity level to benchmark against — see roles.ts.
   if (isPureTrader(player)) return 0
   const reduction = cumulativeCapFactor(config, targetYear)
-  return round1((config.allocation.benchmark[player.industry] ?? 0) * reduction)
+  return round1((forSector(config.allocation.benchmark, player.industry) ?? 0) * reduction)
 }
 
 export const benchmarking: CapMechanism = {

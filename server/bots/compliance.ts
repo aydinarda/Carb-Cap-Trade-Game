@@ -18,6 +18,7 @@ import {
   trySell,
   trySubmitSweep,
 } from './helpers'
+import { forSector } from '../../shared/constants'
 import type { Session } from '../session'
 import type { BotCtx } from './types'
 
@@ -92,7 +93,9 @@ export function trade(ctx: BotCtx): boolean {
   if (!record) return false
   const P = priceCeiling(session)
   const cfg = session.state.config.bots.compliance
-  const coeff = session.state.config.abatement.sectors[bot.industry]
+  // An emitter is always in an industry; only a market maker has no curve, and it never gets here.
+  const coeff = forSector(session.state.config.abatement.sectors, bot.industry)
+  if (!coeff) return false
   const mv = ctx.market
   const mid = marketMid(mv, referencePrice(session))
   // Capital investment, decided once a year and effective next year. It does NOT change
@@ -207,7 +210,8 @@ export function auction(ctx: BotCtx): boolean {
   // how short the firm is, so bids spread out, and the uniform-price auction clears at the
   // marginal buyer's true willingness to pay — which is the fundamental price the secondary
   // market should then discover too.
-  const coeff = session.state.config.abatement.sectors[bot.industry]
+  const coeff = forSector(session.state.config.abatement.sectors, bot.industry)
+  if (!coeff) return false
   const reservation = reservationPrice(
     planned, held, coeff, P,
     session.state.config.bots.fixes.complianceReservation,

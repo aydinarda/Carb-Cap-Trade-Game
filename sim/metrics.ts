@@ -1,4 +1,5 @@
 import { buildMarketView, expectedEmission, optimalAbatement, round1 } from '../shared/engine'
+import { forSector } from '../shared/constants'
 import type { Session } from '../server/session'
 import type { MarketView, YearRecord } from '../shared/types'
 
@@ -81,13 +82,13 @@ export function efficientPriceLR(session: Session, record: YearRecord): number |
   const supply = supplyOf(record)
   const demandAt = (price: number) =>
     players.reduce((sum, p) => {
-      const spec = cfg.abatement.sectors[p.industry]
+      const spec = forSector(cfg.abatement.sectors, p.industry)
       const unabated = session.unabatedFor(p, record.year)
       // Only headroom is choosable: a company at 30% cannot un-install to reach 20%.
-      const r = Math.max(
-        p.abatementInForce,
-        optimalAbatement(spec, price, cfg.abatement.lifetimeCap),
-      )
+      // A market maker has no curve, so it cannot cut at any price.
+      const r = spec
+        ? Math.max(p.abatementInForce, optimalAbatement(spec, price, cfg.abatement.lifetimeCap))
+        : p.abatementInForce
       return sum + unabated * (1 - r)
     }, 0)
 

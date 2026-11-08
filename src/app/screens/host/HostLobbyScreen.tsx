@@ -1,6 +1,6 @@
 import { Bot, Cpu, Play, Plus, Users, X } from 'lucide-react'
 import { useState } from 'react'
-import { INDUSTRY_NAMES, type Industry } from '@shared/constants'
+import { INDUSTRY_NAMES, forSector, type Industry } from '@shared/constants'
 import type { BotType, HostSnapshot } from '@shared/types'
 import {
   AlertDialog,
@@ -38,14 +38,15 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
     (p) => !(p.isBot && (p.botType === 'marketMaker' || p.botType === 'speculator')),
   )
   const benchmarkTotal = emitters.reduce(
-    (sum, p) => sum + (snap.config.benchmark[p.industry] ?? 0),
+    (sum, p) => sum + (forSector(snap.config.benchmark, p.industry) ?? 0),
     0,
   )
   // Hybrid preview, mirroring shared/engine/hybrid.ts at the opening year (no cap reduction
   // applies to round one, so the factor is 1 and can be left out here).
   const hybridFreeTotal = emitters.reduce(
     (sum, p) =>
-      sum + (snap.config.benchmark[p.industry] ?? 0) * (snap.config.hybridFreeShare[p.industry] ?? 0),
+      sum +
+      (forSector(snap.config.benchmark, p.industry) ?? 0) * (forSector(snap.config.hybridFreeShare, p.industry) ?? 0),
     0,
   )
   const hybridCap = snap.classAggregate.totalBaselineEmissions * snap.config.auctionCapRatio

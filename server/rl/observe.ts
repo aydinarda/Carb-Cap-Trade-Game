@@ -427,20 +427,23 @@ export function computeFeatures(snap: PlayerSnapshot, mem: Memory, step: StepKin
   put('score', you.score / (B * P), you.score)
 
   // --- abatement ---------------------------------------------------------------------
+  // Only a market-maker bot has no abatement curve, and an agent never sits in that sector.
+  const spec = snap.abatement
+  if (!spec) throw new Error(`observe: ${you.name} has no abatement curve (market maker)`)
   const committed = you.abatementCommitted
   const ceiling = snap.abatementRoundCeiling
   put('in_force', you.abatementInForce ?? 0, you.abatementInForce)
   put('committed', committed, committed)
   put('round_ceiling', ceiling, ceiling)
   put('lifetime_cap', snap.abatementLifetimeCap, snap.abatementLifetimeCap)
-  const macCommitted = marginalCost(committed, snap.abatement)
+  const macCommitted = marginalCost(committed, spec)
   put('mac_committed', macCommitted / P, macCommitted)
-  const macCeiling = marginalCost(ceiling, snap.abatement)
+  const macCeiling = marginalCost(ceiling, spec)
   put('mac_ceiling', macCeiling / P, macCeiling)
   // The slider's own preview for going all the way to this round's ceiling — the same
   // shared function and the same composed discount the trade screen multiplies by.
   const stepCost =
-    installCost(you.unabatedExpected, committed, ceiling, snap.abatement, you.abatementFixedCost) *
+    installCost(you.unabatedExpected, committed, ceiling, spec, you.abatementFixedCost) *
     snap.abatementCostFactor
   put('step_cost_to_ceiling', stepCost / (B * P), stepCost)
   put('fixed_cost', you.abatementFixedCost / (B * P), you.abatementFixedCost)

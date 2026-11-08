@@ -5,6 +5,7 @@ import {
   round1,
   type Rng,
 } from '../../shared/engine'
+import { forSector } from '../../shared/constants'
 import { GameError, type Session } from '../../server/session'
 import { considerInstall, priceCeiling } from '../../server/bots/helpers'
 
@@ -159,7 +160,9 @@ export function actTrade(
 
   const cfg = session.state.config
   const P = priceCeiling(session)
-  const spec = cfg.abatement.sectors[player.industry]
+  // A simulated student is always in an industry; only a market-maker bot has no curve.
+  const spec = forSector(cfg.abatement.sectors, player.industry)
+  if (!spec) return false
   const mv = buildMarketView(record.orders, record.trades)
   const reference = mv.lastPrice ?? mv.vwap ?? session.openingReference()
 

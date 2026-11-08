@@ -1,4 +1,5 @@
 import type { GameConfig } from '../config/schema'
+import { forSector } from '../constants'
 import type { Player } from '../types'
 import { benchmarkFor } from './benchmarking'
 import { cumulativeCapFactor } from './capReduction'
@@ -41,7 +42,7 @@ export function hybridFreeFor(
   targetYear: number,
   config: GameConfig,
 ): number {
-  const share = config.allocation.hybridFreeShare[player.industry] ?? 0
+  const share = forSector(config.allocation.hybridFreeShare, player.industry) ?? 0
   return round1(benchmarkFor(player, targetYear, config) * share)
 }
 

@@ -5,6 +5,7 @@ import {
   round1,
   tradedCash,
 } from '../../shared/engine'
+import { forSector } from '../../shared/constants'
 import type { MarketView, Order, OrderSide, Player, YearRecord } from '../../shared/types'
 import { bankWeights, sweepWeights } from './sweepShape'
 import type { BotRuntime } from './types'
@@ -111,8 +112,11 @@ export function considerInstall(
   if (rt.lastInvestYear === record.year) return false
   rt.lastInvestYear = record.year
   const cfg = session.state.config.abatement
+  // A market maker has no production to abate.
+  const spec = forSector(cfg.sectors, player.industry)
+  if (!spec) return false
   const plan = planInstall({
-    spec: cfg.sectors[player.industry],
+    spec,
     price: Math.max(0, price * bias),
     unabated: session.unabatedFor(player, record.year),
     committed: player.abatementCommitted,
