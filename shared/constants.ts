@@ -18,6 +18,26 @@ export type Industry = keyof typeof INDUSTRIES
 export const INDUSTRY_NAMES = Object.keys(INDUSTRIES) as Industry[]
 
 /**
+ * The sector a market-maker bot is assigned instead of an industry. Bots only: it is not in
+ * `INDUSTRIES` or `INDUSTRY_NAMES`, so students cannot pick it, the per-sector config tables
+ * need no row for it, and the RL observation (which walks `INDUSTRY_NAMES`) is unchanged.
+ * A market maker has no production, so no abatement curve, benchmark or sector event applies.
+ */
+export const MARKET_MAKER_SECTOR = 'MM'
+
+/** What a company is registered under: one of the industries, or the market-maker sector. */
+export type Sector = Industry | typeof MARKET_MAKER_SECTOR
+
+export function isIndustry(sector: Sector): sector is Industry {
+  return sector !== MARKET_MAKER_SECTOR
+}
+
+/** A per-industry table's entry for a company's sector; undefined for the market-maker sector. */
+export function forSector<T>(table: Partial<Record<Industry, T>>, sector: Sector): T | undefined {
+  return isIndustry(sector) ? table[sector] : undefined
+}
+
+/**
  * Sector average annual emission — the midpoint of the generation range above.
  * Derived rather than hardcoded so it can never drift from INDUSTRIES.
  * Power & Utilities 1000 · Heavy Materials 800 · Manufacturing & Chemicals 525 · Transport 300
