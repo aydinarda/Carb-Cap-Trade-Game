@@ -145,6 +145,24 @@ export interface MarketConfig {
     borrowLimitFrac: number
     chatSeconds: number
     voteSeconds: number
+    /**
+     * How a company that does not vote by hand is voted for (bots, rule-based students, RL
+     * agents; `ruleVote`). The vote is DRAWN at
+     *
+     *   P(yes) = (borrowing·B + abatement·A) / (borrowing + abatement)
+     *
+     * B is 1 unless the company has borrowed more than the proposed cap on average, else 0
+     * (`averageBorrowShare`); A is its lean from installed abatement (`abatementPivot`). The
+     * weights are normalised, so only their ratio matters; one of them may be 0.
+     */
+    ruleWeights: { borrowing: number; abatement: number }
+    /**
+     * The installed abatement capacity (`Player.abatementCommitted`, a fraction of un-abated
+     * emission) at which the abatement lean A is even (½). Linear on each side: 0 installed
+     * leans fully to no (A = 0), full capacity fully to yes (A = 1). With the shipped lifetime
+     * cap of 0.5 the pivot is reached only at the cap (or beyond it after the technology event).
+     */
+    abatementPivot: number
   }
   /**
    * How many of the PREVIOUS year's closing prints the next year's reference price averages

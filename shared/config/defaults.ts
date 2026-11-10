@@ -46,7 +46,14 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     borrowing: { enabled: true, limitFrac: 1 },
     // A cap of 7% of a company's planned emission if the class votes it in; a minute to talk
     // it over, fifteen seconds to vote.
-    referendum: { borrowLimitFrac: 0.07, chatSeconds: 60, voteSeconds: 15 },
+    referendum: {
+      borrowLimitFrac: 0.07,
+      chatSeconds: 60,
+      voteSeconds: 15,
+      // The user's rule (2026-11-10): 70% the borrowing history, 30% the installed abatement.
+      ruleWeights: { borrowing: 0.7, abatement: 0.3 },
+      abatementPivot: 0.5,
+    },
     // The last ten prints of the previous year — where the market closed, not its yearly mean.
     referenceTrades: 10,
   },

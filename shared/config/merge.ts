@@ -212,6 +212,13 @@ export function validateConfig(config: GameConfig): GameConfig {
     const v = referendum[key]
     if (!Number.isFinite(v) || v < 0 || v > 600) throw new ConfigError(`market.referendum.${key} must be in [0, 600].`)
   }
+  const { borrowing, abatement } = referendum.ruleWeights
+  if (![borrowing, abatement].every((w) => Number.isFinite(w) && w >= 0) || borrowing + abatement <= 0) {
+    throw new ConfigError('market.referendum.ruleWeights must be non-negative and not both 0.')
+  }
+  if (!Number.isFinite(referendum.abatementPivot) || referendum.abatementPivot <= 0 || referendum.abatementPivot >= 1) {
+    throw new ConfigError('market.referendum.abatementPivot must be in (0, 1).')
+  }
 
   for (const industry of INDUSTRY_NAMES) {
     positive(config.allocation.benchmark[industry], `allocation.benchmark.${industry}`)
