@@ -42,6 +42,7 @@ import {
   tradedCash,
   tradedNet,
   unabatedFrom,
+  voteDraw,
   type Rng,
 } from '../shared/engine'
 import { screenRound } from '../shared/engine/screening'
@@ -1766,17 +1767,20 @@ export class Session {
 
   /**
    * Votes for every one of `playerIds` that may vote and has not, by the shared rule
-   * (`ruleVote`: against a cap it has been borrowing above on average). What bots, simulated
-   * students and RL agents do — they vote, they do not chat. True if anyone voted.
+   * (`ruleVote`: drawn at a chance weighted from its borrowing history and its installed
+   * abatement, `market.referendum`). What bots, simulated students and RL agents do — they vote,
+   * they do not chat. True if anyone voted.
    */
   castRuleVotes(playerIds: readonly string[]): boolean {
     const r = this.activeReferendum
     if (!r || r.stage !== 'vote') return false
     const voters = new Set(this.referendumVoters())
+    const cfg = this.state.config.market.referendum
+    const rule = { frac: r.proposal.frac, weights: cfg.ruleWeights, abatementPivot: cfg.abatementPivot }
     let voted = false
     for (const id of playerIds) {
       if (!voters.has(id) || r.votes[id] !== undefined) continue
-      r.votes[id] = ruleVote(this.state, id, r.proposal.frac)
+      r.votes[id] = ruleVote(this.state, id, rule, voteDraw(this.state.seed, r.id, id))
       voted = true
     }
     return voted

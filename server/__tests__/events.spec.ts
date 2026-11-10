@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { createRng, round1, ruleVote, tally, averageBorrowShare } from '../../shared/engine'
+import {
+  abatementLean,
+  averageBorrowShare,
+  createRng,
+  round1,
+  ruleVote,
+  ruleYesProbability,
+  tally,
+  voteDraw,
+} from '../../shared/engine'
+import { resolveConfig } from '../../shared/config'
 import type { Referendum } from '../../shared/types'
 import { stepBots } from '../bots/step'
 import { CHAT_MAX_CHARS, GameError, Session } from '../session'
@@ -260,7 +270,9 @@ describe('borrowing referendum', () => {
     expectError(() => s.castVote(trader.id, 'yes'), 'NO_VOTE')
     expect(stepBots(s, createRng(1), () => ({}))).toBe(true)
     const votes = s.state.referendum!.votes
-    expect(votes[firm.id]).toBe(ruleVote(s.state, firm.id, 0.07))
+    const rule = { frac: 0.07, weights: { borrowing: 0.7, abatement: 0.3 }, abatementPivot: 0.5 }
+    const draw = voteDraw(s.state.seed, s.state.referendum!.id, firm.id)
+    expect(votes[firm.id]).toBe(ruleVote(s.state, firm.id, rule, draw))
     expect(votes[trader.id]).toBeUndefined()
     // People are not voted for.
     expect(votes.P1).toBeUndefined()
@@ -298,10 +310,99 @@ describe('the voting rule', () => {
     expect(averageBorrowShare(s.state, 'P9')).toBeNull()
   })
 
-  it('votes against a cap it has been borrowing above, and for it otherwise', () => {
-    expect(ruleVote(s.state, 'P1', 0.07)).toBe('yes')
-    expect(ruleVote(s.state, 'P1', 0.05)).toBe('no')
-    expect(ruleVote(s.state, 'P9', 0.07)).toBe('yes') // no history
+  // The user's weights (2026-11-10): 0.7 the borrowing history, 0.3 the installed abatement.
+  const rule = (frac: number, weights = { borrowing: 0.7, abatement: 0.3 }, abatementPivot = 0.5) =>
+    ({ frac, weights, abatementPivot })
+  const installed = (id: string, a: number) => {
+    s.state.players.find((p) => p.id === id)!.abatementCommitted = a
+  }
+
+  it('leans on installed abatement: 0 at none, even at the pivot, 1 at full, linear between', () => {
+    expect([0, 0.25, 0.5, 0.75, 1].map((a) => abatementLean(a, 0.5))).toEqual([0, 0.25, 0.5, 0.75, 1])
+    expect(abatementLean(0.4, 0.4)).toBe(0.5)
+    expect(abatementLean(0.2, 0.4)).toBeCloseTo(0.25, 10)
+    expect(abatementLean(0.7, 0.4)).toBeCloseTo(0.75, 10)
+    expect(abatementLean(-1, 0.5)).toBe(0)
+    expect(abatementLean(2, 0.5)).toBe(1)
+  })
+
+  it('weighs the borrowing history 0.7 and the abatement lean 0.3', () => {
+    installed('P1', 0)
+    // P1 borrowed 6% on average: under a 7% cap the borrowing part says yes, under 5% no.
+    expect(ruleYesProbability(s.state, 'P1', rule(0.07))).toBeCloseTo(0.7, 10)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.05))).toBeCloseTo(0, 10)
+    installed('P1', 0.5)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.07))).toBeCloseTo(0.85, 10)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.05))).toBeCloseTo(0.15, 10)
+    installed('P1', 1)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.07))).toBeCloseTo(1, 10)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.05))).toBeCloseTo(0.3, 10)
+    // No history: the borrowing part says yes.
+    expect(ruleYesProbability(s.state, 'P9', rule(0.07))).toBeCloseTo(0.7, 10)
+    installed('P1', 0)
+  })
+
+  it('normalises the weights, so only their ratio matters', () => {
+    installed('P1', 0.5)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.05, { borrowing: 7, abatement: 3 }))).toBeCloseTo(0.15, 10)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.05, { borrowing: 1, abatement: 0 }))).toBe(0)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.05, { borrowing: 0, abatement: 1 }))).toBeCloseTo(0.5, 10)
+    installed('P1', 0)
+  })
+
+  it('votes yes when the draw falls under the chance', () => {
+    installed('P1', 0)
+    expect(ruleVote(s.state, 'P1', rule(0.07), 0.69)).toBe('yes')
+    expect(ruleVote(s.state, 'P1', rule(0.07), 0.71)).toBe('no')
+    expect(ruleVote(s.state, 'P1', rule(0.05), 0)).toBe('no') // a chance of 0 never says yes
+    installed('P1', 1)
+    expect(ruleVote(s.state, 'P1', rule(0.07), 0.999999)).toBe('yes') // a chance of 1 always does
+    installed('P1', 0)
+  })
+
+  it('draws each vote from the seed, the referendum and the company alone', () => {
+    const d = voteDraw(7, 1, 'P3')
+    expect(d).toBe(voteDraw(7, 1, 'P3'))
+    expect(d).toBeGreaterThanOrEqual(0)
+    expect(d).toBeLessThan(1)
+    expect(new Set([voteDraw(7, 1, 'P4'), voteDraw(7, 2, 'P3'), voteDraw(8, 1, 'P3'), d]).size).toBe(4)
+    // Uniform enough that a 0.7 chance comes out near 70% over many companies.
+    const n = 4000
+    let yes = 0
+    for (let i = 0; i < n; i++) if (voteDraw(11, 3, `P${i}`) < 0.7) yes++
+    expect(Math.abs(yes / n - 0.7)).toBeLessThan(0.03)
+  })
+
+  it('reads the weights and the pivot from the config, and refuses bad ones', () => {
+    expect(resolveConfig().market.referendum).toMatchObject({
+      ruleWeights: { borrowing: 0.7, abatement: 0.3 },
+      abatementPivot: 0.5,
+    })
+    const bad = (referendum: object) => () => resolveConfig({ market: { referendum } })
+    expect(bad({ ruleWeights: { borrowing: -1 } })).toThrow(/ruleWeights/)
+    expect(bad({ ruleWeights: { borrowing: 0, abatement: 0 } })).toThrow(/ruleWeights/)
+    expect(bad({ abatementPivot: 1 })).toThrow(/abatementPivot/)
+    expect(bad({ abatementPivot: 0 })).toThrow(/abatementPivot/)
+    expect(resolveConfig({ market: { referendum: { ruleWeights: { borrowing: 1, abatement: 0 } } } }).market.referendum.ruleWeights)
+      .toEqual({ borrowing: 1, abatement: 0 })
+  })
+
+  it('holding a referendum moves no other number in a seeded game', () => {
+    const play = (vote: boolean) => {
+      const g = new Session('hybrid', 21)
+      g.addPlayer('Alice', 'Power & Utilities')
+      for (let i = 0; i < 6; i++) g.addBot('compliance')
+      g.startYear()
+      toSummary(g)
+      if (vote) {
+        g.openReferendum({ chatSeconds: 0 }, 1_000_000)
+        stepBots(g, createRng(1), () => ({}))
+        expect(Object.keys(g.state.referendum!.votes)).toHaveLength(6)
+      }
+      // The session's own stream is private; reaching in is the point of this check.
+      return (g as unknown as { rng: { next(): number } }).rng.next()
+    }
+    expect(play(true)).toBe(play(false))
   })
 
   it('counts a simple majority of the votes cast; a tie fails', () => {

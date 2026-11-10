@@ -14,7 +14,16 @@ export const CAP_MECHANISMS: Record<CapMode, CapMechanism> = {
 
 export { type CapMechanism } from './capMechanism'
 export { realizeYear, expectedEmission } from './emissions'
-export { averageBorrowShare, canVote, ruleVote, tally } from './referendum'
+export {
+  abatementLean,
+  averageBorrowShare,
+  canVote,
+  ruleVote,
+  ruleYesProbability,
+  tally,
+  voteDraw,
+  type VoteRule,
+} from './referendum'
 export {
   abatementCost,
   incrementalFraction,
