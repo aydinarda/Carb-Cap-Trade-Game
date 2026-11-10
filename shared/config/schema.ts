@@ -151,11 +151,19 @@ export interface MarketConfig {
      *
      *   P(yes) = (borrowing·B + abatement·A) / (borrowing + abatement)
      *
-     * B is 1 unless the company has borrowed more than the proposed cap on average, else 0
-     * (`averageBorrowShare`); A is its lean from installed abatement (`abatementPivot`). The
-     * weights are normalised, so only their ratio matters; one of them may be 0.
+     * B = 1 − Φ((average borrowing − cap) / σ), the company's average borrowing share
+     * (`averageBorrowShare`) against the proposed cap on a normal curve: ½ right at the cap,
+     * toward 1 below it, toward 0 above it; σ is `borrowingSpread` × the cap. A is its lean from
+     * installed abatement (`abatementPivot`). The weights are normalised, so only their ratio
+     * matters; one of them may be 0.
      */
     ruleWeights: { borrowing: number; abatement: number }
+    /**
+     * The width σ of the borrowing part's normal curve, as a multiple of the proposed cap, so it
+     * follows a cap the host changes. At 0.5 and a 7% cap: σ = 3.5 points, so B is 0.84 at 3.5%
+     * average borrowing, ½ at 7% and 0.16 at 10.5%.
+     */
+    borrowingSpread: number
     /**
      * The installed abatement capacity (`Player.abatementCommitted`, a fraction of un-abated
      * emission) at which the abatement lean A is even (½). Linear on each side: 0 installed

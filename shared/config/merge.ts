@@ -216,6 +216,9 @@ export function validateConfig(config: GameConfig): GameConfig {
   if (![borrowing, abatement].every((w) => Number.isFinite(w) && w >= 0) || borrowing + abatement <= 0) {
     throw new ConfigError('market.referendum.ruleWeights must be non-negative and not both 0.')
   }
+  if (!Number.isFinite(referendum.borrowingSpread) || referendum.borrowingSpread <= 0 || referendum.borrowingSpread > 10) {
+    throw new ConfigError('market.referendum.borrowingSpread must be in (0, 10].')
+  }
   if (!Number.isFinite(referendum.abatementPivot) || referendum.abatementPivot <= 0 || referendum.abatementPivot >= 1) {
     throw new ConfigError('market.referendum.abatementPivot must be in (0, 1).')
   }

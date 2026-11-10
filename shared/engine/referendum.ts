@@ -34,8 +34,32 @@ export interface VoteRule {
   /** The proposed cap, × emission. */
   frac: number
   weights: { borrowing: number; abatement: number }
+  /** σ of the borrowing part's normal curve, × `frac`. */
+  borrowingSpread: number
   /** Installed abatement at which the abatement lean is even. */
   abatementPivot: number
+}
+
+/** The standard normal CDF (Abramowitz–Stegun 7.1.26, |error| < 1.5e-7). */
+export function normalCdf(z: number): number {
+  const x = Math.abs(z) / Math.SQRT2
+  const t = 1 / (1 + 0.3275911 * x)
+  const erf =
+    1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x)
+  return z >= 0 ? 0.5 * (1 + erf) : 0.5 * (1 - erf)
+}
+
+/**
+ * The borrowing part's lean toward yes, in [0, 1] (the user's rule, 2026-11-10): the average
+ * borrowing share against the cap on a normal curve, 1 − Φ((average − frac) / σ) with
+ * σ = spread × frac. ½ right at the cap; toward 1 below it, toward 0 above it. A company with
+ * no settled year yet counts as never having borrowed. A cap of 0 has no width: a step.
+ */
+export function borrowingLean(average: number | null, frac: number, spread: number): number {
+  const a = average ?? 0
+  const sigma = spread * frac
+  if (!(sigma > 0)) return a > frac ? 0 : 1
+  return 1 - normalCdf((a - frac) / sigma)
 }
 
 /**
@@ -51,13 +75,14 @@ export function abatementLean(installed: number, pivot: number): number {
 /**
  * The chance the rule votes yes on capping borrowing at `rule.frac` × emission. Two parts,
  * weighted (normalised) by `rule.weights`:
- *  - borrowing (the user's rule, 2026-11-01): 0 if the company has been borrowing more than the
- *    cap on average — the cap would bind it — else 1, history or not;
+ *  - borrowing (the user's rule, 2026-11-01; on a normal curve since 2026-11-10): the more the
+ *    company has been borrowing above the cap on average — the more the cap would bind it —
+ *    the nearer to no (`borrowingLean`);
  *  - abatement (2026-11-10): `abatementLean` of its installed capacity (`abatementCommitted`).
  */
 export function ruleYesProbability(state: GameState, playerId: string, rule: VoteRule): number {
   const average = averageBorrowShare(state, playerId)
-  const borrowingYes = average !== null && average > rule.frac ? 0 : 1
+  const borrowingYes = borrowingLean(average, rule.frac, rule.borrowingSpread)
   const installed = state.players.find((p) => p.id === playerId)?.abatementCommitted ?? 0
   const lean = abatementLean(installed, rule.abatementPivot)
   const { borrowing, abatement } = rule.weights

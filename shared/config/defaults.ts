@@ -52,6 +52,8 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
       voteSeconds: 15,
       // The user's rule (2026-11-10): 70% the borrowing history, 30% the installed abatement.
       ruleWeights: { borrowing: 0.7, abatement: 0.3 },
+      // σ of the borrowing part = half the proposed cap (the user, 2026-11-10).
+      borrowingSpread: 0.5,
       abatementPivot: 0.5,
     },
     // The last ten prints of the previous year — where the market closed, not its yearly mean.

@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   abatementLean,
   averageBorrowShare,
+  borrowingLean,
   createRng,
+  normalCdf,
   round1,
   ruleVote,
   ruleYesProbability,
@@ -270,7 +272,7 @@ describe('borrowing referendum', () => {
     expectError(() => s.castVote(trader.id, 'yes'), 'NO_VOTE')
     expect(stepBots(s, createRng(1), () => ({}))).toBe(true)
     const votes = s.state.referendum!.votes
-    const rule = { frac: 0.07, weights: { borrowing: 0.7, abatement: 0.3 }, abatementPivot: 0.5 }
+    const rule = { frac: 0.07, weights: { borrowing: 0.7, abatement: 0.3 }, borrowingSpread: 0.5, abatementPivot: 0.5 }
     const draw = voteDraw(s.state.seed, s.state.referendum!.id, firm.id)
     expect(votes[firm.id]).toBe(ruleVote(s.state, firm.id, rule, draw))
     expect(votes[trader.id]).toBeUndefined()
@@ -310,12 +312,15 @@ describe('the voting rule', () => {
     expect(averageBorrowShare(s.state, 'P9')).toBeNull()
   })
 
-  // The user's weights (2026-11-10): 0.7 the borrowing history, 0.3 the installed abatement.
-  const rule = (frac: number, weights = { borrowing: 0.7, abatement: 0.3 }, abatementPivot = 0.5) =>
-    ({ frac, weights, abatementPivot })
+  // The user's rule (2026-11-10): 0.7 the borrowing history, on a normal curve of σ = half the
+  // cap, and 0.3 the installed abatement.
+  const rule = (frac: number, weights = { borrowing: 0.7, abatement: 0.3 }, borrowingSpread = 0.5, abatementPivot = 0.5) =>
+    ({ frac, weights, borrowingSpread, abatementPivot })
   const installed = (id: string, a: number) => {
     s.state.players.find((p) => p.id === id)!.abatementCommitted = a
   }
+  const PHI1 = 0.8413447460685429 // Φ(1)
+  const PHI2 = 0.9772498680518208 // Φ(2)
 
   it('leans on installed abatement: 0 at none, even at the pivot, 1 at full, linear between', () => {
     expect([0, 0.25, 0.5, 0.75, 1].map((a) => abatementLean(a, 0.5))).toEqual([0, 0.25, 0.5, 0.75, 1])
@@ -326,37 +331,62 @@ describe('the voting rule', () => {
     expect(abatementLean(2, 0.5)).toBe(1)
   })
 
-  it('weighs the borrowing history 0.7 and the abatement lean 0.3', () => {
+  it('puts the borrowing history on a normal curve: ½ at the cap, σ = half the cap', () => {
+    expect(normalCdf(0)).toBeCloseTo(0.5, 6)
+    expect(normalCdf(1)).toBeCloseTo(PHI1, 6)
+    expect(normalCdf(-1)).toBeCloseTo(1 - PHI1, 6)
+    expect(normalCdf(2)).toBeCloseTo(PHI2, 6)
+    // A 7% cap: σ = 3.5 points.
+    expect(borrowingLean(0.07, 0.07, 0.5)).toBeCloseTo(0.5, 6)
+    expect(borrowingLean(0.035, 0.07, 0.5)).toBeCloseTo(PHI1, 6)
+    expect(borrowingLean(0.105, 0.07, 0.5)).toBeCloseTo(1 - PHI1, 6)
+    // Symmetric about the cap, and falling as borrowing grows.
+    expect(borrowingLean(0.05, 0.07, 0.5) + borrowingLean(0.09, 0.07, 0.5)).toBeCloseTo(1, 6)
+    const leans = [0, 0.03, 0.06, 0.09, 0.2].map((a) => borrowingLean(a, 0.07, 0.5))
+    expect(leans).toEqual([...leans].sort((x, y) => y - x))
+    // No settled year yet counts as never having borrowed: Φ(2) at σ = half the cap.
+    expect(borrowingLean(null, 0.07, 0.5)).toBeCloseTo(PHI2, 6)
+    // A wider curve pulls the same distance from the cap toward ½.
+    expect(borrowingLean(0.035, 0.07, 1)).toBeCloseTo(normalCdf(0.5), 6)
+    // A cap of 0 has no width: a step.
+    expect(borrowingLean(0, 0, 0.5)).toBe(1)
+    expect(borrowingLean(0.01, 0, 0.5)).toBe(0)
+  })
+
+  it('weighs the borrowing lean 0.7 and the abatement lean 0.3', () => {
     installed('P1', 0)
-    // P1 borrowed 6% on average: under a 7% cap the borrowing part says yes, under 5% no.
-    expect(ruleYesProbability(s.state, 'P1', rule(0.07))).toBeCloseTo(0.7, 10)
-    expect(ruleYesProbability(s.state, 'P1', rule(0.05))).toBeCloseTo(0, 10)
+    // P1 borrowed 6% on average: right at a 6% cap, one σ under a 12% cap, one σ over a 4% one.
+    expect(ruleYesProbability(s.state, 'P1', rule(0.06))).toBeCloseTo(0.35, 6)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.12))).toBeCloseTo(0.7 * PHI1, 6)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.04))).toBeCloseTo(0.7 * (1 - PHI1), 6)
     installed('P1', 0.5)
-    expect(ruleYesProbability(s.state, 'P1', rule(0.07))).toBeCloseTo(0.85, 10)
-    expect(ruleYesProbability(s.state, 'P1', rule(0.05))).toBeCloseTo(0.15, 10)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.06))).toBeCloseTo(0.5, 6)
     installed('P1', 1)
-    expect(ruleYesProbability(s.state, 'P1', rule(0.07))).toBeCloseTo(1, 10)
-    expect(ruleYesProbability(s.state, 'P1', rule(0.05))).toBeCloseTo(0.3, 10)
-    // No history: the borrowing part says yes.
-    expect(ruleYesProbability(s.state, 'P9', rule(0.07))).toBeCloseTo(0.7, 10)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.06))).toBeCloseTo(0.65, 6)
+    // No history, nothing installed: 0.7 × Φ(2).
+    expect(ruleYesProbability(s.state, 'P9', rule(0.07))).toBeCloseTo(0.7 * PHI2, 6)
     installed('P1', 0)
   })
 
   it('normalises the weights, so only their ratio matters', () => {
     installed('P1', 0.5)
-    expect(ruleYesProbability(s.state, 'P1', rule(0.05, { borrowing: 7, abatement: 3 }))).toBeCloseTo(0.15, 10)
-    expect(ruleYesProbability(s.state, 'P1', rule(0.05, { borrowing: 1, abatement: 0 }))).toBe(0)
-    expect(ruleYesProbability(s.state, 'P1', rule(0.05, { borrowing: 0, abatement: 1 }))).toBeCloseTo(0.5, 10)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.04, { borrowing: 7, abatement: 3 })))
+      .toBeCloseTo(ruleYesProbability(s.state, 'P1', rule(0.04)), 10)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.06, { borrowing: 1, abatement: 0 }))).toBeCloseTo(0.5, 6)
+    expect(ruleYesProbability(s.state, 'P1', rule(0.04, { borrowing: 0, abatement: 1 }))).toBeCloseTo(0.5, 10)
     installed('P1', 0)
   })
 
   it('votes yes when the draw falls under the chance', () => {
     installed('P1', 0)
-    expect(ruleVote(s.state, 'P1', rule(0.07), 0.69)).toBe('yes')
-    expect(ruleVote(s.state, 'P1', rule(0.07), 0.71)).toBe('no')
-    expect(ruleVote(s.state, 'P1', rule(0.05), 0)).toBe('no') // a chance of 0 never says yes
+    // 0.35 at a 6% cap with nothing installed.
+    expect(ruleVote(s.state, 'P1', rule(0.06), 0.34)).toBe('yes')
+    expect(ruleVote(s.state, 'P1', rule(0.06), 0.36)).toBe('no')
+    // Abatement alone and nothing installed: a chance of 0 never says yes …
+    expect(ruleVote(s.state, 'P1', rule(0.06, { borrowing: 0, abatement: 1 }), 0)).toBe('no')
     installed('P1', 1)
-    expect(ruleVote(s.state, 'P1', rule(0.07), 0.999999)).toBe('yes') // a chance of 1 always does
+    // … and at full capacity, a chance of 1, it always does.
+    expect(ruleVote(s.state, 'P1', rule(0.06, { borrowing: 0, abatement: 1 }), 0.999999)).toBe('yes')
     installed('P1', 0)
   })
 
@@ -376,6 +406,7 @@ describe('the voting rule', () => {
   it('reads the weights and the pivot from the config, and refuses bad ones', () => {
     expect(resolveConfig().market.referendum).toMatchObject({
       ruleWeights: { borrowing: 0.7, abatement: 0.3 },
+      borrowingSpread: 0.5,
       abatementPivot: 0.5,
     })
     const bad = (referendum: object) => () => resolveConfig({ market: { referendum } })
@@ -383,6 +414,8 @@ describe('the voting rule', () => {
     expect(bad({ ruleWeights: { borrowing: 0, abatement: 0 } })).toThrow(/ruleWeights/)
     expect(bad({ abatementPivot: 1 })).toThrow(/abatementPivot/)
     expect(bad({ abatementPivot: 0 })).toThrow(/abatementPivot/)
+    expect(bad({ borrowingSpread: 0 })).toThrow(/borrowingSpread/)
+    expect(bad({ borrowingSpread: -0.5 })).toThrow(/borrowingSpread/)
     expect(resolveConfig({ market: { referendum: { ruleWeights: { borrowing: 1, abatement: 0 } } } }).market.referendum.ruleWeights)
       .toEqual({ borrowing: 1, abatement: 0 })
   })

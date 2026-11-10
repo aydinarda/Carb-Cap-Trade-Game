@@ -17,7 +17,9 @@ export { realizeYear, expectedEmission } from './emissions'
 export {
   abatementLean,
   averageBorrowShare,
+  borrowingLean,
   canVote,
+  normalCdf,
   ruleVote,
   ruleYesProbability,
   tally,

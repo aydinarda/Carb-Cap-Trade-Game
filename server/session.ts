@@ -1776,7 +1776,12 @@ export class Session {
     if (!r || r.stage !== 'vote') return false
     const voters = new Set(this.referendumVoters())
     const cfg = this.state.config.market.referendum
-    const rule = { frac: r.proposal.frac, weights: cfg.ruleWeights, abatementPivot: cfg.abatementPivot }
+    const rule = {
+      frac: r.proposal.frac,
+      weights: cfg.ruleWeights,
+      borrowingSpread: cfg.borrowingSpread,
+      abatementPivot: cfg.abatementPivot,
+    }
     let voted = false
     for (const id of playerIds) {
       if (!voters.has(id) || r.votes[id] !== undefined) continue
