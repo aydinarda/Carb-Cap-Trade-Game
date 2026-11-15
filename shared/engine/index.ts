@@ -77,6 +77,13 @@ export {
   buildMarketView,
 } from './orderBook'
 export { settleYear } from './settlement'
-export { plannedRecurring, plannedRelease, reserveBase, reservePot } from './reserve'
+export {
+  OPEN_LADDER_MAX_RUNGS,
+  plannedOpenLadder,
+  plannedRecurring,
+  plannedRelease,
+  reserveBase,
+  reservePot,
+} from './reserve'
 
 export { cumulativeCapFactor } from './capReduction'

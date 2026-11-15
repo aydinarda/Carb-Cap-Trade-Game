@@ -13,7 +13,8 @@ import * as speculator from '../bots/speculator'
 import { auctionReference, botAvgCost, disperse, priceCeiling, referencePrice, sellCapacity, trySubmitSweep } from '../bots/helpers'
 import { Session } from '../session'
 import { bankWeights, sweepWeights } from '../bots/sweepShape'
-import type { DeepPartial, GameConfig } from '../../shared/config'
+import { resolveConfig, type DeepPartial, type GameConfig } from '../../shared/config'
+import { BENCHMARK_STRINGENCY, NOISE_SECTOR } from '../../shared/constants'
 import type { BotCtx, BotRuntime } from '../bots/types'
 
 const ARCHETYPES = { compliance, marketMaker, speculator, noise }
@@ -197,17 +198,185 @@ describe('grandfathering bots', () => {
  * these keep meaning what they say if a default moves again. All were found by a
  * price-calibration sweep — see sim/sweeps/price-calibration.ts.
  */
+describe('noise bots: a small emitter in the Noise sector (2026-11-13)', () => {
+  const withNoise = (mode: ConstructorParameters<typeof Session>[0], override?: DeepPartial<GameConfig>) => {
+    const s = new Session(mode, 9, override)
+    const bot = s.addBot('noise')
+    s.addPlayer('Human', 'Transport')
+    return { s, bot }
+  }
+
+  it('sits in its own sector with a flat history at bots.noise.emission', () => {
+    const { bot } = withNoise('hybrid')
+    expect(bot.industry).toBe(NOISE_SECTOR)
+    expect(Object.values(bot.emissions)).toEqual(Array(10).fill(20))
+    const { bot: bigger } = withNoise('hybrid', { bots: { noise: { emission: 35 } } })
+    expect(bigger.emissions[10]).toBe(35)
+  })
+
+  it('draws as much from the seeded stream as an industry bot, so nobody after it moves', () => {
+    const after = (first: 'noise' | 'compliance') => {
+      const s = new Session('hybrid', 4)
+      s.addBot(first)
+      return s.addBot('compliance')
+    }
+    const a = after('noise')
+    const b = after('compliance')
+    expect(a.industry).toBe(b.industry)
+    expect(a.emissions).toEqual(b.emissions)
+  })
+
+  it('is allocated by the normal rules of each mode', () => {
+    const free = (mode: ConstructorParameters<typeof Session>[0]) => {
+      const { s, bot } = withNoise(mode)
+      s.startYear()
+      return s.currentYearRecord()!.freeAllocation[bot.id] ?? 0
+    }
+    // Benchmarking: its sector average is its own emission, at the industries' stringency.
+    expect(free('benchmarking')).toBeCloseTo(round1(20 * BENCHMARK_STRINGENCY), 5)
+    // Hybrid: the Noise sector has no free share, so it buys at the auction.
+    expect(free('hybrid')).toBe(0)
+    expect(free('auctioning')).toBe(0)
+    // Grandfathering: in proportion to its (small) past emission.
+    const gf = free('grandfathering')
+    expect(gf).toBeGreaterThan(0)
+    expect(gf).toBeLessThan(40)
+  })
+
+  it('cannot abate: the Noise sector has no curve', () => {
+    const { s, bot } = withNoise('hybrid')
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    expect(() => s.setAbatement(bot.id, 0.1)).toThrow(/no abatement option/)
+  })
+
+  it('still trades, its price anchored on the market', () => {
+    const { s, bot } = withNoise('benchmarking')
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    let acted = false
+    for (let seed = 1; seed <= 10 && !acted; seed++) acted = noise.trade(ctxFor(s, bot.id, seed))
+    expect(acted).toBe(true)
+    const own = s.currentYearRecord()!.orders.filter((o) => o.playerId === bot.id)
+    expect(own.length).toBeGreaterThan(0)
+    expect(own.every((o) => o.price > 0 && o.price <= priceCeiling(s))).toBe(true)
+  })
+
+  // The user, 2026-11-15: its target is to hold what it will emit, so it asks for what it needs.
+  // Until then every order was one `size` lot (4 t): at the auction that was a fifth of a
+  // year's need at best, so it never covered and rolled a growing debt.
+  const inTrade = (mode: ConstructorParameters<typeof Session>[0]) => {
+    const { s, bot } = withNoise(mode)
+    s.startYear()
+    s.closeCapStage()
+    s.openTrade()
+    return { s, bot, rec: s.currentYearRecord()! }
+  }
+  const slipBounds = () => {
+    const { size, sizeJitter } = resolveConfig().bots.noise
+    return [round1(size * (1 - sizeJitter)), round1(size * (1 + sizeJitter))]
+  }
+
+  it('asks the auction for everything it needs, a carried debt included', () => {
+    const { s, bot } = withNoise('auctioning')
+    s.startYear()
+    const rec = s.currentYearRecord()!
+    const planned = s.plannedEmission(bot.id)
+    expect(planned).toBeGreaterThan(resolveConfig().bots.noise.size) // or one lot would cover it anyway
+    expect(noise.auction(ctxFor(s, bot.id))).toBe(true)
+    expect(rec.auctionBid[bot.id].qty).toBeCloseTo(planned, 5)
+    rec.carriedIn[bot.id] = -15
+    noise.auction(ctxFor(s, bot.id))
+    expect(rec.auctionBid[bot.id].qty).toBeCloseTo(planned + 15, 5)
+    // Covered already: it bids for nothing.
+    rec.carriedIn[bot.id] = planned
+    delete rec.auctionBid[bot.id]
+    expect(noise.auction(ctxFor(s, bot.id))).toBe(false)
+    expect(rec.auctionBid[bot.id]).toBeUndefined()
+  })
+
+  it('asks the market for exactly what is missing, a carried debt included', () => {
+    let buys = 0
+    for (let seed = 1; seed <= 40; seed++) {
+      const { s, bot, rec } = inTrade('auctioning')
+      rec.carriedIn[bot.id] = -12
+      const need = round1(s.plannedEmission(bot.id) - s.creditsHeld(bot.id))
+      expect(need).toBeCloseTo(s.plannedEmission(bot.id) + 12, 5)
+      noise.trade(ctxFor(s, bot.id, seed))
+      for (const o of rec.orders.filter((o) => o.playerId === bot.id)) {
+        // It holds nothing, so a wrong-side sell cannot be placed: every order is its buy.
+        expect(o.side).toBe('buy')
+        expect(o.qty).toBe(need)
+        buys += 1
+      }
+    }
+    expect(buys).toBeGreaterThan(10)
+  })
+
+  it('slips to the wrong side with one small lot, never with its position', () => {
+    const [lo, hi] = slipBounds()
+    let buys = 0
+    let sells = 0
+    for (let seed = 1; seed <= 80; seed++) {
+      const { s, bot, rec } = inTrade('auctioning')
+      rec.regulatorGranted[bot.id] = 10 // holds half of what it will emit
+      const need = round1(s.plannedEmission(bot.id) - s.creditsHeld(bot.id))
+      expect(need).toBeGreaterThan(hi)
+      noise.trade(ctxFor(s, bot.id, seed))
+      for (const o of rec.orders.filter((o) => o.playerId === bot.id)) {
+        if (o.side === 'buy') {
+          expect(o.qty).toBe(need)
+          buys += 1
+        } else {
+          expect(o.qty).toBeGreaterThanOrEqual(lo)
+          expect(o.qty).toBeLessThanOrEqual(hi)
+          sells += 1
+        }
+      }
+    }
+    expect(sells).toBeGreaterThan(0)
+    expect(buys).toBeGreaterThan(sells)
+  })
+
+  it('sells only what it holds beyond its emission', () => {
+    const [lo, hi] = slipBounds()
+    let sells = 0
+    for (let seed = 1; seed <= 40; seed++) {
+      // Benchmarking hands it a little more than it emits.
+      const { s, bot, rec } = inTrade('benchmarking')
+      const surplus = round1(s.creditsHeld(bot.id) - s.plannedEmission(bot.id))
+      expect(surplus).toBeGreaterThan(0)
+      noise.trade(ctxFor(s, bot.id, seed))
+      for (const o of rec.orders.filter((o) => o.playerId === bot.id)) {
+        if (o.side === 'sell') {
+          expect(o.qty).toBe(surplus)
+          sells += 1
+        } else {
+          expect(o.qty).toBeGreaterThanOrEqual(lo)
+          expect(o.qty).toBeLessThanOrEqual(hi)
+        }
+      }
+    }
+    expect(sells).toBeGreaterThan(10)
+  })
+
+  it('refuses a non-positive emission', () => {
+    expect(() => resolveConfig({ bots: { noise: { emission: 0 } } })).toThrow(/bots.noise.emission/)
+  })
+})
+
 describe('bots.fixes', () => {
-  it('noiseAbatement: whether the noise bot ever invests in abatement capacity', () => {
-    // No longer a bug fix — sizing reads `plannedEmission`, which cannot disagree with the
-    // engine, so the old "prices a cut it never makes" defect is structurally impossible.
-    // What is left is the archetype question: is a careless trader also a firm that never
-    // retrofits? Both answers are coherent, so the flag stays and this pins both arms.
+  it('noiseAbatement has no effect since noise bots sit in the Noise sector (no abatement curve)', () => {
+    // The flag used to decide whether a careless trader also retrofits. Since 2026-11-13 a noise
+    // bot is a small emitter in the bots-only `Noise` sector, which has no curve: it never
+    // installs, whichever way the flag is set.
     const run = (invests: boolean) => {
       const s = new Session('benchmarking', 5, {
         bots: { fixes: { noiseAbatement: invests } },
       })
-      const bot = s.addBot('noise', 'Power & Utilities')
+      const bot = s.addBot('noise')
       s.addPlayer('Human', 'Transport')
       s.startYear()
       s.closeCapStage()
@@ -217,9 +386,7 @@ describe('bots.fixes', () => {
     }
 
     expect(run(false).abatementCommitted).toBe(0)
-    expect(run(true).abatementCommitted).toBeGreaterThan(0)
-    // Either way it stays in force NEXT year, not this one — the install is capital.
-    expect(run(true).abatementInForce).toBe(0)
+    expect(run(true).abatementCommitted).toBe(0)
   })
 
   it('a bot ticking all window installs once, not once per tick', () => {

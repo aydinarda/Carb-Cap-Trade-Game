@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_GAME_CONFIG } from '../../config'
 import type { ReserveConfig } from '../../config/schema'
-import { plannedRecurring, plannedRelease, reserveBase, reservePot } from '../reserve'
+import {
+  OPEN_LADDER_MAX_RUNGS,
+  plannedOpenLadder,
+  plannedRecurring,
+  plannedRelease,
+  reserveBase,
+  reservePot,
+} from '../reserve'
 
 /** The shipped ladder, forced on. Thresholds are read from it, never assumed. */
 const CFG: ReserveConfig = {
@@ -108,6 +115,7 @@ describe('the repeating top-up', () => {
       { triggerPrice: 70, cumulativeFraction: 0.2 },
     ],
     recurring: { fromPrice: 78, offers: [{ price: 78, fraction: 0.05 }, { price: 85, fraction: 0.05 }] },
+    openLadder: { fromPrice: 110, step: 10, fraction: 0.01, increment: 0.01 },
     ...over,
   })
 
@@ -137,5 +145,79 @@ describe('the repeating top-up', () => {
 
   it('is inert when there is no pot to draw on', () => {
     expect(plannedRecurring(cfg(), 0, 90)).toEqual([])
+  })
+})
+
+describe('the open-ended ladder above the fine', () => {
+  const cfg = (over: Partial<ReserveConfig['openLadder']> = {}, enabled = true): ReserveConfig => ({
+    ...CFG,
+    enabled,
+    // Flat unless a test asks for growth, so a rung's size reads straight off `fraction`.
+    openLadder: { fromPrice: 110, step: 10, fraction: 0.01, increment: 0, ...over },
+  })
+  const ISSUANCE = 20000 // 1% of it is 200
+
+  it('offers nothing below its first rung', () => {
+    expect(plannedOpenLadder(cfg(), ISSUANCE, 109.9, 0)).toEqual([])
+  })
+
+  it('offers a share of the ISSUANCE at the rung the price reached', () => {
+    expect(plannedOpenLadder(cfg(), ISSUANCE, 110, 0)).toEqual([{ price: 110, qty: 200 }])
+    expect(plannedOpenLadder(cfg({ fraction: 0.025 }), ISSUANCE, 119.9, 0)).toEqual([{ price: 110, qty: 500 }])
+  })
+
+  it('posts every rung a jump passed, each at its own price', () => {
+    expect(plannedOpenLadder(cfg(), ISSUANCE, 135, 0)).toEqual([
+      { price: 110, qty: 200 },
+      { price: 120, qty: 200 },
+      { price: 130, qty: 200 },
+    ])
+  })
+
+  it('offers MORE the higher the price: each rung adds `increment` to the share', () => {
+    const grow = cfg({ increment: 0.01 })
+    expect(plannedOpenLadder(grow, ISSUANCE, 135, 0)).toEqual([
+      { price: 110, qty: 200 }, // 1%
+      { price: 120, qty: 400 }, // 2%
+      { price: 130, qty: 600 }, // 3%
+    ])
+    // A rung keeps its own size whenever it is posted.
+    expect(plannedOpenLadder(grow, ISSUANCE, 135, 2)).toEqual([{ price: 130, qty: 600 }])
+    expect(plannedOpenLadder(cfg({ fraction: 0.02, increment: 0.005 }), ISSUANCE, 125, 0).map((r) => r.qty)).toEqual([400, 500])
+    // Never more than everything issued, however far up it goes.
+    const far = plannedOpenLadder(cfg({ increment: 0.5 }), ISSUANCE, 160, 0).map((r) => r.qty)
+    expect(far).toEqual([200, 10200, 20000, 20000, 20000, 20000])
+  })
+
+  it('the shipped ladder grows', () => {
+    const shipped = plannedOpenLadder(CFG, ISSUANCE, CFG.openLadder.fromPrice + 2 * CFG.openLadder.step, 0)
+    expect(shipped).toHaveLength(3)
+    expect(shipped[1].qty).toBeGreaterThan(shipped[0].qty)
+    expect(shipped[2].qty).toBeGreaterThan(shipped[1].qty)
+  })
+
+  it('offers a rung once a round: the ones already posted are skipped', () => {
+    expect(plannedOpenLadder(cfg(), ISSUANCE, 135, 2)).toEqual([{ price: 130, qty: 200 }])
+    expect(plannedOpenLadder(cfg(), ISSUANCE, 135, 3)).toEqual([])
+    // The price falling back and returning does not re-post a rung.
+    expect(plannedOpenLadder(cfg(), ISSUANCE, 112, 3)).toEqual([])
+  })
+
+  it('has no top: the rungs go on every step', () => {
+    const rungs = plannedOpenLadder(cfg(), ISSUANCE, 460, 0)
+    expect(rungs).toHaveLength(36) // 110, 120, …, 460
+    expect(rungs[rungs.length - 1].price).toBe(460)
+    expect(plannedOpenLadder(cfg({ step: 25 }), ISSUANCE, 190, 0).map((r) => r.price)).toEqual([110, 135, 160, 185])
+  })
+
+  it('is bounded against an absurd print', () => {
+    expect(plannedOpenLadder(cfg(), ISSUANCE, 1e9, 0)).toHaveLength(OPEN_LADDER_MAX_RUNGS)
+    expect(plannedOpenLadder(cfg(), ISSUANCE, 1e9, OPEN_LADDER_MAX_RUNGS)).toEqual([])
+  })
+
+  it('is inert when disabled, at fraction 0, or with nothing issued', () => {
+    expect(plannedOpenLadder(cfg({}, false), ISSUANCE, 150, 0)).toEqual([])
+    expect(plannedOpenLadder(cfg({ fraction: 0 }), ISSUANCE, 150, 0)).toEqual([])
+    expect(plannedOpenLadder(cfg(), 0, 150, 0)).toEqual([])
   })
 })

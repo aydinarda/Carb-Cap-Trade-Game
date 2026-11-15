@@ -269,6 +269,11 @@ export interface YearRecord {
    * evaluated on every order placed.
    */
   reserveRecurringDone: boolean
+  /**
+   * How many rungs of the open-ended ladder above the fine (`reserve.openLadder`) this round
+   * has offered. Each rung is offered once a round; a new round starts again at 0.
+   */
+  reserveLadderRungs: number
 }
 
 /**

@@ -1,5 +1,5 @@
 import type { GameConfig } from '../config/schema'
-import { forSector } from '../constants'
+import { BENCHMARK_STRINGENCY, NOISE_SECTOR, forSector } from '../constants'
 import type { Player } from '../types'
 import type { CapMechanism } from './capMechanism'
 import { round1 } from './rng'
@@ -23,7 +23,17 @@ export function benchmarkFor(player: Player, targetYear: number, config: GameCon
   // Pure-trader bots have no activity level to benchmark against — see roles.ts.
   if (isPureTrader(player)) return 0
   const reduction = cumulativeCapFactor(config, targetYear)
-  return round1((forSector(config.allocation.benchmark, player.industry) ?? 0) * reduction)
+  return round1(sectorBenchmark(player, config) * reduction)
+}
+
+/**
+ * The untightened benchmark of a company's sector. The `Noise` sector (bots only) has no row in
+ * the host's table: its sector average IS the noise bots' configured emission, so it gets that
+ * at the same stringency the industries' defaults are set at.
+ */
+function sectorBenchmark(player: Player, config: GameConfig): number {
+  if (player.industry === NOISE_SECTOR) return config.bots.noise.emission * BENCHMARK_STRINGENCY
+  return forSector(config.allocation.benchmark, player.industry) ?? 0
 }
 
 export const benchmarking: CapMechanism = {

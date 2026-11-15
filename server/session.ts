@@ -3,6 +3,7 @@ import { resolveConfig, type DeepPartial, type GameConfig } from '../shared/conf
 import {
   INDUSTRY_NAMES,
   MARKET_MAKER_SECTOR,
+  NOISE_SECTOR,
   RESERVE_ID,
   SCREENING_ID,
   forSector,
@@ -30,6 +31,7 @@ import {
   openSellRemaining,
   investmentGap,
   optimalYearCost,
+  plannedOpenLadder,
   plannedRecurring,
   plannedRelease,
   reserveBase,
@@ -71,12 +73,16 @@ const BOT_LABELS: Record<BotType, string> = {
   noise: 'Noise-Bot',
 }
 
+/** A flat emission history at `level` tonnes a year. */
+function flatHistory(industry: Sector, level: number, config: GameConfig): PlayerProfile {
+  const emissions: Record<number, number> = {}
+  for (let y = 1; y <= config.emissions.historyYears; y++) emissions[y] = level
+  return { industry, emissions }
+}
+
 /** Near-zero emission history for pure-trader bots (financial players). */
 function flatTinyHistory(industry: Sector, config: GameConfig): PlayerProfile {
-  const emissions: Record<number, number> = {}
-  const { historyYears, traderHistoryLevel } = config.emissions
-  for (let y = 1; y <= historyYears; y++) emissions[y] = traderHistoryLevel
-  return { industry, emissions }
+  return flatHistory(industry, config.emissions.traderHistoryLevel, config)
 }
 
 const roomCodeAlphabet = customAlphabet('ABCDEFGHJKMNPQRSTUVWXYZ23456789', 4)
@@ -1032,11 +1038,15 @@ export class Session {
     const drawn = industry ?? INDUSTRY_NAMES[Math.floor(this.rng.uniform(0, INDUSTRY_NAMES.length))]
     // A market maker sits in its own sector, not an industry. The draw above still runs for it
     // so the seeded stream, and with it every later bot and student, stays where it was.
-    const ind: Sector = botType === 'marketMaker' ? MARKET_MAKER_SECTOR : drawn
+    const ind: Sector = botType === 'marketMaker' ? MARKET_MAKER_SECTOR : botType === 'noise' ? NOISE_SECTOR : drawn
     const isEmitter = botType === 'compliance' || botType === 'noise'
-    const profile = isEmitter
+    let profile = isEmitter
       ? generateHistoryForIndustry(drawn, this.rng, this.state.config.emissions)
       : flatTinyHistory(ind, this.state.config)
+    // A noise bot is a SMALL emitter in its own sector (2026-11-13): a flat history at
+    // `bots.noise.emission`. The industry history above is still drawn and then replaced, so
+    // the seeded stream does not move for anyone added after it.
+    if (botType === 'noise') profile = flatHistory(NOISE_SECTOR, this.state.config.bots.noise.emission, this.state.config)
     const n = this.state.players.filter((p) => p.botType === botType).length + 1
     const player: Player = {
       id: `P${this.state.players.length + 1}`,
@@ -1392,6 +1402,7 @@ export class Session {
       reserveCommitted: 0,
       reserveRevenue: 0,
       reserveRecurringDone: false,
+      reserveLadderRungs: 0,
     }
     record.primaryPrice = mechanism.primaryPrice(record, this.state.config, this.openingReference())
     this.seedTraderBots(record, mechanism.usesAuction)
@@ -2010,7 +2021,7 @@ export class Session {
     const cfg = this.state.config.allocation.reserve
     if (!cfg.enabled) return
     const record = this.currentYearRecord()
-    if (!record || record.reservePot <= 0) return
+    if (!record) return
     // Nothing has printed this year, so there is no discovered price and no ceiling to
     // defend. Deliberately NOT falling back to last year's price: that would flood the
     // ladder before anyone had traded, and destroy the causal story — the price rose, and
@@ -2018,19 +2029,37 @@ export class Session {
     const price = meanOfLast(record.trades, cfg.triggerTrades)
     if (price === null) return
 
-    const base = round1(record.reservePot / cfg.steps[cfg.steps.length - 1].cumulativeFraction)
-    for (const rung of plannedRelease(cfg, base, price, record.reserveCommitted)) {
-      record.reserveCommitted = round1(record.reserveCommitted + rung.qty)
-      this.submitOrder(RESERVE_ID, 'sell', rung.qty, rung.price)
+    // The pot: the ladder and the repeating top-up. Inert in a year that opened with no
+    // shortfall, as it always was.
+    if (record.reservePot > 0) {
+      const base = round1(record.reservePot / cfg.steps[cfg.steps.length - 1].cumulativeFraction)
+      for (const rung of plannedRelease(cfg, base, price, record.reserveCommitted)) {
+        record.reserveCommitted = round1(record.reserveCommitted + rung.qty)
+        this.submitOrder(RESERVE_ID, 'sell', rung.qty, rung.price)
+      }
+      // The repeating top-up, once per round. Flagged rather than folded into
+      // `reserveCommitted`: that total is the ladder's own accumulator, and adding the top-up
+      // to it would make the ladder believe it had already released more than it has.
+      if (!record.reserveRecurringDone) {
+        const extra = plannedRecurring(cfg, base, price)
+        if (extra.length) {
+          record.reserveRecurringDone = true
+          for (const offer of extra) this.submitOrder(RESERVE_ID, 'sell', offer.qty, offer.price)
+        }
+      }
     }
-    // The repeating top-up, once per round. Flagged rather than folded into
-    // `reserveCommitted`: that total is the ladder's own accumulator, and adding the top-up
-    // to it would make the ladder believe it had already released more than it has.
-    if (!record.reserveRecurringDone) {
-      const extra = plannedRecurring(cfg, base, price)
-      if (extra.length) {
-        record.reserveRecurringDone = true
-        for (const offer of extra) this.submitOrder(RESERVE_ID, 'sell', offer.qty, offer.price)
+
+    // Above the fine: the open-ended ladder, OUTSIDE the pot — offered whatever the pot is,
+    // every round, one rung per `step` the price has reached (`reserve.openLadder`). The
+    // issuance is summed only when a new rung is due: this runs on every order placed.
+    const ladder = cfg.openLadder
+    if (ladder.fraction > 0 && price >= ladder.fromPrice + record.reserveLadderRungs * ladder.step) {
+      const issuance = round1(
+        record.regulatorPool + Object.values(record.freeAllocation).reduce((a, b) => a + b, 0),
+      )
+      for (const rung of plannedOpenLadder(cfg, issuance, price, record.reserveLadderRungs)) {
+        record.reserveLadderRungs += 1
+        this.submitOrder(RESERVE_ID, 'sell', rung.qty, rung.price)
       }
     }
   }
@@ -2083,7 +2112,7 @@ export class Session {
     const player = this.getPlayer(playerId)
     if (!player) throw new GameError('NO_PLAYER', 'Player not found.')
     const spec = forSector(this.state.config.abatement.sectors, player.industry)
-    if (!spec) throw new GameError('NO_ABATEMENT', 'A market maker has no production to abate.')
+    if (!spec) throw new GameError('NO_ABATEMENT', 'This company has no abatement option (market maker or noise bot).')
     const record = this.currentYearRecord()!
     // Two decimals, not one. `round1` here meant the stored fraction snapped to 10% steps,
     // which was survivable when the range was 0-100% but leaves only three usable choices

@@ -85,6 +85,10 @@ export function validateConfig(config: GameConfig): GameConfig {
     if (!Number.isFinite(sc[key]) || sc[key] < 0 || sc[key] > 1) throw new ConfigError(`screening.${key} must be between 0 and 1.`)
   }
   if (!Number.isInteger(sc.holdRounds) || sc.holdRounds < 1) throw new ConfigError('screening.holdRounds must be a whole number, 1 or more.')
+  const noiseEmission = config.bots.noise.emission
+  if (!Number.isFinite(noiseEmission) || noiseEmission <= 0 || noiseEmission > 2000) {
+    throw new ConfigError('bots.noise.emission must be in (0, 2000] tonnes.')
+  }
   const push = config.bots.compliance.debtPush
   if (!Number.isFinite(push) || push < 0 || push > 10) {
     throw new ConfigError('bots.compliance.debtPush must be between 0 and 10.')
@@ -274,6 +278,21 @@ export function validateConfig(config: GameConfig): GameConfig {
     prevPrice = step.triggerPrice
     prevFrac = step.cumulativeFraction
   })
+  const ladder = reserve.openLadder
+  if (!Number.isFinite(ladder.fromPrice) || ladder.fromPrice <= 0) {
+    throw new ConfigError('allocation.reserve.openLadder.fromPrice must be > 0.')
+  }
+  // A whole euro at least: the rungs are separate orders, and a step of cents would post
+  // hundreds of them for one move of the price.
+  if (!Number.isFinite(ladder.step) || ladder.step < 1) {
+    throw new ConfigError('allocation.reserve.openLadder.step must be >= 1.')
+  }
+  if (!Number.isFinite(ladder.fraction) || ladder.fraction < 0 || ladder.fraction > 1) {
+    throw new ConfigError('allocation.reserve.openLadder.fraction must be between 0 and 1.')
+  }
+  if (!Number.isFinite(ladder.increment) || ladder.increment < 0 || ladder.increment > 1) {
+    throw new ConfigError('allocation.reserve.openLadder.increment must be between 0 and 1.')
+  }
 
   return config
 }

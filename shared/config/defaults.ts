@@ -202,6 +202,10 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
           { price: 85, fraction: 0.05 },
         ],
       },
+      // Above the fine, every round, with no top: 1% of the year's issuance at 110, 2% at
+      // 120, 3% at 130, … — the higher the price, the more is offered. Outside the pot, which
+      // is 0 in almost every year the price is up there.
+      openLadder: { fromPrice: 110, step: 10, fraction: 0.01, increment: 0.01 },
     },
   },
   abatement: {
@@ -316,6 +320,8 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     },
     speculator: { size: 10, initialInventory: 20, momentumEps: 0.01 },
     noise: {
+      // A small emitter (2026-11-13). It asks for what it needs; `size` is a wrong-side slip.
+      emission: 20,
       size: 4,
       errorRate: 0.25,
       skipRate: 0.2,

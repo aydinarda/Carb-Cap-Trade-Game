@@ -191,13 +191,18 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
             icon={<Landmark size={12} />}
           />
         )}
-        {agg.reservePot > 0 && (
+        {(agg.reservePot > 0 || agg.reserveReleased > 0) && (
           // The cost containment reserve only appears once it has something to give — a
           // year that opened with no shortfall has no pot, and showing an empty one would
-          // just be noise on a projector.
+          // just be noise on a projector. It also appears with no pot once it has SOLD: the
+          // rungs above the fine (`reserve.openLadder`) are outside the pot.
           <StatCard
             label="Price reserve"
-            value={`${agg.reserveReleased.toLocaleString()} / ${agg.reservePot.toLocaleString()}`}
+            value={
+              agg.reservePot > 0
+                ? `${agg.reserveReleased.toLocaleString()} / ${agg.reservePot.toLocaleString()}`
+                : agg.reserveReleased.toLocaleString()
+            }
             unit="cr"
             tone={agg.reserveReleased > 0 ? 'good' : 'default'}
             hint={

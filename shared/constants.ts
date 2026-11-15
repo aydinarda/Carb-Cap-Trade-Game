@@ -25,14 +25,23 @@ export const INDUSTRY_NAMES = Object.keys(INDUSTRIES) as Industry[]
  */
 export const MARKET_MAKER_SECTOR = 'MM'
 
-/** What a company is registered under: one of the industries, or the market-maker sector. */
-export type Sector = Industry | typeof MARKET_MAKER_SECTOR
+/**
+ * The sector a noise bot is assigned instead of an industry (2026-11-13). Bots only, outside
+ * `INDUSTRY_NAMES` like the market makers' sector. A noise bot is a SMALL emitter
+ * (`bots.noise.emission` t a year, matched to its small orders) so it can roughly cover itself;
+ * it has no abatement curve and no sector event, and its benchmark is its own emission level
+ * (`benchmarkFor`).
+ */
+export const NOISE_SECTOR = 'Noise'
+
+/** What a company is registered under: one of the industries, or a bots-only sector. */
+export type Sector = Industry | typeof MARKET_MAKER_SECTOR | typeof NOISE_SECTOR
 
 export function isIndustry(sector: Sector): sector is Industry {
-  return sector !== MARKET_MAKER_SECTOR
+  return sector !== MARKET_MAKER_SECTOR && sector !== NOISE_SECTOR
 }
 
-/** A per-industry table's entry for a company's sector; undefined for the market-maker sector. */
+/** A per-industry table's entry for a company's sector; undefined for a bots-only sector. */
 export function forSector<T>(table: Partial<Record<Industry, T>>, sector: Sector): T | undefined {
   return isIndustry(sector) ? table[sector] : undefined
 }

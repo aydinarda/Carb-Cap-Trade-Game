@@ -321,6 +321,34 @@ export interface ReserveConfig {
     fromPrice: number
     offers: { price: number; fraction: number }[]
   }
+  /**
+   * The open-ended ladder ABOVE THE FINE, offered again every round (the user, 2026-11-15).
+   *
+   * One rung every `step` euros from `fromPrice` up, with no top: 110, 120, 130, … The first
+   * time a round's price reaches a rung, the reserve offers a share of that year's ISSUANCE
+   * (free allocation + auction pool) at the rung's price. Each rung is offered once a round,
+   * and all of them again the next round.
+   *
+   * THE HIGHER THE PRICE, THE MORE IS OFFERED (the user: "fiyat arttıkça ton da artacak"):
+   * rung k (0, 1, 2, …) offers `fraction + k × increment` of the issuance, at most all of it.
+   * At the shipped 1% + 1% a rung: 1% at 110, 2% at 120, 3% at 130, … `increment` 0 makes
+   * every rung the same size.
+   *
+   * It is outside the pot, on purpose. The pot is a share of (need − issuance), and measured
+   * over simulated games that is ZERO in 95–99% of the years the price is above the fine: the
+   * squeeze there is the debt carried in from earlier rounds, which the pot does not see. So
+   * this ladder is offered whatever the pot is, including in a year whose pot is 0.
+   *
+   * What it sells is supply on top of the cap. `fraction` 0 disables it.
+   */
+  openLadder: {
+    fromPrice: number
+    step: number
+    /** The first rung's share of the year's issuance. 0 turns the ladder off. */
+    fraction: number
+    /** What each further rung adds to that share. */
+    increment: number
+  }
 }
 
 export interface AllocationConfig {
@@ -654,8 +682,21 @@ export interface BotsConfig {
     momentumEps: number
   }
   noise: {
+    /**
+     * A noise bot's emission, tonnes a year (2026-11-13). It sits in the `Noise` sector as a
+     * small emitter: a flat history at this level, sized to its small orders (`size`) so it
+     * can roughly cover itself. It used to draw a full industry history (150–1150 t) while
+     * ordering 4 t lots, so it could never cover, rolled a growing debt, and the ledger's
+     * yearly revaluation of that debt gave it points in the millions.
+     */
+    emission: number
+    /**
+     * The size of a wrong-side slip, tonnes (see `errorRate`). Until 2026-11-15 it was the size
+     * of EVERY order; the bot now asks for what it needs (planned emission less what it holds,
+     * a carried debt included) at the auction and in the market.
+     */
     size: number
-    /** Chance to flip side. */
+    /** Chance to take the wrong side for a tick, with one `size` lot. */
     errorRate: number
     /** Chance to idle a tick. */
     skipRate: number
@@ -663,7 +704,7 @@ export interface BotsConfig {
     priceJitter: number
     /** ±fraction of price jitter when bidding at auction. */
     auctionJitter: number
-    /** Order size is multiplied by U(1 − sizeJitter, 1 + sizeJitter). */
+    /** A slip's size is multiplied by U(1 − sizeJitter, 1 + sizeJitter). */
     sizeJitter: number
   }
   compliance: {
@@ -731,6 +772,9 @@ export interface BotsConfig {
      * What is left is a behavioural question worth being able to answer both ways: is a
      * careless trader also a firm that never retrofits? Off means it trades badly AND never
      * decarbonises, which is a coherent archetype, not a defect.
+     *
+     * NO EFFECT since 2026-11-13: noise bots sit in the `Noise` sector, which has no abatement
+     * curve, so they never install either way. Kept so old sweeps still parse.
      */
     noiseAbatement: boolean
     /**

@@ -68,6 +68,51 @@ export function plannedRecurring(
     .filter((o) => o.qty > 0)
 }
 
+/**
+ * The most rungs of the open-ended ladder offered in one round: 110 … 1,100 € at the shipped
+ * step. A safety bound, not a design top — one print at an absurd price must not make the
+ * reserve post thousands of orders.
+ */
+export const OPEN_LADDER_MAX_RUNGS = 100
+
+/**
+ * The open-ended ladder above the fine (`reserve.openLadder`): the rungs the price has newly
+ * reached this round.
+ *
+ * Rung k sits at `fromPrice + k × step` and offers `(fraction + k × increment) × issuance` at
+ * that price, at most the whole issuance: the higher the price, the more is offered.
+ * `offered` is how many rungs this round has already posted, so each is offered once a round
+ * and a price that jumps straight from 100 to 135 posts 110, 120 and 130 as three orders.
+ *
+ * It takes the year's ISSUANCE, not the pot's base: this ladder is outside the pot and is
+ * offered in a year whose pot is 0 too.
+ */
+export function plannedOpenLadder(
+  cfg: ReserveConfig,
+  issuance: number,
+  marketPrice: number,
+  offered: number,
+): { price: number; qty: number }[] {
+  const ladder = cfg.openLadder
+  if (!cfg.enabled || !(ladder.fraction > 0) || !(ladder.step > 0) || !(issuance > 0)) return []
+  if (marketPrice < ladder.fromPrice) return []
+  // The first rung is the smallest: if even that rounds to nothing, there is no ladder.
+  if (round1(issuance * ladder.fraction) <= 0) return []
+  const increment = Math.max(0, ladder.increment)
+  const reached = Math.min(
+    OPEN_LADDER_MAX_RUNGS,
+    Math.floor((marketPrice - ladder.fromPrice) / ladder.step + 1e-9) + 1,
+  )
+  const out: { price: number; qty: number }[] = []
+  for (let k = Math.max(0, offered); k < reached; k++) {
+    out.push({
+      price: round1(ladder.fromPrice + k * ladder.step),
+      qty: round1(issuance * Math.min(1, ladder.fraction + k * increment)),
+    })
+  }
+  return out
+}
+
 export function plannedRelease(
   cfg: ReserveConfig,
   base: number,

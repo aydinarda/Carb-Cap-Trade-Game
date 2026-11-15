@@ -87,7 +87,7 @@ describe('reserve — the pot', () => {
     expect(rec.reserveCommitted).toBe(0)
   })
 
-  it('is ZERO when issuance already meets need, and stays inert all year', () => {
+  it('is ZERO when issuance already meets need, and its ladder stays inert all year', () => {
     // A ratio of 1.0 issues supply equal to need, so there is no shortfall to relieve. This
     // is the correct answer, not a wiring bug — pinned so it cannot rot into one.
     //
@@ -97,7 +97,7 @@ describe('reserve — the pot', () => {
     const rec = s.currentYearRecord()!
     expect(rec.reservePot).toBe(0)
 
-    printAt(s, RUNG[RUNG.length - 1] + 15) // far above every rung
+    printAt(s, RUNG[RUNG.length - 1] + 15) // far above every rung of the pot's ladder
     expect(rec.orders.some((o) => o.playerId === RESERVE_ID)).toBe(false)
     expect(rec.reserveReleased).toBe(0)
   })
@@ -264,5 +264,94 @@ describe('reserve — the off switch', () => {
     printAt(s, RUNG[RUNG.length - 1] + 15)
     expect(s.currentYearRecord()!.orders.some((o) => o.playerId === RESERVE_ID)).toBe(false)
     expect(s.currentYearRecord()!.reserveReleased).toBe(0)
+  })
+})
+
+/**
+ * The open-ended ladder above the fine (`reserve.openLadder`): outside the pot, every round.
+ *
+ * `auctionCapRatio` 1 on purpose: issuance meets need, so the pot is ZERO — the state almost
+ * every above-the-fine year is in. The ladder must work exactly there.
+ */
+describe('reserve — the open ladder above the fine', () => {
+  const NO_POT = merge(RESERVE_ON, { allocation: { auctionCapRatio: 1 } })
+  const LADDER = DEFAULT_GAME_CONFIG.allocation.reserve.openLadder
+  const own = (s: Session) =>
+    s.currentYearRecord()!.orders.filter((o) => o.playerId === RESERVE_ID).sort((a, b) => a.price - b.price)
+
+  it('is offered in a year whose pot is zero, sized off that year\'s issuance', () => {
+    const s = opened('auctioning', NO_POT)
+    const rec = s.currentYearRecord()!
+    expect(rec.reservePot).toBe(0)
+    printAt(s, LADDER.fromPrice - 5)
+    expect(own(s)).toHaveLength(0)
+
+    printAt(s, LADDER.fromPrice + 1)
+    expect(own(s).map((o) => o.price)).toEqual([LADDER.fromPrice])
+    expect(own(s)[0].side).toBe('sell')
+    expect(own(s)[0].qty).toBe(Math.round(rec.regulatorPool * LADDER.fraction * 10) / 10)
+    expect(rec.reserveLadderRungs).toBe(1)
+  })
+
+  it('offers each rung once a round, and the next one only when the price gets there', () => {
+    const s = opened('auctioning', NO_POT)
+    const rec = s.currentYearRecord()!
+    printAt(s, LADDER.fromPrice + 1)
+    printAt(s, LADDER.fromPrice + 1) // more prints at the same level: nothing new
+    expect(own(s)).toHaveLength(1)
+
+    // Sweep the first rung and every ask left under the next one, then let the market print a
+    // step higher on its own.
+    s.placeOrder('P3', 'buy', 5000, LADDER.fromPrice + LADDER.step + 1)
+    expect(own(s)[0].remaining).toBe(0)
+    printAt(s, LADDER.fromPrice + LADDER.step + 1)
+    expect(own(s).map((o) => o.price)).toEqual([LADDER.fromPrice, LADDER.fromPrice + LADDER.step])
+    expect(rec.reserveLadderRungs).toBe(2)
+    // The higher rung offers more: one `increment` of the issuance on top of the first.
+    const share = (f: number) => Math.round(rec.regulatorPool * f * 10) / 10
+    expect(own(s).map((o) => o.qty)).toEqual([share(LADDER.fraction), share(LADDER.fraction + LADDER.increment)])
+    expect(LADDER.increment).toBeGreaterThan(0)
+    expect(rec.reserveReleased).toBeGreaterThan(0)
+  })
+
+  it('starts again the next round', () => {
+    const s = opened('auctioning', NO_POT)
+    printAt(s, LADDER.fromPrice + 1)
+    expect(s.currentYearRecord()!.reserveLadderRungs).toBe(1)
+    s.closeTrade()
+    s.advanceYear()
+    s.submitBid('P1', 1500, 500) // above the auction's reserve price, enough to clear its debt
+    s.closeCapStage()
+    s.openTrade()
+    expect(s.currentYearRecord()!.reserveLadderRungs).toBe(0)
+    printAt(s, LADDER.fromPrice + 1)
+    expect(own(s).map((o) => o.price)).toEqual([LADDER.fromPrice])
+  })
+
+  it('works next to the pot\'s own ladder, and neither counts the other', () => {
+    const s = opened('benchmarking')
+    const rec = s.currentYearRecord()!
+    expect(rec.reservePot).toBeGreaterThan(0)
+    printAt(s, AT_RUNG1)
+    const committed = rec.reserveCommitted
+    expect(rec.reserveLadderRungs).toBe(0)
+    expect(committed).toBeGreaterThan(0)
+  })
+
+  it('is off at fraction 0 and with the reserve disabled', () => {
+    const none = opened('auctioning', merge(NO_POT, { allocation: { reserve: { openLadder: { fraction: 0 } } } }))
+    printAt(none, LADDER.fromPrice + 25)
+    expect(own(none)).toHaveLength(0)
+    const off = opened('auctioning', merge(NO_POT, { allocation: { reserve: { enabled: false } } }))
+    printAt(off, LADDER.fromPrice + 25)
+    expect(own(off)).toHaveLength(0)
+  })
+
+  it('refuses a ladder that could not be posted', () => {
+    const bad = (openLadder: Partial<typeof LADDER>) => () => new Session('auctioning', 1, { allocation: { reserve: { openLadder } } })
+    expect(bad({ step: 0.5 })).toThrow(/openLadder.step/)
+    expect(bad({ fromPrice: 0 })).toThrow(/openLadder.fromPrice/)
+    expect(bad({ fraction: 1.5 })).toThrow(/openLadder.fraction/)
+    expect(bad({ increment: -0.01 })).toThrow(/openLadder.increment/)
   })
 })
