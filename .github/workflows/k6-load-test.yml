@@ -22,6 +22,14 @@ on:
           - '50'
           - '100'
           - both
+      start_delay:
+        description: Seconds before year 1 starts, at least (time to join the lobby from a browser; the log shows the room code)
+        default: '180'
+        required: true
+      frontend_url:
+        description: The game's site, shown in the log's join hint (optional)
+        default: ''
+        required: false
       years:
         description: Rounds (years) played
         default: '12'
@@ -55,6 +63,8 @@ jobs:
       BASE_URL: ${{ inputs.base_url }}
       # The backend's instructor key. The repository secret wins when it is set.
       HOST_KEY: ${{ secrets.HOST_KEY || 'admin123' }}
+      START_DELAY: ${{ inputs.start_delay }}
+      FRONTEND_URL: ${{ inputs.frontend_url }}
       YEARS: ${{ inputs.years }}
       ROUND_WINDOW: ${{ inputs.round_window }}
       CAP_WINDOW: ${{ inputs.cap_window }}
@@ -73,12 +83,12 @@ jobs:
 
       - name: Class of 50
         if: inputs.class_size == '50' || inputs.class_size == 'both'
-        run: k6 run --quiet --summary-mode=compact --summary-export=k6-class-50.json scripts/k6/class-50.js
+        run: k6 run --quiet --log-format=raw --summary-mode=compact --summary-export=k6-class-50.json scripts/k6/class-50.js
 
       # Runs after a failed 50 too: its numbers are still worth having.
       - name: Class of 100
         if: ${{ !cancelled() && (inputs.class_size == '100' || inputs.class_size == 'both') }}
-        run: k6 run --quiet --summary-mode=compact --summary-export=k6-class-100.json scripts/k6/class-100.js
+        run: k6 run --quiet --log-format=raw --summary-mode=compact --summary-export=k6-class-100.json scripts/k6/class-100.js
 
       - name: Keep the summaries
         if: ${{ !cancelled() }}

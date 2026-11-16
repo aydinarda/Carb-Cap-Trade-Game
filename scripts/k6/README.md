@@ -31,7 +31,22 @@ using: they share the instance.
 - **health** (1 request / 2 s): `GET /healthz` for the whole run. It shares the event loop with
   the game, so it is what Render's health check sees.
 
-At the defaults one run takes about 19 minutes.
+At the defaults one run takes about 19 minutes (plus `START_DELAY` beyond the class's join window).
+
+## Watching and joining
+
+The log opens with a block for the room: its code, how to **play** (open the game's site, enter
+the code during the lobby; `START_DELAY` keeps the lobby open), and how to **watch as host**: a
+one-line `localStorage.setItem(…)` to paste in the browser console on the game's site, then
+`/host`. Use another browser or a private window for the host view: one browser holds one
+identity. The test drives the clock, so do not press the host buttons.
+
+During the game the host VU logs each phase: the lobby countdown and who joined, the auction's
+clearing price, a market line every `MARKET_LOG_EVERY` s (last price, VWAP, volume, best bid/ask,
+reserve sold), each year's settlement with the top 3, and the final top 5 with your rank.
+
+The block prints the room's host token. Actions logs of a public repository are public, so anyone
+reading them could take over that test room (only that one).
 
 ## Settings (environment variables)
 
@@ -46,6 +61,9 @@ At the defaults one run takes about 19 minutes.
 | `TRADE_MIN`, `TRADE_MAX` | 3, 8 | s between a student's market actions |
 | `JOIN_SPREAD` | 20 | s over which students arrive |
 | `JOIN_TIMEOUT` | 120 | s the host waits for the class before starting anyway |
+| `START_DELAY` | 0 (workflow: 180) | s before year 1, at least: time for you to join the lobby |
+| `FRONTEND_URL` | none | the game's site, only for the join hint in the log |
+| `MARKET_LOG_EVERY` | 15 | s between market lines in the log |
 | `BOTS` | `compliance:28,marketMaker:4,speculator:2,noise:6` | 40 bots, every type |
 | `AGENTS` | `all` | `all`, `none`, or model ids |
 | `ACK_TIMEOUT_MS` | 10000 | an emit with no ack after this counts as failed |

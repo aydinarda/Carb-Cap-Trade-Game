@@ -32,6 +32,9 @@ const TRADE_MIN = num('TRADE_MIN', 3) // s, a student acts every U(TRADE_MIN, TR
 const TRADE_MAX = num('TRADE_MAX', 8)
 const JOIN_SPREAD = num('JOIN_SPREAD', 20) // s, students arrive spread over this
 const JOIN_TIMEOUT = num('JOIN_TIMEOUT', 120) // s, the host starts once all joined or after this
+const START_DELAY = num('START_DELAY', 0) // s, year 1 never starts earlier: time for a person to join the lobby
+const FRONTEND_URL = env('FRONTEND_URL', '').replace(/\/$/, '') // the game's site, for the join hint in the log
+const MARKET_LOG_EVERY = num('MARKET_LOG_EVERY', 15) // s between market lines in the log
 const AGENTS = env('AGENTS', 'all') // 'all' = every hybrid model once, 'none', or a comma list of model ids
 const BOTS = env('BOTS', 'compliance:28,marketMaker:4,speculator:2,noise:6')
 
@@ -60,9 +63,31 @@ const rand = (a, b) => a + Math.random() * (b - a)
 const round1 = (x) => Math.round(x * 10) / 10
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x))
 
-/** Seconds the whole run may take: the join window, every year, and a margin (≈ 21 min at the defaults). */
+/** The longest the lobby may last, in s: the start delay, or the class's join window if longer. */
+const lobbySeconds = () => Math.max(START_DELAY, JOIN_SPREAD + JOIN_TIMEOUT)
+
+/** Seconds the whole run may take: the lobby, every year, and a margin (≈ 19 min at the defaults). */
 export function gameSeconds() {
-  return Math.ceil(JOIN_SPREAD + JOIN_TIMEOUT + YEARS * (CAP_WINDOW + ROUND_WINDOW + REVIEW_GAP + 5) + 60)
+  return Math.ceil(lobbySeconds() + YEARS * (CAP_WINDOW + ROUND_WINDOW + REVIEW_GAP + 5) + 60)
+}
+
+const K6_NAME = 'k6 student'
+const fmt = (x, digits = 1) => (x === null || x === undefined ? '—' : Number(x).toFixed(digits))
+
+/** Who a roster or leaderboard row is: a k6 student, an RL agent, a bot, or a person. */
+function kindOf(row) {
+  if (row.isBot) return row.botType || 'bot'
+  if (row.agentModel || /^RL /.test(row.name)) return 'agent'
+  if (row.name.startsWith(K6_NAME)) return 'k6'
+  return 'person'
+}
+
+function topOf(leaderboard, n) {
+  return (leaderboard || [])
+    .filter((r) => r.points !== null)
+    .slice(0, n)
+    .map((r, i) => `${i + 1}. ${r.name} (${kindOf(r)}) ${fmt(r.points, 0)}`)
+    .join(' · ')
 }
 
 function parseBots(spec) {
@@ -257,8 +282,18 @@ export function makeTest(students) {
     const botCount = roster.filter((p) => p.isBot).length
     const agentCount = roster.filter((p) => p.agentModel).length
     hostSocket.close()
-    console.log(`room ${created.roomCode}: ${students} students expected, ${botCount} bots (${BOTS}), ${agentCount} RL agents; ` +
-      `${YEARS} years × (cap ${CAP_WINDOW}s + market ${ROUND_WINDOW}s + summary ${REVIEW_GAP}s). Join it in a browser now to watch.`)
+    const site = FRONTEND_URL || 'the game\'s site'
+    const identity = JSON.stringify({ role: 'host', roomCode: created.roomCode, token: created.hostToken })
+    for (const line of [
+      `════════ ROOM ${created.roomCode} ════════`,
+      `${students} k6 students · ${botCount} bots (${BOTS}) · ${agentCount} RL agents · ${YEARS} years × (cap ${CAP_WINDOW} s + market ${ROUND_WINDOW} s + summary ${REVIEW_GAP} s)`,
+      `Year 1 starts in about ${Math.max(START_DELAY, JOIN_SPREAD)} s (once all k6 students are in and the start delay has passed). Joining closes then.`,
+      `PLAY:  open ${site}, enter room ${created.roomCode}, any name and industry.`,
+      `WATCH as host, in another browser or a private window: open ${site}, then run in the browser console:`,
+      `  localStorage.setItem('capgame:identity', '${identity}'); location.href = '/host'`,
+      `  The test drives the clock: watch, but do not press the host buttons.`,
+      `══════════════════════════════`,
+    ]) console.log(line)
     return { roomCode: created.roomCode, hostToken: created.hostToken, students, botCount, agentCount }
   }
 
@@ -266,15 +301,35 @@ export function makeTest(students) {
     const snap = snapshotHolder()
     const client = await connect(BASE_URL, { role: 'host', token: data.hostToken }, { onSnapshot: snap.onSnapshot })
 
-    // Lobby: wait for the class.
-    const joinedNow = () => {
+    // Lobby: wait for the class, and for the start delay so a person can join too.
+    const roster = () => {
       const s = snap.get()
-      return s ? s.players.filter((p) => !p.isBot && !p.agentModel).length : 0
+      return s ? s.players : []
     }
-    const until = Date.now() + (JOIN_SPREAD + JOIN_TIMEOUT) * 1000
-    while (joinedNow() < data.students && Date.now() < until) await wait(1000)
-    classJoined.add(joinedNow())
-    console.log(`class in: ${joinedNow()} / ${data.students} students`)
+    const t0 = Date.now()
+    const people = new Set()
+    let nextLog = 0
+    for (;;) {
+      const players = roster()
+      const k6In = players.filter((p) => kindOf(p) === 'k6').length
+      for (const p of players) {
+        if (kindOf(p) === 'person' && !people.has(p.id)) {
+          people.add(p.id)
+          console.log(`lobby · a person joined: ${p.name} (${p.industry})`)
+        }
+      }
+      const elapsed = (Date.now() - t0) / 1000
+      if ((k6In >= data.students && elapsed >= START_DELAY) || elapsed >= lobbySeconds()) {
+        classJoined.add(k6In)
+        console.log(`lobby closed · k6 students ${k6In}/${data.students} · people ${people.size}`)
+        break
+      }
+      if (elapsed >= nextLog) {
+        console.log(`lobby · year 1 in ${Math.max(1, Math.ceil(Math.max(START_DELAY - elapsed, 0)))} s or more · k6 students ${k6In}/${data.students} · people ${people.size} · room ${data.roomCode}`)
+        nextLog += 30
+      }
+      await wait(1000)
+    }
 
     let allOk = true
     const step = async (event) => {
@@ -284,17 +339,37 @@ export function makeTest(students) {
         console.error(`${event} refused: ${res.code} ${res.error}`)
       }
     }
+    const marketLine = (label) => {
+      const s = snap.get()
+      const mv = s && s.market
+      const reserve = s && s.classAggregate ? s.classAggregate.reserveReleased : null
+      console.log(`${label} · last ${fmt(mv && mv.lastPrice)} € · VWAP ${fmt(mv && mv.vwap)} € · volume ${fmt(mv && mv.volume, 0)} t · ` +
+        `bid/ask ${fmt(mv && mv.bestBid)}/${fmt(mv && mv.bestAsk)} € · reserve sold ${fmt(reserve, 0)} t`)
+    }
     for (let y = 0; y < YEARS; y++) {
       await step(y === 0 ? 'host:startYear' : 'host:advanceYear')
+      console.log(`──── year ${y + 1}/${YEARS} ──── cap stage (auction) ${CAP_WINDOW} s`)
       await wait(CAP_WINDOW * 1000)
       await step('host:closeCapStage')
+      await wait(300)
+      const cap = snap.get()
+      console.log(`auction cleared at ${fmt(cap && cap.auctionPrice)} € · pool ${fmt(cap && cap.regulatorPool, 0)} t`)
       await step('host:openTrade')
-      await wait(ROUND_WINDOW * 1000)
+      console.log(`market open ${ROUND_WINDOW} s`)
+      const marketEnd = Date.now() + ROUND_WINDOW * 1000
+      const marketStart = Date.now()
+      while (Date.now() < marketEnd - 1000) {
+        await wait(Math.min(MARKET_LOG_EVERY * 1000, marketEnd - Date.now()))
+        if (Date.now() < marketEnd - 1000) marketLine(`market +${Math.round((Date.now() - marketStart) / 1000)} s`)
+      }
+      await wait(Math.max(0, marketEnd - Date.now()))
       await step('host:closeTrade')
-      await wait(REVIEW_GAP * 1000)
-      const s = snap.get()
-      const price = s && s.market ? s.market.vwap : null
-      console.log(`year ${y + 1}/${YEARS} settled · VWAP ${price === null ? '—' : price.toFixed(1)} · auction ${s && s.auctionPrice !== null ? s.auctionPrice : '—'}`)
+      await wait(500)
+      marketLine(`year ${y + 1} settled`)
+      const settled = snap.get()
+      const connected = settled ? settled.players.filter((p) => !p.isBot && !p.agentModel && p.connected).length : 0
+      console.log(`  top: ${topOf(settled && settled.leaderboard, 3)} · connected students and people: ${connected}`)
+      await wait(Math.max(0, REVIEW_GAP * 1000 - 800))
     }
     await step('host:endGame')
     await wait(1500)
@@ -303,7 +378,12 @@ export function makeTest(students) {
     const rows = (s && s.leaderboard ? s.leaderboard : []).filter((r) => r.points !== null)
     const top = rows.reduce((m, r) => Math.max(m, r.points), 0)
     leaderboardMax.add(top)
-    console.log(`game over · ${rows.length} ranked · max points ${top.toFixed(1)} · above 1,000: ${rows.filter((r) => r.points > 1000).length}`)
+    console.log(`════════ GAME OVER · room ${data.roomCode} ════════`)
+    console.log(`top 5: ${topOf(rows, 5)}`)
+    console.log(`${rows.length} ranked · max points ${fmt(top)} · above 1,000: ${rows.filter((r) => r.points > 1000).length}`)
+    for (const r of rows.filter((x) => kindOf(x) === 'person')) {
+      console.log(`  you: ${r.name} · rank ${rows.indexOf(r) + 1} of ${rows.length} · ${fmt(r.points, 0)} points`)
+    }
     gameCompleted.add(allOk && !!s && s.phase === 'ended')
     client.close()
   }
