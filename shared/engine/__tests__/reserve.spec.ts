@@ -196,6 +196,13 @@ describe('the open-ended ladder above the fine', () => {
     expect(shipped[2].qty).toBeGreaterThan(shipped[1].qty)
   })
 
+  it('keeps running when the reserve (the pot) is switched off', () => {
+    // The host's switch stops the pot only (2026-11-16): with the ladder gone too, the price ran
+    // to 2–4× the fine and the leaderboard exploit came back.
+    expect(plannedOpenLadder(cfg({}, false), ISSUANCE, 135, 0)).toEqual(plannedOpenLadder(cfg(), ISSUANCE, 135, 0))
+    expect(plannedOpenLadder(cfg({}, false), ISSUANCE, 135, 0)).toHaveLength(3)
+  })
+
   it('offers a rung once a round: the ones already posted are skipped', () => {
     expect(plannedOpenLadder(cfg(), ISSUANCE, 135, 2)).toEqual([{ price: 130, qty: 200 }])
     expect(plannedOpenLadder(cfg(), ISSUANCE, 135, 3)).toEqual([])
@@ -215,8 +222,7 @@ describe('the open-ended ladder above the fine', () => {
     expect(plannedOpenLadder(cfg(), ISSUANCE, 1e9, OPEN_LADDER_MAX_RUNGS)).toEqual([])
   })
 
-  it('is inert when disabled, at fraction 0, or with nothing issued', () => {
-    expect(plannedOpenLadder(cfg({}, false), ISSUANCE, 150, 0)).toEqual([])
+  it('is inert at fraction 0 or with nothing issued', () => {
     expect(plannedOpenLadder(cfg({ fraction: 0 }), ISSUANCE, 150, 0)).toEqual([])
     expect(plannedOpenLadder(cfg(), 0, 150, 0)).toEqual([])
   })

@@ -286,6 +286,12 @@ export interface ReserveStep {
  * squeeze, not to set the price.
  */
 export interface ReserveConfig {
+  /**
+   * The POT on or off: the ladder (`steps`) and the repeating top-up (`recurring`). The host's
+   * "Price reserve" switch sets it. It does NOT stop `openLadder` above the fine (2026-11-16):
+   * with that ladder off as well, the leaderboard exploit came back (CLAUDE.md §5, precaution
+   * notes).
+   */
   enabled: boolean
   /**
    * What the pot is a share of, recomputed at each year open.
@@ -339,7 +345,8 @@ export interface ReserveConfig {
    * squeeze there is the debt carried in from earlier rounds, which the pot does not see. So
    * this ladder is offered whatever the pot is, including in a year whose pot is 0.
    *
-   * What it sells is supply on top of the cap. `fraction` 0 disables it.
+   * What it sells is supply on top of the cap. `fraction` 0 disables it. `enabled` (the host's
+   * switch) does NOT: the ladder runs with the pot switched off (2026-11-16).
    */
   openLadder: {
     fromPrice: number

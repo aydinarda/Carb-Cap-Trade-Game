@@ -257,7 +257,7 @@ describe('reserve — identity', () => {
 })
 
 describe('reserve — the off switch', () => {
-  it('posts nothing at all when disabled, however high the price goes', () => {
+  it('posts nothing from the pot when disabled, however high the price goes below the open ladder', () => {
     const s = opened('benchmarking', { allocation: { reserve: { enabled: false } } })
     // Still SIZED — the pot is computed either way, so enabling it is a pure flip.
     expect(s.currentYearRecord()!.reservePot).toBeGreaterThan(0)
@@ -338,13 +338,32 @@ describe('reserve — the open ladder above the fine', () => {
     expect(committed).toBeGreaterThan(0)
   })
 
-  it('is off at fraction 0 and with the reserve disabled', () => {
+  it('is off at fraction 0', () => {
     const none = opened('auctioning', merge(NO_POT, { allocation: { reserve: { openLadder: { fraction: 0 } } } }))
     printAt(none, LADDER.fromPrice + 25)
     expect(own(none)).toHaveLength(0)
-    const off = opened('auctioning', merge(NO_POT, { allocation: { reserve: { enabled: false } } }))
-    printAt(off, LADDER.fromPrice + 25)
-    expect(own(off)).toHaveLength(0)
+  })
+
+  it("keeps running when the host switches the reserve off: the switch stops the pot only", () => {
+    // 2026-11-16: with the ladder stopped too, the leaderboard exploit came back (14% of games
+    // above 1,000 points with the 20 shipped agents).
+    // The host's switch writes exactly this (`updateSettings({ reserveEnabled: false })`).
+    const s = opened('benchmarking', { allocation: { reserve: { enabled: false } } })
+    const rec = s.currentYearRecord()!
+    expect(rec.reservePot).toBeGreaterThan(0) // there IS a pot, and it must stay silent
+    printAt(s, LADDER.fromPrice + LADDER.step + 1)
+    const prices = own(s).map((o) => o.price)
+    expect(prices.every((p) => p >= LADDER.fromPrice)).toBe(true) // nothing from the pot's 65–85 rungs
+    expect(prices).toContain(LADDER.fromPrice)
+    expect(rec.reserveCommitted).toBe(0)
+    expect(rec.reserveRecurringDone).toBe(false)
+  })
+
+  it('the host switch sets only the pot\'s flag', () => {
+    const s = new Session('hybrid', 1)
+    s.updateSettings({ reserveEnabled: false })
+    expect(s.state.config.allocation.reserve.enabled).toBe(false)
+    expect(s.state.config.allocation.reserve.openLadder.fraction).toBe(LADDER.fraction)
   })
 
   it('refuses a ladder that could not be posted', () => {

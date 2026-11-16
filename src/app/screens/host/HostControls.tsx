@@ -248,7 +248,8 @@ export function SettingsPanel({ config }: { config: HostConfigView }) {
           <div className="text-xs text-foreground">Price reserve</div>
           <div className="text-[10px] text-muted-foreground font-mono">
             releases up to 25% of the year's shortfall in steps from €
-            {config.reserveSteps[0]?.triggerPrice ?? '—'}
+            {config.reserveSteps[0]?.triggerPrice ?? '—'}; off stops these steps only, the
+            ladder above the fine always runs
           </div>
         </div>
         <button

@@ -94,7 +94,9 @@ export function plannedOpenLadder(
   offered: number,
 ): { price: number; qty: number }[] {
   const ladder = cfg.openLadder
-  if (!cfg.enabled || !(ladder.fraction > 0) || !(ladder.step > 0) || !(issuance > 0)) return []
+  // Not `cfg.enabled`: that is the host's switch for the pot, and the ladder above the fine
+  // keeps running when it is off (2026-11-16). `fraction` 0 is this ladder's own off switch.
+  if (!(ladder.fraction > 0) || !(ladder.step > 0) || !(issuance > 0)) return []
   if (marketPrice < ladder.fromPrice) return []
   // The first rung is the smallest: if even that rounds to nothing, there is no ladder.
   if (round1(issuance * ladder.fraction) <= 0) return []

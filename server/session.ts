@@ -1204,7 +1204,8 @@ export class Session {
     }
     if (settings.reserveEnabled !== undefined) {
       // The pot is sized at year open regardless, so this is a pure on/off — a teacher can
-      // play the same year with and without the ceiling and compare.
+      // play the same year with and without the ceiling and compare. It switches the POT only:
+      // the ladder above the fine (`reserve.openLadder`) keeps running (2026-11-16).
       this.state.config.allocation.reserve.enabled = !!settings.reserveEnabled
     }
     if (settings.auctionCapRatio !== undefined) {
@@ -2019,7 +2020,6 @@ export class Session {
    */
   private maybeReleaseReserve() {
     const cfg = this.state.config.allocation.reserve
-    if (!cfg.enabled) return
     const record = this.currentYearRecord()
     if (!record) return
     // Nothing has printed this year, so there is no discovered price and no ceiling to
@@ -2030,8 +2030,8 @@ export class Session {
     if (price === null) return
 
     // The pot: the ladder and the repeating top-up. Inert in a year that opened with no
-    // shortfall, as it always was.
-    if (record.reservePot > 0) {
+    // shortfall, as it always was, and when the host has switched the reserve off.
+    if (cfg.enabled && record.reservePot > 0) {
       const base = round1(record.reservePot / cfg.steps[cfg.steps.length - 1].cumulativeFraction)
       for (const rung of plannedRelease(cfg, base, price, record.reserveCommitted)) {
         record.reserveCommitted = round1(record.reserveCommitted + rung.qty)
@@ -2052,6 +2052,11 @@ export class Session {
     // Above the fine: the open-ended ladder, OUTSIDE the pot — offered whatever the pot is,
     // every round, one rung per `step` the price has reached (`reserve.openLadder`). The
     // issuance is summed only when a new rung is due: this runs on every order placed.
+    //
+    // NOT behind `cfg.enabled` (2026-11-16): the host's reserve switch stops the pot only.
+    // Measured with the 20 shipped agents, a switched-off ladder let the price run to 2–4×
+    // the fine and 14% of games ended with leaderboard points above 1,000 (CLAUDE.md §5,
+    // precaution notes). Only the config (`openLadder.fraction` 0) turns it off.
     const ladder = cfg.openLadder
     if (ladder.fraction > 0 && price >= ladder.fromPrice + record.reserveLadderRungs * ladder.step) {
       const issuance = round1(
