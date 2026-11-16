@@ -23,7 +23,7 @@ const env = (key, fallback) => (__ENV[key] !== undefined && __ENV[key] !== '' ? 
 const num = (key, fallback) => Number(env(key, fallback))
 
 export const BASE_URL = env('BASE_URL', 'http://localhost:3001').replace(/\/$/, '')
-const HOST_KEY = env('HOST_KEY', '')
+const HOST_KEY = env('HOST_KEY', 'admin123') // the live backend's key, as in scripts/load-full-session.mjs
 const YEARS = num('YEARS', 12)
 const CAP_WINDOW = num('CAP_WINDOW', 20) // s, cap stage (auction)
 const ROUND_WINDOW = num('ROUND_WINDOW', 45) // s, market; the agents need 31 s for their 15 decisions

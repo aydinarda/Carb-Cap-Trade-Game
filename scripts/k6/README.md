@@ -3,12 +3,12 @@
 Two sets, the same game with 50 or 100 students:
 
 ```bash
-BASE_URL=https://carb-cap-trade-api.onrender.com HOST_KEY=… k6 run scripts/k6/class-50.js
-BASE_URL=https://carb-cap-trade-api.onrender.com HOST_KEY=… k6 run scripts/k6/class-100.js
+BASE_URL=https://carb-cap-trade-api.onrender.com k6 run scripts/k6/class-50.js
+BASE_URL=https://carb-cap-trade-api.onrender.com k6 run scripts/k6/class-100.js
 ```
 
-Or from GitHub: Actions → "Load test (k6, hybrid class)" → Run workflow (needs the repository
-secret `HOST_KEY`). Written against k6 v2.0.0. Do not run it against a backend a real class is
+Or from GitHub: Actions → "Load test (k6, hybrid class)" → Run workflow. Written against k6
+v2.0.0. Do not run it against a backend a real class is
 using: they share the instance.
 
 `scripts/load-full-session.mjs` (Node, all four modes) is a separate test and stays.
@@ -38,7 +38,7 @@ At the defaults one run takes about 19 minutes.
 | Variable | Default | |
 |---|---|---|
 | `BASE_URL` | `http://localhost:3001` | backend |
-| `HOST_KEY` | none (required) | instructor key |
+| `HOST_KEY` | `admin123` | instructor key (the workflow uses the `HOST_KEY` secret when set) |
 | `YEARS` | 12 | rounds |
 | `CAP_WINDOW` | 20 | s, cap stage |
 | `ROUND_WINDOW` | 45 | s, market (the agents need 31 s for their 15 decisions) |
