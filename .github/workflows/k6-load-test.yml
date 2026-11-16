@@ -1,0 +1,95 @@
+name: Load test (k6, hybrid class)
+
+# Manual only. Plays one hybrid game against the deployed backend: 50 and/or 100 simulated
+# students + every RL agent model the server ships (one company each) + 40 bots of every type,
+# on a classroom clock. Thresholds fail the job (see scripts/k6/README.md).
+#
+# Do NOT run it while a real class is playing on the same backend: it shares the instance.
+# Needs the repository secret HOST_KEY (the backend's instructor key).
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Backend URL to hit
+        default: https://carb-cap-trade-api.onrender.com
+        required: true
+      class_size:
+        description: Students in the class
+        type: choice
+        default: '50'
+        required: true
+        options:
+          - '50'
+          - '100'
+          - both
+      years:
+        description: Rounds (years) played
+        default: '12'
+        required: true
+      round_window:
+        description: Market window per round (seconds); the agents need 31 s for their decisions
+        default: '45'
+        required: true
+      cap_window:
+        description: Cap stage (auction) per round (seconds)
+        default: '20'
+        required: true
+      review_gap:
+        description: Year summary between rounds (seconds)
+        default: '10'
+        required: true
+      bots:
+        description: 'Bots by type, "type:count,…" (types: compliance, marketMaker, speculator, noise)'
+        default: 'compliance:28,marketMaker:4,speculator:2,noise:6'
+        required: true
+      agents:
+        description: 'RL agents: "all" (every hybrid model once), "none", or a comma list of model ids'
+        default: all
+        required: true
+
+jobs:
+  k6:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BASE_URL: ${{ inputs.base_url }}
+      HOST_KEY: ${{ secrets.HOST_KEY }}
+      YEARS: ${{ inputs.years }}
+      ROUND_WINDOW: ${{ inputs.round_window }}
+      CAP_WINDOW: ${{ inputs.cap_window }}
+      REVIEW_GAP: ${{ inputs.review_gap }}
+      BOTS: ${{ inputs.bots }}
+      AGENTS: ${{ inputs.agents }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the host key
+        run: |
+          if [ -z "$HOST_KEY" ]; then
+            echo "::error::Set the repository secret HOST_KEY to the backend's instructor key."
+            exit 1
+          fi
+
+      # The version the scripts were written and checked against.
+      - name: Install k6 v2.0.0
+        run: |
+          curl -fsSL https://github.com/grafana/k6/releases/download/v2.0.0/k6-v2.0.0-linux-amd64.tar.gz | tar xz
+          sudo mv k6-v2.0.0-linux-amd64/k6 /usr/local/bin/k6
+          k6 version
+
+      - name: Class of 50
+        if: inputs.class_size == '50' || inputs.class_size == 'both'
+        run: k6 run --quiet --summary-mode=compact --summary-export=k6-class-50.json scripts/k6/class-50.js
+
+      # Runs after a failed 50 too: its numbers are still worth having.
+      - name: Class of 100
+        if: ${{ !cancelled() && (inputs.class_size == '100' || inputs.class_size == 'both') }}
+        run: k6 run --quiet --summary-mode=compact --summary-export=k6-class-100.json scripts/k6/class-100.js
+
+      - name: Keep the summaries
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-summaries
+          path: k6-class-*.json
+          if-no-files-found: ignore

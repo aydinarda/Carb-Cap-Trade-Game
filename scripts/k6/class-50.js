@@ -1,0 +1,10 @@
+// A hybrid class of 50 students + every RL agent model + 40 bots. See README.md in this folder.
+//   BASE_URL=https://carb-cap-trade-api.onrender.com HOST_KEY=… k6 run scripts/k6/class-50.js
+import { makeTest } from './lib/hybrid-class.js'
+
+const test = makeTest(50)
+export const options = test.options
+export const setup = test.setup
+export const host = test.host
+export const student = test.student
+export const health = test.health
