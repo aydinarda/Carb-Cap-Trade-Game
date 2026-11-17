@@ -165,8 +165,10 @@ function ScreeningBanner({ notice }: { notice: NonNullable<PlayerSnapshot['you']
         </ul>
         <span className="text-xs text-muted-foreground">
           The instructor may take back what you hold above {notice.keepMultiple}× your planned emission and
-          sell it to the market at a fair price.
+          sell it to the market at a fair price, and charge back any profit you made selling credits you bought
+          beyond that, plus a fine.
           {notice.penalized > 0 && <> {notice.penalized.toLocaleString()} t has been taken back so far.</>}
+          {notice.charged > 0 && <> You have been charged €{Math.round(notice.charged).toLocaleString()} (extra profit returned plus a fine).</>}
         </span>
       </div>
     </div>

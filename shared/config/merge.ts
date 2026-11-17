@@ -85,6 +85,11 @@ export function validateConfig(config: GameConfig): GameConfig {
     if (!Number.isFinite(sc[key]) || sc[key] < 0 || sc[key] > 1) throw new ConfigError(`screening.${key} must be between 0 and 1.`)
   }
   if (!Number.isInteger(sc.holdRounds) || sc.holdRounds < 1) throw new ConfigError('screening.holdRounds must be a whole number, 1 or more.')
+  for (const key of ['fineMultiple', 'yellowExcess', 'redExcess', 'yellowProfit', 'redProfit'] as const) {
+    if (!Number.isFinite(sc[key]) || sc[key] < 0) throw new ConfigError(`screening.${key} must be a number, 0 or more.`)
+  }
+  if (sc.redExcess < sc.yellowExcess) throw new ConfigError('screening.redExcess must be at least screening.yellowExcess.')
+  if (sc.redProfit < sc.yellowProfit) throw new ConfigError('screening.redProfit must be at least screening.yellowProfit.')
   const noiseEmission = config.bots.noise.emission
   if (!Number.isFinite(noiseEmission) || noiseEmission <= 0 || noiseEmission > 2000) {
     throw new ConfigError('bots.noise.emission must be in (0, 2000] tonnes.')

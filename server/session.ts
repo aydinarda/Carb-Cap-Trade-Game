@@ -47,7 +47,7 @@ import {
   voteDraw,
   type Rng,
 } from '../shared/engine'
-import { screenRound } from '../shared/engine/screening'
+import { EMPTY_BOOK, replayStockYear, screenRound, stockSignals, type StockBook } from '../shared/engine/screening'
 import type {
   BotType,
   CapMode,
@@ -63,6 +63,7 @@ import type {
   OrderSide,
   Player,
   PlayerProfile,
+  ScreeningEntry,
   YearRecord,
 } from '../shared/types'
 
@@ -158,6 +159,8 @@ export class Session {
       referendum: null,
       borrowLimitRule: null,
       screening: {},
+      stockBooks: {},
+      stockBooksYear: null,
     }
   }
 
@@ -326,7 +329,11 @@ export class Session {
 
   // ---- market-cornering screening ----
 
-  /** Flags this round's cornering (shared/engine/screening.ts) onto the instructor's list. */
+  /**
+   * At a round's close: the one-round cornering screen (`screenRound`) and the stock ledger's
+   * colours, onto the instructor's list. A company once listed stays listed, with its log; only
+   * the one-round screen's flags drive what the company is told and how bots react (`holdRounds`).
+   */
   private screenSettledRound(record: YearRecord) {
     const cfg = this.state.config.screening
     if (!cfg.enabled) return
@@ -347,23 +354,76 @@ export class Session {
       },
       cfg,
     )
-    for (const [id, reasons] of Object.entries(flags)) {
-      const before = this.state.screening[id]
-      this.state.screening[id] = {
-        lastFlaggedYear: record.year,
-        flaggedRounds: (before?.flaggedRounds ?? 0) + 1,
-        reasons,
-        status: 'watch',
-        penalties: before?.penalties ?? [],
+    const books = this.stockBooksNow()
+    for (const p of this.state.players) {
+      const classic = flags[p.id]
+      const signals = this.screeningSignals(p.id, books)
+      if (!classic && signals.color === 'none') continue
+      const entry = this.listCompany(p.id, record.year)
+      if (classic) {
+        entry.lastFlaggedYear = record.year
+        entry.flaggedRounds += 1
+        entry.reasons = classic
+        entry.status = 'watch'
+      } else if (entry.status !== 'watch' && this.screeningOpenProfit(p.id, books) > 0.5) {
+        // Cleared or penalised, and it has made new extra profit since: open again.
+        entry.status = 'watch'
       }
+      entry.log.push({ year: record.year, color: signals.color, reasons: [...(classic ?? []), ...signals.reasons] })
     }
+  }
+
+  /** The company's list entry, created (listed for good) if it has none. */
+  private listCompany(playerId: string, year: number): ScreeningEntry {
+    let entry = this.state.screening[playerId]
+    if (!entry) {
+      entry = { lastFlaggedYear: null, flaggedRounds: 0, reasons: [], status: 'watch', penalties: [], listedYear: year, log: [], collected: 0, cleared: 0 }
+      this.state.screening[playerId] = entry
+    }
+    return entry
   }
 
   /** Whether the company is under screening: flagged within `screening.holdRounds`, not cleared. */
   isUnderScreening(playerId: string): boolean {
     const entry = this.state.screening[playerId]
-    if (!entry || entry.status === 'cleared') return false
+    if (!entry || entry.status === 'cleared' || entry.lastFlaggedYear === null) return false
     return this.state.currentYear - entry.lastFlaggedYear < this.state.config.screening.holdRounds
+  }
+
+  /** The stock ledger's inputs for one year: each company's keep line, opening holdings and auction award. */
+  private stockCompanies(record: YearRecord) {
+    const { keepMultiple } = this.state.config.screening
+    return this.state.players.map((p) => ({
+      id: p.id,
+      exempt: isPureTrader(p),
+      keep: keepMultiple * this.plannedFor(p, record.year),
+      startHeld: (record.freeAllocation[p.id] ?? 0) + (record.carriedIn[p.id] ?? 0),
+      award: record.regulatorGranted[p.id] ?? 0,
+      awardPrice: record.primaryPrice ?? 0,
+    }))
+  }
+
+  /** The stock ledger as it stands now: the closed years, plus the year in progress replayed on top. */
+  stockBooksNow(): Record<string, StockBook> {
+    const record = this.currentYearRecord()
+    if (!record || this.state.stockBooksYear === record.year) return this.state.stockBooks
+    return replayStockYear(this.state.stockBooks, this.stockCompanies(record), record.trades, record.confiscations ?? [])
+  }
+
+  /** Extra profit realised and not yet charged back or waived (€). */
+  screeningOpenProfit(playerId: string, books = this.stockBooksNow()): number {
+    const entry = this.state.screening[playerId]
+    const realized = books[playerId]?.realized ?? 0
+    return Math.max(0, realized - (entry?.collected ?? 0) - (entry?.cleared ?? 0))
+  }
+
+  /** The company's colour on the host's list now, and why. */
+  screeningSignals(playerId: string, books = this.stockBooksNow()) {
+    const player = this.getPlayer(playerId)
+    const cfg = this.state.config.screening
+    if (!player || isPureTrader(player)) return { color: 'none' as const, excessRatio: 0, profitPerTonne: 0, reasons: [] as string[] }
+    const baseline = player.emissions[this.state.config.emissions.baselineYear] ?? 0
+    return stockSignals(books[playerId] ?? EMPTY_BOOK, this.plannedEmission(playerId), baseline, this.screeningOpenProfit(playerId, books), cfg)
   }
 
   /** What a penalty would take back now: holdings above `keepMultiple` × its planned emission. */
@@ -390,41 +450,82 @@ export class Session {
   }
 
   /**
-   * The instructor penalises a company under screening: it loses what it holds above
-   * `keepMultiple` × its planned emission, and the regulator offers those credits back to the
-   * market at a fair price. Only during the trade window, so they can actually be bought.
+   * The instructor penalises a company on the list (or one the colours show yellow or red right
+   * now). In any phase, and after the fact (the user's rule, 2026-11-18, after MAR):
+   *  - the extra profit it made selling stock bought above `keepMultiple` × its need, not yet
+   *    charged or waived, is returned and `fineMultiple` × it is charged on top — to `score` AND
+   *    `decisionScore`, so the leaderboard sees it;
+   *  - while the market is open, what it holds above `keepMultiple` × its planned emission is
+   *    also taken back and offered to the market at a fair price (outside the trade window
+   *    there is no one to sell it to, so that part waits for the next press).
    */
-  screeningPenalize(playerId: string): { qty: number; price: number } {
-    this.requirePhase('trade')
-    const entry = this.state.screening[playerId]
-    if (!entry || !this.isUnderScreening(playerId)) {
-      throw new GameError('NOT_SCREENED', 'This company is not under screening.')
+  screeningPenalize(playerId: string): { qty: number; price: number; profit: number; charged: number } {
+    const cfg = this.state.config.screening
+    const player = this.getPlayer(playerId)
+    if (!player) throw new GameError('NO_PLAYER', 'Player not found.')
+    if (!cfg.enabled) throw new GameError('SCREENING_OFF', 'Market screening is switched off in this session.')
+    const books = this.stockBooksNow()
+    if (!this.state.screening[playerId] && this.screeningSignals(playerId, books).color === 'none') {
+      throw new GameError('NOT_SCREENED', 'This company is not on the screening list.')
     }
-    const qty = this.screeningTakeable(playerId)
-    if (qty <= 0) {
+    const profit = this.screeningOpenProfit(playerId, books)
+    const takeable = this.state.phase === 'trade' ? this.screeningTakeable(playerId) : 0
+    if (profit <= 0.5 && takeable <= 0) {
       throw new GameError(
         'NOTHING_TO_TAKE',
-        `It holds no more than ${this.state.config.screening.keepMultiple}× its planned emission — there is nothing to take back.`,
+        `Nothing to collect: no extra profit from stock bought above ${cfg.keepMultiple}× its planned emission, and ` +
+          (this.state.phase === 'trade' ? 'nothing held above it to take back.' : 'credits can only be taken back while the market is open.'),
       )
     }
     const record = this.currentYearRecord()!
-    // Its own asks first, so taking credits back never leaves it offering tonnes it no longer has.
-    for (const order of record.orders.filter((o) => o.playerId === playerId && o.side === 'sell' && o.status === 'open')) {
-      this.cancelOrder(playerId, order.id)
+    const entry = this.listCompany(playerId, record.year)
+    let qty = 0
+    let price = 0
+    if (takeable > 0) {
+      qty = takeable
+      // Its own asks first, so taking credits back never leaves it offering tonnes it no longer has.
+      for (const order of record.orders.filter((o) => o.playerId === playerId && o.side === 'sell' && o.status === 'open')) {
+        this.cancelOrder(playerId, order.id)
+      }
+      record.confiscated = { ...record.confiscated, [playerId]: round1((record.confiscated?.[playerId] ?? 0) + qty) }
+      record.confiscations = [...(record.confiscations ?? []), { playerId, qty, atTrade: record.trades.length }]
+      price = this.screeningReleasePrice()
+      this.submitOrder(SCREENING_ID, 'sell', qty, price)
     }
-    record.confiscated = { ...record.confiscated, [playerId]: round1((record.confiscated?.[playerId] ?? 0) + qty) }
-    const price = this.screeningReleasePrice()
-    this.submitOrder(SCREENING_ID, 'sell', qty, price)
+    const charged = profit > 0.5 ? round1(profit * (1 + cfg.fineMultiple)) : 0
+    if (charged > 0) {
+      player.score = round1(player.score + charged)
+      player.decisionScore = round1(player.decisionScore + charged)
+      entry.collected += profit
+    }
     entry.status = 'penalized'
-    entry.penalties.push({ year: record.year, qty, price })
-    return { qty, price }
+    entry.penalties.push({ year: record.year, qty, price, profit: round1(profit), charged })
+    entry.log.push({
+      year: record.year,
+      color: this.screeningSignals(playerId).color,
+      reasons: [
+        `penalised by the instructor: ${charged > 0 ? `€${Math.round(charged).toLocaleString('en-US')} charged (€${Math.round(profit).toLocaleString('en-US')} extra profit returned + ${cfg.fineMultiple}× it)` : 'no extra profit to charge'}` +
+          (qty > 0 ? `, ${qty.toLocaleString('en-US')} t taken back` : ''),
+      ],
+    })
+    return { qty, price, profit: round1(profit), charged }
   }
 
-  /** The instructor takes a company off the screening list. It is screened again if it repeats. */
+  /**
+   * The instructor judges the company fine: its open extra profit is waived and its status set to
+   * cleared. It stays listed with its log; a new flag or new extra profit reopens it.
+   */
   screeningClear(playerId: string) {
     const entry = this.state.screening[playerId]
     if (!entry) throw new GameError('NOT_SCREENED', 'This company is not on the screening list.')
+    const waived = this.screeningOpenProfit(playerId)
+    entry.cleared += waived
     entry.status = 'cleared'
+    entry.log.push({
+      year: this.state.currentYear,
+      color: this.screeningSignals(playerId).color,
+      reasons: [`cleared by the instructor${waived > 0.5 ? `, €${Math.round(waived).toLocaleString('en-US')} of extra profit waived` : ''}`],
+    })
   }
 
   /**
@@ -1668,6 +1769,10 @@ export class Session {
       // year's holdings via carriedIn.
       player.bankedCredits = round1((held[player.id] ?? 0) - (record.realized[player.id] ?? 0))
     }
+    // The stock ledger folds the whole year in now (whether or not screening is on, so switching
+    // it on later still sees the past), before the screen reads it.
+    this.state.stockBooks = replayStockYear(this.state.stockBooks, this.stockCompanies(record), record.trades, record.confiscations ?? [])
+    this.state.stockBooksYear = record.year
     this.screenSettledRound(record)
     this.state.phase = 'yearSummary'
   }

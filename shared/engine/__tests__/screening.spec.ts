@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_GAME_CONFIG } from '../../config'
-import { screenRound, type ScreeningCompany } from '../screening'
+import { replayStockYear, screenRound, stockSignals, type ScreeningCompany, type StockCompany } from '../screening'
 import type { Trade } from '../../types'
 
 const T = DEFAULT_GAME_CONFIG.screening
@@ -40,5 +40,85 @@ describe('screenRound (market-cornering screening)', () => {
       T,
     )
     expect(flags).toEqual({})
+  })
+})
+
+describe('replayStockYear (the active screening stock ledger)', () => {
+  const co = (id: string, over: Partial<StockCompany> = {}): StockCompany => ({
+    id, exempt: false, keep: 130, startHeld: 0, award: 0, awardPrice: 0, ...over,
+  })
+
+  it('counts only tonnes bought above the keep line, at what they cost', () => {
+    // Free 100, buys 50 at 20: holds 150 against a line of 130, so 20 t of stock at 20.
+    const b = replayStockYear({}, [co('A', { startHeld: 100 })], [trade('X', 'A', 50, 20)])
+    expect(b.A.excess).toBeCloseTo(20)
+    expect(b.A.cost).toBeCloseTo(400)
+    // An auction award counts the same way, at the clearing price.
+    const a = replayStockYear({}, [co('A', { startHeld: 100, award: 80, awardPrice: 30 })], [])
+    expect(a.A).toMatchObject({ excess: 50, cost: 1500 })
+  })
+
+  it('a sale out of the stock realises the profit above its average cost; below cost counts 0', () => {
+    const b = replayStockYear({}, [co('A', { startHeld: 130 })], [
+      trade('X', 'A', 100, 20), // all 100 t above the line, at 20
+      trade('A', 'Y', 60, 50), // +30 a tonne on 60 t
+      trade('A', 'Z', 40, 10), // a loss: no credit
+    ])
+    expect(b.A.realized).toBeCloseTo(1800)
+    expect(b.A).toMatchObject({ excess: 0, soldTonnes: 100 })
+  })
+
+  it('never touches free allocation or surplus banked from abatement', () => {
+    // Holds 300 free against a line of 130 and sells 150 dear: it bought nothing, so no extra profit.
+    const b = replayStockYear({}, [co('A', { startHeld: 300 })], [trade('A', 'Y', 150, 80)])
+    expect(b.A).toMatchObject({ excess: 0, realized: 0 })
+  })
+
+  it('stock the company needs after all leaves at cost: the next year starts trimmed to its line', () => {
+    const y1 = replayStockYear({}, [co('A', { startHeld: 130, award: 70, awardPrice: 30 })], [])
+    expect(y1.A).toMatchObject({ excess: 70, cost: 2100 })
+    // It surrendered most of it: it opens next year with 160 against the same line, so 30 t remain.
+    const y2 = replayStockYear(y1, [co('A', { startHeld: 160 })], [])
+    expect(y2.A.excess).toBeCloseTo(30)
+    expect(y2.A.cost).toBeCloseTo(900)
+    expect(y2.A.realized).toBe(0)
+  })
+
+  it('a confiscation takes tonnes out of the stock first, at cost, in its place among the trades', () => {
+    const b = replayStockYear(
+      {},
+      [co('A', { startHeld: 130 })],
+      [trade('X', 'A', 100, 20), trade('A', 'Y', 10, 50)],
+      [{ playerId: 'A', qty: 100, atTrade: 1 }], // taken back before the sale
+    )
+    expect(b.A).toMatchObject({ excess: 0, realized: 0 })
+  })
+
+  it('keeps its memory across years: stock bought cheap in one year and sold dear in a later one', () => {
+    const y1 = replayStockYear({}, [co('A', { startHeld: 130 })], [trade('X', 'A', 500, 25)])
+    const y2 = replayStockYear(y1, [co('A', { startHeld: 630 })], [trade('A', 'Y', 500, 150)])
+    expect(y2.A.realized).toBeCloseTo(500 * 125)
+  })
+
+  it('does not track pure traders', () => {
+    expect(replayStockYear({}, [co('M', { exempt: true })], [trade('X', 'M', 100, 20)])).toEqual({})
+  })
+})
+
+describe('stockSignals (the host list colours)', () => {
+  const t = { yellowExcess: 0.2, redExcess: 1.7, yellowProfit: 15, redProfit: 150 }
+  const book = (excess: number, cost = 0) => ({ excess, cost, realized: 0, soldTonnes: 0, soldValue: 0, soldCost: 0 })
+
+  it('colours by the worse of stock and profit, each scaled to the company', () => {
+    expect(stockSignals(book(0), 100, 100, 0, t).color).toBe('none')
+    expect(stockSignals(book(10), 100, 100, 0, t).color).toBe('none') // 0.1× its need
+    expect(stockSignals(book(30, 600), 100, 100, 0, t)).toMatchObject({ color: 'yellow', excessRatio: 0.3 })
+    expect(stockSignals(book(200), 100, 100, 0, t).color).toBe('red')
+    expect(stockSignals(book(0), 100, 100, 2_000, t)).toMatchObject({ color: 'yellow', profitPerTonne: 20 })
+    expect(stockSignals(book(0), 100, 100, 20_000, t).color).toBe('red')
+    // The same euros are minor for a big emitter.
+    expect(stockSignals(book(0), 10_000, 10_000, 20_000, t).color).toBe('none')
+    // Reasons say why.
+    expect(stockSignals(book(200, 4000), 100, 100, 20_000, t).reasons.join(' | ')).toMatch(/holds 200 t it bought above its need, 2× .* \| made €20,000 of extra profit/)
   })
 })

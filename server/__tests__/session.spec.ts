@@ -858,6 +858,12 @@ describe('market-cornering screening (only the host acts on it)', () => {
     s.closeTrade()
     return s
   }
+  /** Bob's extra profit from that resale: he bought every tonne above his line at the clearing price. */
+  const firstProfit = (s: Session) => {
+    const p = s.state.years[s.state.config.emissions.firstGameYear].auctionPrice!
+    return round1((round1(p * 2) - p) * 600)
+  }
+  const row = (s: Session, id: string) => hostSnapshot(s).screening.find((r) => r.id === id)!
 
   it('flags the cornering company at the close, tells it why, and lists it for the host', () => {
     const s = cornered()
@@ -867,23 +873,52 @@ describe('market-cornering screening (only the host acts on it)', () => {
     expect(notice.reasons.join(' ')).toMatch(/auction supply/)
     expect(notice.reasons.join(' ')).toMatch(/resold 600 t/)
     expect(playerSnapshot(s, 'P1').you.screening).toBeNull()
-    const row = hostSnapshot(s).screening[0]
-    expect(row).toMatchObject({ id: 'P2', active: true, status: 'watch', flaggedRounds: 1 })
+    expect(row(s, 'P2')).toMatchObject({ listed: true, active: true, status: 'watch', flaggedRounds: 1, listedYear: 11 })
+    expect(row(s, 'P2').color).not.toBe('none')
+    expect(row(s, 'P2').openProfit).toBeCloseTo(firstProfit(s), 1)
+    expect(row(s, 'P2').charge).toBeCloseTo(firstProfit(s) * 4, 0)
+    // The table lists every emitter, the quiet ones too.
+    expect(row(s, 'P1')).toMatchObject({ color: 'none', listed: false, charge: 0 })
+    expect(s.state.screening.P2.log[0].reasons.join(' ')).toMatch(/extra profit/)
   })
 
-  it('lets the host penalize during the trade window: credits above 1.3× need are taken and offered back', () => {
+  it('penalizes in any phase and after the fact: the extra profit back plus 3× it, on both ledgers', () => {
+    const s = cornered() // the year summary: the market is closed
+    const bob = s.getPlayer('P2')!
+    const before = { score: bob.score, decision: bob.decisionScore }
+    const pointsBefore = hostSnapshot(s).leaderboard.find((r) => r.id === 'P2')!.points!
+    const profit = firstProfit(s)
+    const res = s.screeningPenalize('P2')
+    expect(res).toMatchObject({ qty: 0 })
+    expect(res.profit).toBeCloseTo(profit, 1)
+    expect(res.charged).toBeCloseTo(round1(profit * 4), 1)
+    expect(bob.score).toBeCloseTo(before.score + res.charged, 1)
+    expect(bob.decisionScore).toBeCloseTo(before.decision + res.charged, 1)
+    expect(hostSnapshot(s).leaderboard.find((r) => r.id === 'P2')!.points!).toBeLessThan(pointsBefore)
+    expect(s.state.screening.P2.status).toBe('penalized')
+    expect(playerSnapshot(s, 'P2').you.screening!.charged).toBe(res.charged)
+    expect(row(s, 'P2')).toMatchObject({ openProfit: 0, charge: 0, charged: res.charged })
+    // Charged once: nothing more to collect, and no credits can be taken while the market is closed.
+    expect(() => s.screeningPenalize('P2')).toThrow(/nothing to collect/i)
+  })
+
+  it('takes back credits above 1.3× need while the market is open, at a price the cornering did not make', () => {
     const s = cornered()
     s.advanceYear()
     const pool = s.currentYearRecord()!.regulatorPool
     s.submitBid('P2', round1(pool * 0.9), 300) // corners again, so it holds far above the cap
     s.closeCapStage()
-    expect(() => s.screeningPenalize('P2')).toThrow(/phase/i) // not before the market opens
+    // Before the market opens: last year's profit is charged, but no credits can be taken yet.
+    const early = s.screeningPenalize('P2')
+    expect(early.qty).toBe(0)
+    expect(early.charged).toBeCloseTo(round1(firstProfit(s) * 4), 1)
     s.openTrade()
     const held = s.creditsHeld('P2')
     const takeable = s.screeningTakeable('P2')
     expect(takeable).toBeCloseTo(round1(held - 1.3 * s.plannedEmission('P2')), 1)
-    const { qty, price } = s.screeningPenalize('P2')
+    const { qty, price, charged } = s.screeningPenalize('P2')
     expect(qty).toBe(takeable)
+    expect(charged).toBe(0) // no new profit since
     expect(s.creditsHeld('P2')).toBeCloseTo(round1(held - qty), 1)
     const rec = s.currentYearRecord()!
     // Bob bid alone at 300, so the auction price is his own: the release is at the lowest fair
@@ -893,16 +928,19 @@ describe('market-cornering screening (only the host acts on it)', () => {
     expect(price).toBeLessThan(rec.auctionPrice!)
     const ask = rec.orders.find((o) => o.playerId === SCREENING_ID && o.status === 'open')
     expect(ask).toMatchObject({ side: 'sell', remaining: qty, price })
+    expect(rec.confiscations).toEqual([{ playerId: 'P2', qty, atTrade: rec.trades.length }])
     expect(s.state.screening.P2.status).toBe('penalized')
     expect(playerSnapshot(s, 'P2').you.screening!.penalized).toBe(qty)
+    // The confiscated tonnes left Bob's stock at cost: nothing he bought above his line is left.
+    expect(row(s, 'P2').excess).toBe(0)
     // Someone buys it back: counted as the screening release, not as new supply.
     s.placeOrder('P1', 'buy', 10, price)
     expect(rec.screeningReleased).toBe(10)
     expect(rec.reserveReleased).toBe(0)
-    expect(() => s.screeningPenalize('P1')).toThrow(/not under screening/)
+    expect(() => s.screeningPenalize('P1')).toThrow(/not on the screening list/)
   })
 
-  it('refuses a penalty with nothing above the cap, and the host can clear', () => {
+  it('after the sale nothing is left to take back, yet the profit is charged back; the host can clear', () => {
     const s = cornered()
     s.advanceYear()
     s.closeCapStage()
@@ -912,23 +950,73 @@ describe('market-cornering screening (only the host acts on it)', () => {
     s.placeOrder('P2', 'sell', carried, 40)
     s.placeOrder('P1', 'buy', carried, 40)
     expect(s.screeningTakeable('P2')).toBe(0)
-    expect(() => s.screeningPenalize('P2')).toThrow(/nothing to take back/)
+    const open = row(s, 'P2').openProfit
+    expect(open).toBeGreaterThan(firstProfit(s)) // this year's sale of his stock adds to it
+    const res = s.screeningPenalize('P2')
+    expect(res.qty).toBe(0)
+    expect(res.charged).toBeCloseTo(round1(open * 4), 0)
+    expect(() => s.screeningPenalize('P2')).toThrow(/nothing to collect/i)
     s.screeningClear('P2')
     expect(s.isUnderScreening('P2')).toBe(false)
     expect(playerSnapshot(s, 'P2').you.screening).toBeNull()
+    // Cleared, not forgotten: still listed, with its log.
+    expect(row(s, 'P2')).toMatchObject({ listed: true, status: 'cleared' })
+    expect(s.state.screening.P2.log.at(-1)!.reasons.join(' ')).toMatch(/cleared by the instructor/)
   })
 
-  it('expires after holdRounds clean rounds, and does nothing when switched off', () => {
+  it('stays listed for the game: the notice expires after holdRounds, the host row and Penalize do not', () => {
     const s = cornered()
-    s.advanceYear() // 1 round after the flag: still on the list
+    s.advanceYear() // 1 round after the flag: still under screening
     expect(s.isUnderScreening('P2')).toBe(true)
     s.closeCapStage()
     s.openTrade()
     s.closeTrade()
-    s.advanceYear() // 2 rounds after: expired
+    s.advanceYear() // 2 rounds after: the notice and the bots' caution expire
     expect(s.isUnderScreening('P2')).toBe(false)
+    expect(playerSnapshot(s, 'P2').you.screening).toBeNull()
+    expect(row(s, 'P2')).toMatchObject({ listed: true, status: 'watch' })
+    expect(s.state.screening.P2.log.length).toBeGreaterThanOrEqual(1)
+    // The profit was never charged: Penalize still collects it, two rounds later, before the market opens.
+    expect(s.screeningPenalize('P2').charged).toBeCloseTo(round1(firstProfit(s) * 4), 1)
+  })
+
+  it('catches what the one-round screen misses: stock bought cheap in one round, sold dear in a bubble year', () => {
+    const s = auctioning(1)
+    s.startYear()
+    const pool1 = s.currentYearRecord()!.regulatorPool
+    s.submitBid('P1', pool1, 30) // Alice wins the auction…
+    s.closeCapStage()
+    s.openTrade()
+    s.placeOrder('P1', 'sell', 1000, 30) // …and Bob buys 1 000 t from her at the auction price
+    s.placeOrder('P2', 'buy', 1000, 30)
+    s.closeTrade()
+    // The one-round screen sees nothing (no resale, no spike); the ledger lists him while he stocks up.
+    expect(s.state.screening.P2).toMatchObject({ lastFlaggedYear: null, flaggedRounds: 0, listedYear: 11 })
+    expect(s.state.screening.P2.log[0]).toMatchObject({ year: 11, color: 'red' })
+    expect(s.state.screening.P2.log[0].reasons.join(' ')).toMatch(/holds .* t it bought above its need/)
+    expect(() => s.screeningPenalize('P2')).toThrow(/nothing to collect/i) // no profit yet, market closed
+    s.advanceYear()
+    const pool2 = s.currentYearRecord()!.regulatorPool
+    s.submitBid('P1', pool2, 140) // a bubble year: the auction itself clears high
+    s.closeCapStage()
+    s.openTrade()
+    s.placeOrder('P2', 'sell', 600, 150) // Bob sells his stock barely above the auction price
+    s.placeOrder('P1', 'buy', 600, 150)
+    s.closeTrade()
+    const entry = s.state.screening.P2
+    expect(entry.lastFlaggedYear).toBeNull() // the one-round screen never flagged him…
+    expect(s.isUnderScreening('P2')).toBe(false)
+    const r = row(s, 'P2')
+    expect(r).toMatchObject({ color: 'red', listed: true }) // …the ledger did, from what he paid
+    expect(r.profitPerTonne).toBeGreaterThanOrEqual(s.state.config.screening.redProfit)
+    expect(s.screeningPenalize('P2').charged).toBeCloseTo(round1(r.openProfit * 4), 0)
+  })
+
+  it('does nothing when switched off', () => {
     const off = cornered({ screening: { enabled: false } })
     expect(off.state.screening).toEqual({})
+    expect(hostSnapshot(off).screening).toEqual([])
+    expect(() => off.screeningPenalize('P2')).toThrow(/switched off/)
     const lobby = auctioning()
     lobby.updateSettings({ screeningEnabled: false })
     expect(lobby.state.config.screening.enabled).toBe(false)

@@ -940,7 +940,10 @@ describe('bots under market screening buy only what they need', () => {
     s.addPlayer('Human', 'Transport')
     s.startYear()
     if (screened) {
-      s.state.screening[bot.id] = { lastFlaggedYear: s.state.currentYear, flaggedRounds: 1, reasons: ['test'], status: 'watch', penalties: [] }
+      s.state.screening[bot.id] = {
+        lastFlaggedYear: s.state.currentYear, flaggedRounds: 1, reasons: ['test'], status: 'watch', penalties: [],
+        listedYear: s.state.currentYear, log: [], collected: 0, cleared: 0,
+      }
     }
     compliance.auction(ctxFor(s, bot.id))
     return { s, bid: s.currentYearRecord()!.auctionBid[bot.id], planned: s.plannedEmission(bot.id) }

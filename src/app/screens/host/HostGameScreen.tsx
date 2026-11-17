@@ -543,10 +543,20 @@ export function HostGameScreen({ snap }: { snap: HostSnapshot }) {
   )
 }
 
+const SCREEN_COLOR = {
+  red: { label: 'RED', badge: 'border-destructive/60 bg-destructive/15 text-destructive', row: 'border-l-2 border-l-destructive pl-3' },
+  yellow: { label: 'YELLOW', badge: 'border-accent/60 bg-accent/15 text-accent', row: 'border-l-2 border-l-accent pl-3' },
+  none: { label: 'OK', badge: 'border-border text-muted-foreground', row: '' },
+} as const
+
+const euro = (v: number) => `€${Math.round(v).toLocaleString()}`
+
 /**
- * The regulator's market-cornering screening list. The engine flags; only the instructor acts:
- * Penalize takes back what the company holds above the cap and offers it to the market at a fair
- * price (trade window only, so it can be bought); Clear takes it off the list.
+ * The regulator's screening table (host only): every emitter, coloured by the stock ledger —
+ * red = should be penalised, yellow = watch, no colour = no issue. A company once listed stays
+ * listed with its log. Penalize works in any phase and after the fact: it returns the extra profit
+ * made selling stock bought above the company's need plus the fine on it, and while the market is
+ * open also takes back what it holds above the cap. Clear waives the open profit.
  */
 function ScreeningPanel({ snap }: { snap: HostSnapshot }) {
   const { hostAction } = useGame()
@@ -556,62 +566,117 @@ function ScreeningPanel({ snap }: { snap: HostSnapshot }) {
     await hostAction(event, { playerId })
     setBusy(null)
   }
-  const active = snap.screening.filter((r) => r.active).length
+  const rows = snap.screening
+  const flagged = rows.filter((r) => r.color !== 'none' || r.listed)
+  const quiet = rows.filter((r) => r.color === 'none' && !r.listed)
+  const reds = rows.filter((r) => r.color === 'red').length
+  const yellows = rows.filter((r) => r.color === 'yellow').length
+  const listed = rows.filter((r) => r.listed).length
   return (
     <div className="rounded-xl border border-accent/30 bg-card/70 p-5">
-      <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-muted-foreground mb-3">
+      <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-muted-foreground mb-1">
         <ScanSearch size={13} className="text-accent" />
-        Market screening · {active} under screening
+        Market screening · {reds} red · {yellows} yellow · {listed} listed
       </div>
-      {snap.screening.length === 0 ? (
-        <p className="text-xs text-muted-foreground font-mono">
-          No company flagged yet. A company is flagged at a round&apos;s close when it both took far more than it
-          needs (or a large share of the supply) and resold it dear or drove the price up. Market makers are exempt.
-        </p>
+      <p className="text-[11px] text-muted-foreground font-mono mb-3">
+        Red = should be penalised · yellow = watch. Measured on stock each company bought above its need and the extra
+        profit it made selling it. Penalize returns that profit plus the fine on it, in any phase; while the market is
+        open it also takes back holdings above the cap. Market makers and speculators are exempt.
+      </p>
+      {rows.length === 0 ? (
+        <p className="text-xs text-muted-foreground font-mono">Screening is off, or the game has not started.</p>
       ) : (
-        <div className="flex flex-col divide-y divide-border">
-          {snap.screening.map((r) => (
-            <div key={r.id} className={cn('py-3 flex flex-wrap items-start justify-between gap-3', !r.active && 'opacity-60')}>
-              <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-sm font-mono">
-                  <span className="font-bold">{r.id}</span> {r.name}{' '}
-                  <span className="text-xs text-muted-foreground">
-                    · {r.kind} · flagged {r.flaggedRounds}× · last Y{r.lastFlaggedYear} ·{' '}
-                    {r.status === 'cleared' ? 'cleared' : r.active ? (r.status === 'penalized' ? 'penalized' : 'under screening') : 'expired'}
-                    {r.penalized > 0 && ` · ${r.penalized.toLocaleString()} t taken back`}
-                  </span>
-                </span>
-                <ul className="list-disc pl-5 text-xs text-muted-foreground">
-                  {r.reasons.map((reason) => (
-                    <li key={reason}>{reason}</li>
-                  ))}
-                </ul>
-              </div>
-              {r.active && (
-                <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy === r.id || snap.phase !== 'trade' || r.takeable <= 0}
-                    title={
-                      snap.phase !== 'trade'
-                        ? 'Only while the market is open, so the credits can be sold back'
-                        : r.takeable <= 0
-                          ? 'It holds nothing above the cap right now'
-                          : `Take back ${r.takeable.toLocaleString()} t and offer them to the market`
-                    }
-                    onClick={() => void act('host:screeningPenalize', r.id)}
-                    className="font-mono text-xs border-destructive/50 text-destructive hover:bg-destructive/10"
-                  >
-                    Penalize{snap.phase === 'trade' && r.takeable > 0 ? ` · ${r.takeable.toLocaleString()} t` : ''}
-                  </Button>
-                  <Button size="sm" variant="ghost" disabled={busy === r.id} onClick={() => void act('host:screeningClear', r.id)} className="font-mono text-xs">
-                    Clear
-                  </Button>
-                </div>
-              )}
+        <div className="flex flex-col gap-3">
+          {flagged.length > 0 && (
+            <div className="flex flex-col divide-y divide-border">
+              {flagged.map((r) => {
+                const c = SCREEN_COLOR[r.color]
+                const canPenalize = r.charge > 0 || r.takeable > 0
+                const label = [r.charge > 0 ? euro(r.charge) : '', r.takeable > 0 ? `${r.takeable.toLocaleString()} t` : '']
+                  .filter(Boolean)
+                  .join(' + ')
+                return (
+                  <div key={r.id} className={cn('py-3 flex flex-wrap items-start justify-between gap-3', c.row)}>
+                    <div className="flex flex-col gap-1 min-w-0">
+                      <span className="text-sm font-mono flex flex-wrap items-center gap-2">
+                        <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-bold tracking-wider', c.badge)}>{c.label}</span>
+                        <span>
+                          <span className="font-bold">{r.id}</span> {r.name}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          · {r.kind}
+                          {r.listed && ` · listed since Y${r.listedYear}`}
+                          {r.status && ` · ${r.status === 'watch' ? 'watching' : r.status}`}
+                          {r.flaggedRounds > 0 && ` · cornering flags ${r.flaggedRounds}×`}
+                        </span>
+                      </span>
+                      <span className="text-xs font-mono text-muted-foreground">
+                        holds {r.held.toLocaleString()} t / planned {r.planned.toLocaleString()} t · stock bought above need{' '}
+                        {r.excess.toLocaleString()} t ({r.excessRatio}×{r.avgCost !== null ? `, avg ${euro(r.avgCost)}/t` : ''}) · open
+                        extra profit {euro(r.openProfit)} ({euro(r.profitPerTonne)}/t baseline)
+                        {(r.charged > 0 || r.penalized > 0) &&
+                          ` · charged so far ${euro(r.charged)}${r.penalized > 0 ? `, ${r.penalized.toLocaleString()} t taken back` : ''}`}
+                      </span>
+                      {r.reasons.length > 0 && (
+                        <ul className="list-disc pl-5 text-xs text-muted-foreground">
+                          {r.reasons.map((reason) => (
+                            <li key={reason}>{reason}</li>
+                          ))}
+                        </ul>
+                      )}
+                      {r.log.length > 0 && (
+                        <details className="text-[11px] font-mono text-muted-foreground">
+                          <summary className="cursor-pointer select-none">log (latest {r.log.length})</summary>
+                          <ul className="mt-1 flex flex-col gap-0.5">
+                            {r.log.map((line, i) => (
+                              <li key={`${line.year}-${i}`}>
+                                Y{line.year} · {SCREEN_COLOR[line.color].label.toLowerCase()} · {line.reasons.join('; ') || '—'}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy === r.id || !canPenalize}
+                        title={
+                          canPenalize
+                            ? `Collect ${r.charge > 0 ? `${euro(r.charge)} (extra profit + fine)` : 'no profit'}${r.takeable > 0 ? ` and take back ${r.takeable.toLocaleString()} t` : ''}`
+                            : snap.phase === 'trade'
+                              ? 'Nothing to collect now: no open extra profit and nothing held above the cap'
+                              : 'No open extra profit; credits above the cap can only be taken back while the market is open'
+                        }
+                        onClick={() => void act('host:screeningPenalize', r.id)}
+                        className="font-mono text-xs border-destructive/50 text-destructive hover:bg-destructive/10"
+                      >
+                        Penalize{label ? ` · ${label}` : ''}
+                      </Button>
+                      {r.listed && r.status !== 'cleared' && (
+                        <Button size="sm" variant="ghost" disabled={busy === r.id} onClick={() => void act('host:screeningClear', r.id)} className="font-mono text-xs">
+                          Clear
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-          ))}
+          )}
+          {quiet.length > 0 && (
+            <div>
+              <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground mb-1">No issue · {quiet.length}</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-0.5">
+                {quiet.map((r) => (
+                  <span key={r.id} className="text-[11px] font-mono text-muted-foreground truncate">
+                    <span className="text-foreground">{r.id}</span> {r.name} · {r.held.toLocaleString()} / {r.planned.toLocaleString()} t
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

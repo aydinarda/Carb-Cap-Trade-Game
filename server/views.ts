@@ -80,30 +80,57 @@ function screeningNotice(session: Session, playerId: string): ScreeningNotice | 
     reasons: entry.reasons,
     penalized: round1(entry.penalties.reduce((a, x) => a + x.qty, 0)),
     keepMultiple: session.state.config.screening.keepMultiple,
+    charged: round1(entry.penalties.reduce((a, x) => a + (x.charged ?? 0), 0)),
   }
 }
 
-/** The instructor's list: everyone ever flagged, those still under screening first, newest first. */
+/**
+ * The instructor's screening table: every emitter, listed or not, coloured by the stock ledger —
+ * red first, then yellow, then the rest; within a colour, the biggest charge first. Host only.
+ */
 function screeningRows(session: Session): ScreeningRow[] {
+  const cfg = session.state.config.screening
+  if (!cfg.enabled || session.state.phase === 'lobby') return []
+  const books = session.stockBooksNow()
+  const rank = { red: 0, yellow: 1, none: 2 } as const
   const rows: ScreeningRow[] = []
-  for (const [id, entry] of Object.entries(session.state.screening)) {
-    const p = session.getPlayer(id)
-    if (!p) continue
-    const active = session.isUnderScreening(id)
+  for (const p of session.state.players) {
+    if (isPureTrader(p)) continue
+    const entry = session.state.screening[p.id]
+    const signals = session.screeningSignals(p.id, books)
+    const book = books[p.id]
+    const openProfit = session.screeningOpenProfit(p.id, books)
+    const listed = !!entry
+    const collectable = listed || signals.color !== 'none'
     rows.push({
-      id,
+      id: p.id,
       name: p.name,
       kind: p.botType ?? (p.agentModel ? 'RL agent' : 'student'),
-      lastFlaggedYear: entry.lastFlaggedYear,
-      flaggedRounds: entry.flaggedRounds,
-      reasons: entry.reasons,
-      status: entry.status,
-      active,
-      takeable: active && session.state.phase === 'trade' ? session.screeningTakeable(id) : 0,
-      penalized: round1(entry.penalties.reduce((a, x) => a + x.qty, 0)),
+      color: signals.color,
+      listed,
+      status: entry?.status ?? null,
+      active: session.isUnderScreening(p.id),
+      lastFlaggedYear: entry?.lastFlaggedYear ?? null,
+      flaggedRounds: entry?.flaggedRounds ?? 0,
+      listedYear: entry?.listedYear ?? null,
+      reasons: [...(entry && session.isUnderScreening(p.id) ? entry.reasons : []), ...signals.reasons],
+      planned: round1(session.plannedEmission(p.id)),
+      held: round1(session.creditsHeld(p.id)),
+      excess: round1(book?.excess ?? 0),
+      excessRatio: Math.round(signals.excessRatio * 100) / 100,
+      avgCost: book && book.excess > 0 ? round1(book.cost / book.excess) : null,
+      openProfit: round1(openProfit),
+      profitPerTonne: round1(signals.profitPerTonne),
+      charge: openProfit > 0.5 ? round1(openProfit * (1 + cfg.fineMultiple)) : 0,
+      takeable: collectable && session.state.phase === 'trade' ? session.screeningTakeable(p.id) : 0,
+      penalized: round1(entry?.penalties.reduce((a, x) => a + x.qty, 0) ?? 0),
+      charged: round1(entry?.penalties.reduce((a, x) => a + (x.charged ?? 0), 0) ?? 0),
+      log: entry ? [...entry.log].reverse().slice(0, 6) : [],
     })
   }
-  return rows.sort((a, b) => Number(b.active) - Number(a.active) || b.lastFlaggedYear - a.lastFlaggedYear)
+  return rows.sort(
+    (a, b) => rank[a.color] - rank[b.color] || Number(b.listed) - Number(a.listed) || b.charge - a.charge || b.excessRatio - a.excessRatio || a.id.localeCompare(b.id),
+  )
 }
 
 /** The slice of the config the host panel renders. See HostConfigView for why it is narrow. */

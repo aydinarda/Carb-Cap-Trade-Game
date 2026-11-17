@@ -387,5 +387,14 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     spike: 1.5,
     holdRounds: 2,
     keepMultiple: 1.3,
+    // Active screening (2026-11-18). Return the extra profit and pay 3× it on top.
+    fineMultiple: 3,
+    // Provisional bands, before calibration. Stock 0.2 above the 1.3 line = holding 1.5× its
+    // need through purchases (the old `overNeed`); 1.7 = 3×. Profit 150 €/t of baseline is one
+    // `pointsScale`: enough to multiply a leaderboard score by e.
+    yellowExcess: 0.2,
+    redExcess: 1.7,
+    yellowProfit: 15,
+    redProfit: 150,
   },
 }

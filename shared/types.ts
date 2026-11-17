@@ -2,6 +2,9 @@ import type { GameConfig } from './config/schema'
 import type { Industry, Sector } from './constants'
 import type { AbatementSpec } from './engine/abatementModels'
 import type { AuctionBid } from './engine/auction'
+import type { ScreeningColor, StockBook, StockConfiscation } from './engine/screening'
+
+export type { ScreeningColor } from './engine/screening'
 
 export type CapMode = 'grandfathering' | 'benchmarking' | 'auctioning' | 'hybrid'
 
@@ -218,6 +221,8 @@ export interface YearRecord {
   carriedDecision?: Record<string, number>
   /** Screening: credits the instructor took back from a company this year. */
   confiscated?: Record<string, number>
+  /** Screening: the same, one entry per penalty, placed among the year's trades for the stock ledger. */
+  confiscations?: StockConfiscation[]
   /** Screening: of those, sold back into the market, and what they fetched. */
   screeningReleased?: number
   screeningRevenue?: number
@@ -595,21 +600,41 @@ export interface GameState {
   referendum: Referendum | null
   /** The borrowing cap the class voted in, if one passed. */
   borrowLimitRule: BorrowLimitRule | null
-  /** Companies the market-cornering screen has flagged, by player id. */
+  /** Companies the market-cornering screen has listed, by player id. Listed once, listed for good. */
   screening: Record<string, ScreeningEntry>
+  /**
+   * The active screening's stock ledger (shared/engine/screening.ts `replayStockYear`), as it
+   * stood when year `stockBooksYear` closed. The year in progress is replayed on top of it.
+   */
+  stockBooks: Record<string, StockBook>
+  stockBooksYear: number | null
 }
 
-/** One company on the regulator's screening list. */
+/** One company on the regulator's screening list. It stays listed for the rest of the game. */
 export interface ScreeningEntry {
-  /** The last round (year) it was flagged in, and how many rounds it has been flagged. */
-  lastFlaggedYear: number
+  /**
+   * The last round (year) the one-round cornering screen (`screenRound`) flagged it in, and how
+   * many rounds it has flagged it. Null when only the stock ledger's colours listed it. This is
+   * what the company is told about and what bots react to (`holdRounds`), unchanged.
+   */
+  lastFlaggedYear: number | null
   flaggedRounds: number
-  /** Why, from the last round it was flagged in. */
+  /** Why, from the last round the one-round screen flagged it in — what the company is shown. */
   reasons: string[]
-  /** 'cleared' = the instructor took it off the list. */
+  /** 'cleared' = the instructor judged it fine; a new flag or new extra profit reopens it. */
   status: 'watch' | 'penalized' | 'cleared'
-  /** Credits the instructor took back, and the price they were offered back to the market at. */
-  penalties: { year: number; qty: number; price: number }[]
+  /**
+   * Every penalty: credits taken back and the price they were offered back at (0 t outside the
+   * trade window), the extra profit returned and the total charged (profit × (1 + fineMultiple)).
+   */
+  penalties: { year: number; qty: number; price: number; profit?: number; charged?: number }[]
+  /** The round it was first listed in. */
+  listedYear: number
+  /** Round by round, the colour and every reason it was listed for, and the host's actions. Kept for the game. */
+  log: { year: number; color: ScreeningColor; reasons: string[] }[]
+  /** Extra profit already charged back (€), and waived by Clear (€). What is still open = realised − both. */
+  collected: number
+  cleared: number
 }
 
 /** What a company sees about its own screening. */
@@ -619,22 +644,46 @@ export interface ScreeningNotice {
   penalized: number
   /** A penalty takes back what it holds above this × its planned emission. */
   keepMultiple: number
+  /** Euros charged so far: extra profit returned plus the fine on it. */
+  charged: number
 }
 
-/** The instructor's screening list row. */
+/** One company in the instructor's screening table: every emitter, listed or not. */
 export interface ScreeningRow {
   id: string
   name: string
   kind: string
-  lastFlaggedYear: number
-  flaggedRounds: number
-  reasons: string[]
-  status: ScreeningEntry['status']
-  /** Whether it is still under screening (flagged within `screening.holdRounds`, not cleared). */
+  /** The colour band now: none = no issue, yellow = watch, red = should be penalised. */
+  color: ScreeningColor
+  /** On the screening list (stays for the game once on it). */
+  listed: boolean
+  status: ScreeningEntry['status'] | null
+  /** Whether the company is shown "under screening" (flagged within `screening.holdRounds`, not cleared). */
   active: boolean
-  /** What a penalty would take back right now: holdings above keepMultiple × planned emission. */
+  lastFlaggedYear: number | null
+  flaggedRounds: number
+  listedYear: number | null
+  /** The one-round screen's reasons and the stock ledger's, now. */
+  reasons: string[]
+  planned: number
+  held: number
+  /** Stock bought above keepMultiple × planned emission, and that ÷ planned emission. */
+  excess: number
+  excessRatio: number
+  /** Average cost of that stock (€/t); null with none. */
+  avgCost: number | null
+  /** Extra profit realised and not yet charged or waived (€), and that per tonne of baseline. */
+  openProfit: number
+  profitPerTonne: number
+  /** What Penalize collects now: openProfit × (1 + fineMultiple). */
+  charge: number
+  /** What a penalty would take back now: holdings above keepMultiple × planned (trade window only). */
   takeable: number
+  /** Tonnes taken back and euros charged so far. */
   penalized: number
+  charged: number
+  /** The latest log lines, newest first. */
+  log: ScreeningEntry['log']
 }
 
 // ---- Role-scoped views sent over the wire ----

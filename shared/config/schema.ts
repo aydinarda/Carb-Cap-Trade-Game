@@ -57,6 +57,23 @@ export interface ScreeningConfig {
    * last round's close (never above the fine) — a price the cornering cannot have pushed up.
    */
   keepMultiple: number
+  /**
+   * Active screening (2026-11-18, the user's design after MAR): a penalty also returns the extra
+   * profit the company made selling stock it bought above `keepMultiple` × its need, plus this ×
+   * that profit as a fine. Charged to both `score` and `decisionScore`, so it reaches the
+   * leaderboard. 3 = MAR's floor for the maximum fine.
+   */
+  fineMultiple: number
+  /**
+   * The host list's colour bands (shared/engine/screening.ts `stockSignals`). Stock: tonnes bought
+   * above the keep line ÷ planned emission. Profit: open extra profit ÷ baseline emission, € per
+   * tonne. Yellow = watch, red = should be penalised. Provisional: to be calibrated on simulated
+   * normal play (yellow ≈ its 99th percentile, red above anything normal play reaches).
+   */
+  yellowExcess: number
+  redExcess: number
+  yellowProfit: number
+  redProfit: number
 }
 
 /**
