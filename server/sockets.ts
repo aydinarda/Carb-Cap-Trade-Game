@@ -1,6 +1,7 @@
 import type { Ack, SocketAuth } from '../shared/events'
 import { Broadcaster, type AppSocket, type IO } from './broadcaster'
 import { HOST_KEY, SEED } from './config'
+import { traceConnection, traceDrop, traceResume } from './connLog'
 import { agents } from './rl/manager'
 import { GameError, Session, SessionStore } from './session'
 
@@ -91,6 +92,7 @@ export function registerSockets(io: IO): Broadcaster {
 
   io.on('connection', (rawSocket) => {
     const socket = rawSocket as AppSocket
+    traceConnection(socket) // logging only: see connLog.ts
 
     // Resumed identity: rejoin room, flip connected, resend state
     if (socket.data.roomCode) {
@@ -101,6 +103,7 @@ export function registerSockets(io: IO): Broadcaster {
           const player = session.getPlayer(socket.data.playerId)
           if (player) player.connected = true
         }
+        traceResume(socket, session)
         // This socket needs its state now; the rest of the room only needs to learn that
         // the dot went green, which can ride the next coalesced flush.
         broadcaster.sync(socket, session)
@@ -270,7 +273,8 @@ export function registerSockets(io: IO): Broadcaster {
     socket.on('player:vote', ({ choice }, ack) =>
       playerAction(ack, (s, pid) => s.castVote(pid, choice)))
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
+      traceDrop(socket, reason, socket.data.roomCode ? store.get(socket.data.roomCode) : undefined)
       broadcaster.leave(socket)
       if (!socket.data.roomCode || !socket.data.playerId) return
       const session = store.get(socket.data.roomCode)

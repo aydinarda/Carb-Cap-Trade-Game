@@ -173,10 +173,26 @@ function where(s) {
   return s ? `${s.phase}${s.phase === 'lobby' || s.phase === 'ended' ? '' : `, year ${s.currentYear + 1}`}` : 'before the first snapshot'
 }
 
-/** A dropped socket, for the log: what the close said and where the game was. */
-function dropLine(who, info, s) {
-  return `${who}: connection dropped in ${where(s)} · close ${info.code ?? '—'}${info.reason ? ` "${info.reason}"` : ''}` +
-    `${info.serverDisconnect ? ' · the server disconnected it' : ' · reconnecting'}`
+/**
+ * A dropped socket, for the log: what the close said, where the game was, how long the server had
+ * been silent, the acks still awaited, then the socket's last events (times relative to the close).
+ */
+function logDrop(who, info, s) {
+  console.warn(`${who}: connection dropped in ${where(s)} · close ${info.code ?? '—'}${info.reason ? ` "${info.reason}"` : ''}` +
+    ` · open ${info.openSeconds} s · last message from the server ${info.lastRecvSeconds} s before` +
+    ` · acks pending: ${info.waiting.length ? info.waiting.join(', ') : 'none'}` +
+    `${info.serverDisconnect ? ' · the server disconnected it' : ' · reconnecting'}`)
+  console.warn(`${who}:   before: ${info.before}`)
+}
+
+/** The handlers that log a socket's drops, its return and its first events after it. */
+function dropHandlers(who, snap) {
+  return {
+    onSnapshot: snap.onSnapshot,
+    onDrop: (info) => logDrop(who, info, snap.get()),
+    onBack: (ms, attempts) => console.log(`${who}: back after ${fmt(ms / 1000)} s (attempt ${attempts})`),
+    onAfter: (events) => console.log(`${who}:   after: ${events}`),
+  }
 }
 
 function tally(res, event) {
@@ -376,11 +392,7 @@ export function makeTest(students) {
 
   async function host(data) {
     const snap = snapshotHolder()
-    const client = await resilient(BASE_URL, () => ({ role: 'host', token: data.hostToken }), {
-      onSnapshot: snap.onSnapshot,
-      onDrop: (info) => console.warn(dropLine('host', info, snap.get())),
-      onBack: (ms, attempts) => console.log(`host: back after ${fmt(ms / 1000)} s (attempt ${attempts})`),
-    })
+    const client = await resilient(BASE_URL, () => ({ role: 'host', token: data.hostToken }), dropHandlers('host', snap))
 
     // Lobby: wait for the class, and for the start delay so a person can join too.
     const roster = () => {
@@ -523,11 +535,7 @@ export function makeTest(students) {
     let identity = null
     let client
     try {
-      client = await resilient(BASE_URL, () => identity, {
-        onSnapshot: snap.onSnapshot,
-        onDrop: (info) => console.warn(dropLine(`student ${id}`, info, snap.get())),
-        onBack: (ms, attempts) => console.log(`student ${id}: back after ${fmt(ms / 1000)} s (attempt ${attempts})`),
-      })
+      client = await resilient(BASE_URL, () => identity, dropHandlers(`student ${id}`, snap))
     } catch (e) {
       joinOk.add(false)
       console.error(`student ${id}: ${e.message}`)

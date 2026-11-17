@@ -36,10 +36,19 @@ using: they share the instance.
 
 A socket that drops (closed by the server, Render's proxy or the network, not by the test)
 reconnects as the browser does: after 1 s, then 2, 4 and every 5 s, with the player's token (the
-host's for the host), so the student keeps playing. Each drop is logged with its close code and
-where the game was (`student 17: connection dropped in trade, year 6 · close 1006 …`), then
-`back after 1.3 s`. Before 2026-11-17 a dropped student stopped for good, which a browser never
-does.
+host's for the host), so the student keeps playing. Before 2026-11-17 a dropped student stopped
+for good, which a browser never does. Each drop is logged with what came before and after it:
+
+```
+student 17: connection dropped in trade, year 6 · close 1006 "unexpected EOF" · open 512.3 s · last message from the server 0.4 s before · acks pending: player:placeOrder#31 (0.2 s) · reconnecting
+student 17:   before: -9.8…-0.4 ←snapshot 22 KB ×12 · -3.1 →player:placeOrder#30 · -3.0 ←ack#30 92 ms · -0.2 →player:placeOrder#31 · …
+student 17: back after 1.3 s (attempt 1)
+student 17:   after: +0.0 ←connected · +0.0 ←snapshot 23 KB · +0.1 →player:placeOrder#1 · …   (10 s after it is back)
+```
+
+The server logs the same drop from its side in Render's log (`server/connLog.ts`): `[conn] drop`
+with Engine.IO's reason, last ping out, last pong and last packet in, last flush and unsent
+packets, then `[conn]   before:`, and `[conn] back … after X s` with `[conn]   after:`.
 
 At the defaults one run takes about 19 minutes (plus `START_DELAY` beyond the class's join window).
 
@@ -101,9 +110,12 @@ students), `data_received`, `actions_accepted`, `actions_expected_rejects`,
 `actions_lost_to_drops`, `ws_reconnect_failures`, `leaderboard_max_points`. Expected refusals
 (racing the clock, offering credits already offered, …) are counted, not failed.
 
-Close codes in a drop line: `1006` with "unexpected EOF" is the connection cut with no close frame
-(network or proxy); a code from the server (`1000`, `1001`, `1005`) means it closed the socket,
-e.g. an Engine.IO ping timeout when the server fell 20 s behind.
+Reading a drop, both sides together: k6 `1006` "unexpected EOF" with a recent last message, and
+the server's `transport close` with a recent last packet in, is a connection cut in between
+(Render's proxy or the network). A long silence before it (k6's last message, or the server's
+last packet in, 20 s or more ago; acks pending) with the server's `ping timeout` is a stall: the
+server fell behind, or the path stopped carrying data. Many students in the same second point at
+the server or the proxy, a few spread over the game at the network.
 
 ## How it talks to the server
 

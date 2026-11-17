@@ -13,6 +13,9 @@
  *
  * Snapshots are large and pushed several times a second, so they are handed to the caller
  * as the raw JSON string; the caller parses only when it needs to decide something.
+ *
+ * Every socket remembers its last events (`→player:placeOrder#7`, `←ack#7 85 ms`,
+ * `←snapshot 22 KB`, `←ping →pong`), so a drop can be logged with what came just before it.
  */
 import { WebSocket } from 'k6/websockets'
 import { clearTimeout, setTimeout } from 'k6/timers'
@@ -37,11 +40,52 @@ export const reconnectFailures = new Counter('ws_reconnect_failures')
 
 const ACK_TIMEOUT_MS = Number(__ENV.ACK_TIMEOUT_MS || 10000)
 const CONNECT_TIMEOUT_MS = Number(__ENV.CONNECT_TIMEOUT_MS || 30000)
+/** Events a socket remembers for its drop line, and the first ones it keeps for its "after" line. */
+const RECENT_EVENTS = 15
+/** After a reconnect, how long to wait before logging the new socket's first events. */
+const AFTER_MS = 10000
 
 function digitsEnd(data, from) {
   let i = from
   while (i < data.length && data.charCodeAt(i) >= 48 && data.charCodeAt(i) <= 57) i++
   return i
+}
+
+const secs = (ms) => (ms / 1000).toFixed(1)
+
+/** A socket's last events, and its first ones; a run of snapshots is folded into one entry. */
+function eventLog() {
+  const last = []
+  const first = []
+  const add = (list, text, now) => {
+    const prev = list[list.length - 1]
+    if (prev && prev.text.startsWith('←snapshot') && text.startsWith('←snapshot')) {
+      prev.n++
+      prev.end = now
+      prev.text = text
+      return true
+    }
+    list.push({ start: now, end: now, text, n: 1 })
+    return false
+  }
+  return {
+    note(text) {
+      const now = Date.now()
+      if (!add(last, text, now) && last.length > RECENT_EVENTS) last.shift()
+      if (first.length < RECENT_EVENTS || first[first.length - 1].text.startsWith('←snapshot')) {
+        if (!add(first, text, now) && first.length > RECENT_EVENTS) first.pop()
+      }
+    },
+    last: () => last.slice(),
+    first: () => first.slice(),
+  }
+}
+
+/** `-12.0…-3.1 ←snapshot 22 KB ×30 · -2.5 →player:placeOrder#7`, times relative to `ref`. */
+export function formatEvents(list, ref) {
+  if (!list.length) return 'none'
+  const rel = (at) => `${at >= ref ? '+' : '-'}${secs(Math.abs(at - ref))}`
+  return list.map((e) => (e.n > 1 ? `${rel(e.start)}…${rel(e.end)} ${e.text} ×${e.n}` : `${rel(e.start)} ${e.text}`)).join(' · ')
 }
 
 /**
@@ -51,15 +95,18 @@ function digitsEnd(data, from) {
  * @param {object|null} auth  the handshake `auth` (SocketAuth), or null for a fresh socket
  * @param {{ onSnapshot?: (raw: string) => void, onClose?: (info: CloseInfo) => void, failures?: Counter }} handlers
  *   `onSnapshot` gets `["session:snapshot",{...}]` as a string; `JSON.parse(raw)[1]` is the snapshot.
- *   `onClose` gets `{ code, reason, byUs, wasConnected, serverDisconnect }`. `failures` counts a
- *   failed connect (default `ws_connect_failures`).
+ *   `onClose` gets a CloseInfo (below). `failures` counts a failed connect (default
+ *   `ws_connect_failures`).
  */
 export function connect(baseUrl, auth, handlers = {}) {
   return new Promise((resolve, reject) => {
     const url = `${baseUrl.replace(/^http/, 'ws')}/socket.io/?EIO=4&transport=websocket`
     const ws = new WebSocket(url)
-    const pending = new Map()
+    const opened = Date.now()
+    const log = eventLog()
+    const pending = new Map() // id → { event, t0, done }
     let seq = 0
+    let lastRecv = opened
     let connected = false
     let closed = false
     let byUs = false
@@ -89,13 +136,19 @@ export function connect(baseUrl, auth, handlers = {}) {
           const timer = setTimeout(() => {
             if (!pending.delete(id)) return
             ackTimeouts.add(1, { event })
+            log.note(`✗ack#${id} none in ${secs(ACK_TIMEOUT_MS)} s`)
             done({ ok: false, error: 'no ack', code: 'TIMEOUT' })
           }, ACK_TIMEOUT_MS)
-          pending.set(id, (response) => {
-            clearTimeout(timer)
-            ackRtt.add(Date.now() - t0, { event })
-            done(response)
+          pending.set(id, {
+            event,
+            t0,
+            done: (response) => {
+              clearTimeout(timer)
+              ackRtt.add(Date.now() - t0, { event })
+              done(response)
+            },
           })
+          log.note(`→${event}#${id}`)
           ws.send(`42${id}${JSON.stringify([event, payload ?? {}])}`)
         })
       },
@@ -107,10 +160,13 @@ export function connect(baseUrl, auth, handlers = {}) {
       get open() {
         return connected && !closed
       },
+      /** This socket's first events (for the line after a reconnect). */
+      firstEvents: () => log.first(),
     }
 
     ws.onmessage = (e) => {
       const data = typeof e.data === 'string' ? e.data : String(e.data)
+      lastRecv = Date.now()
       const type = data.charAt(0)
       if (type === '0') {
         ws.send(`40${auth ? JSON.stringify(auth) : ''}`)
@@ -118,6 +174,7 @@ export function connect(baseUrl, auth, handlers = {}) {
       }
       if (type === '2') {
         ws.send('3')
+        log.note('←ping →pong')
         return
       }
       if (type !== '4') return
@@ -127,21 +184,27 @@ export function connect(baseUrl, auth, handlers = {}) {
         if (body.startsWith('["session:snapshot"')) {
           snapshots.add(1)
           snapshotSize.add(data.length)
+          log.note(`←snapshot ${Math.round(data.length / 1024)} KB`)
           if (handlers.onSnapshot) handlers.onSnapshot(body)
+        } else {
+          log.note(`←${body.slice(2, body.indexOf('"', 2))}`)
         }
         return
       }
       if (packet === '3') {
         const end = digitsEnd(data, 2)
         const id = Number(data.slice(2, end))
-        const cb = pending.get(id)
-        if (!cb) return
+        const p = pending.get(id)
+        if (!p) return
         pending.delete(id)
-        cb(JSON.parse(data.slice(end))[0])
+        const response = JSON.parse(data.slice(end))[0]
+        log.note(`←ack#${id} ${Date.now() - p.t0} ms${response && response.ok === false ? ` ${response.code || 'refused'}` : ''}`)
+        p.done(response)
         return
       }
       if (packet === '0') {
         connected = true
+        log.note('←connected')
         if (!settled) {
           settled = true
           clearTimeout(connectTimer)
@@ -156,6 +219,7 @@ export function connect(baseUrl, auth, handlers = {}) {
       if (packet === '1') {
         // The server disconnected this socket (socket.disconnect()). The game never does; a
         // browser would not reconnect after it either.
+        log.note('←disconnect')
         serverDisconnect = true
         closed = true
         try { ws.close() } catch (_) { /* already closing */ }
@@ -167,12 +231,24 @@ export function connect(baseUrl, auth, handlers = {}) {
     }
 
     ws.onclose = (e) => {
+      const now = Date.now()
       closed = true
-      for (const cb of pending.values()) cb({ ok: false, error: 'socket closed', code: 'CLOSED' })
+      const waiting = [...pending.entries()].map(([id, p]) => `${p.event}#${id} (${secs(now - p.t0)} s)`)
+      for (const p of pending.values()) p.done({ ok: false, error: 'socket closed', code: 'CLOSED' })
       pending.clear()
       if (!connected) failConnect('closed before connecting')
       if (handlers.onClose) {
-        handlers.onClose({ code: e && e.code, reason: (e && e.reason) || '', byUs, wasConnected: connected, serverDisconnect })
+        handlers.onClose({
+          code: e && e.code,
+          reason: (e && e.reason) || '',
+          byUs,
+          wasConnected: connected,
+          serverDisconnect,
+          openSeconds: secs(now - opened),
+          lastRecvSeconds: secs(now - lastRecv),
+          waiting,
+          before: formatEvents(log.last(), now),
+        })
       }
     }
   })
@@ -198,12 +274,15 @@ function within(promise, ms) {
  * buffers it; one whose ack was in flight when it dropped resolves with code CLOSED.
  *
  * @param {() => object|null} auth  the handshake auth for each connection (a player's token once joined)
- * @param {{ onSnapshot?, onDrop?: (info: CloseInfo) => void, onBack?: (awayMs: number, attempts: number) => void }} handlers
+ * @param {{ onSnapshot?, onDrop?: (info: CloseInfo) => void, onBack?: (awayMs: number, attempts: number) => void,
+ *   onAfter?: (events: string) => void }} handlers
+ *   `onAfter` gets the new socket's first events, AFTER_MS after it is back.
  */
 export async function resilient(baseUrl, auth, handlers = {}) {
   let stopped = false
   let back = null // while away: resolves once connected again (or stopped)
   let current = null
+  let afterTimer = null
 
   const dropped = (info) => {
     if (info.byUs || !info.wasConnected || stopped) return
@@ -227,8 +306,17 @@ export async function resilient(baseUrl, auth, handlers = {}) {
         return
       }
       back = null
-      wsDowntime.add(Date.now() - t0)
-      if (handlers.onBack) handlers.onBack(Date.now() - t0, attempt)
+      const backAt = Date.now()
+      wsDowntime.add(backAt - t0)
+      if (handlers.onBack) handlers.onBack(backAt - t0, attempt)
+      if (handlers.onAfter) {
+        const conn = current
+        if (afterTimer) clearTimeout(afterTimer)
+        afterTimer = setTimeout(() => {
+          afterTimer = null
+          handlers.onAfter(formatEvents(conn.firstEvents(), backAt))
+        }, AFTER_MS)
+      }
       return
     }
   }
@@ -243,6 +331,7 @@ export async function resilient(baseUrl, auth, handlers = {}) {
     },
     close() {
       stopped = true
+      if (afterTimer) clearTimeout(afterTimer)
       current.close()
     },
     /** Until `close()`: a dropped socket is still open, it is coming back. */
@@ -256,7 +345,12 @@ export async function resilient(baseUrl, auth, handlers = {}) {
   }
 }
 
-/** @typedef {{ code?: number, reason: string, byUs: boolean, wasConnected: boolean, serverDisconnect: boolean }} CloseInfo */
+/**
+ * @typedef {{ code?: number, reason: string, byUs: boolean, wasConnected: boolean, serverDisconnect: boolean,
+ *   openSeconds: string, lastRecvSeconds: string, waiting: string[], before: string }} CloseInfo
+ *   `lastRecvSeconds`: since the last message from the server; `waiting`: emits still without an
+ *   ack when it closed; `before`: its last events, times relative to the close.
+ */
 
 /** A promise that resolves after `ms`, without blocking the VU's event loop. */
 export function wait(ms) {
