@@ -18,6 +18,7 @@ import type {
   HostSnapshot,
   IndustryBreakdownRow,
   LeaderboardRow,
+  MarketView,
   PlayerHistoryYear,
   PlayerSnapshot,
   PublicPlayerInfo,
@@ -331,7 +332,46 @@ function classAggregate(session: Session): ClassAggregate {
   }
 }
 
-export function playerSnapshot(session: Session, playerId: string): PlayerSnapshot {
+/**
+ * The class-wide parts of a player snapshot: identical for every player at one moment.
+ *
+ * A broadcast builds them ONCE and hands them to every player's snapshot (`Broadcaster.flush`).
+ * Each of them walks the whole class or the whole year's tape, so building them per player made
+ * one flush quadratic in class size: measured 2026-11-17 at 100 students + 60 bots and agents,
+ * 10.9 ms to build a flush locally, which a 0.1-CPU host cannot keep up with.
+ *
+ * Only for objects that are serialised straight away and never mutated: the snapshots of one
+ * flush share these references.
+ */
+export interface SharedPlayerView {
+  roster: PublicPlayerInfo[]
+  market: MarketView | null
+  classAggregate: ClassAggregate | null
+  leaderboard: LeaderboardRow[] | null
+  prevMarketPrice: number | null
+}
+
+export function sharedPlayerView(session: Session): SharedPlayerView {
+  const { state } = session
+  const record = session.currentYearRecord()
+  const settled = state.phase === 'yearSummary' || state.phase === 'ended'
+  return {
+    roster: publicRoster(session),
+    market:
+      record && (state.phase === 'trade' || settled)
+        ? buildMarketView(record.orders, record.trades)
+        : null,
+    classAggregate: state.phase === 'lobby' ? null : classAggregate(session),
+    leaderboard: settled ? leaderboard(session) : null,
+    prevMarketPrice: session.previousMarketPrice(),
+  }
+}
+
+export function playerSnapshot(
+  session: Session,
+  playerId: string,
+  shared: SharedPlayerView = sharedPlayerView(session),
+): PlayerSnapshot {
   const { state } = session
   const player = session.getPlayer(playerId)
   if (!player) throw new Error(`Unknown player ${playerId}`)
@@ -352,7 +392,7 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
     phase: state.phase,
     currentYear: state.currentYear,
     playerCount: state.players.length,
-    roster: publicRoster(session),
+    roster: shared.roster,
     abatement: forSector(state.config.abatement.sectors, player.industry) ?? null,
     // Per company, not per class: a breakthrough may be held by some and not others.
     abatementLifetimeCap: session.lifetimeCapFor(player.id),
@@ -405,13 +445,10 @@ export function playerSnapshot(session: Session, playerId: string): PlayerSnapsh
       session.freeAllocationBasis === 'benchmark'
         ? (forSector(sectorAverages(state.config), player.industry) ?? null)
         : null,
-    prevMarketPrice: session.previousMarketPrice(),
-    market:
-      record && (state.phase === 'trade' || settled)
-        ? buildMarketView(record.orders, record.trades)
-        : null,
-    classAggregate: state.phase === 'lobby' ? null : classAggregate(session),
-    leaderboard: settled ? leaderboard(session) : null,
+    prevMarketPrice: shared.prevMarketPrice,
+    market: shared.market,
+    classAggregate: shared.classAggregate,
+    leaderboard: shared.leaderboard,
     you: {
       id: player.id,
       name: player.name,

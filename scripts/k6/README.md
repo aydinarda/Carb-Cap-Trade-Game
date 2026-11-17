@@ -21,7 +21,10 @@ using: they share the instance.
 - **host** (1 VU): waits until the whole class has joined, then plays `YEARS` rounds:
   `startYear` → cap stage `CAP_WINDOW` s → `closeCapStage`, `openTrade` → market `ROUND_WINDOW` s →
   `closeTrade` → year summary `REVIEW_GAP` s → `advanceYear`; then `endGame`. Logs each year's VWAP
-  and auction price, and the leaderboard's top points at the end.
+  and auction price, and the leaderboard's top points at the end. It also plays the events in
+  `EVENTS`, as an instructor would from the host panel: energy crisis, rate cut, subsidy, tech
+  unlock, nuclear closure, free allocation cut, and a borrowing referendum (chat, then vote; the
+  next year waits for its result). Students say a line in the chat now and then and all vote.
 - **students** (50 or 100 VUs): join during the lobby (spread over `JOIN_SPREAD` s), then each
   round: sometimes switch borrowing, bid at the auction (a 3-step sweep or one bid), and act every
   `TRADE_MIN`–`TRADE_MAX` s in the market: cover what they need, otherwise small buys and sells
@@ -64,6 +67,8 @@ reading them could take over that test room (only that one).
 | `START_DELAY` | 0 (workflow: 180) | s before year 1, at least: time for you to join the lobby |
 | `FRONTEND_URL` | none | the game's site, only for the join hint in the log |
 | `MARKET_LOG_EVERY` | 15 | s between market lines in the log |
+| `EVENTS` | `2:energyCrisis:3,4:rateCut,5:subsidy:3,6:tech,7:nuclear,8:freeCut,9:referendum` | host events by year (`year:kind[:arg]`, or `none`); announced at the start of that year's cap stage, the referendum in its year summary |
+| `REFERENDUM_CHAT`, `REFERENDUM_VOTE` | 20, 15 | s of the referendum's chat and vote |
 | `BOTS` | `compliance:28,marketMaker:4,speculator:2,noise:6` | 40 bots, every type |
 | `AGENTS` | `all` | `all`, `none`, or model ids |
 | `ACK_TIMEOUT_MS` | 10000 | an emit with no ack after this counts as failed |
@@ -80,6 +85,7 @@ reading them could take over that test room (only that one).
 | `ws_connect_failures` | 0 |
 | `game_completed` (every host transition accepted, game ended) | 100% |
 | `student_saw_end` | > 99% |
+| `event_ok` (every scheduled event accepted; the referendum closed with a result) | 100% |
 
 Also reported: `snapshot_size` and `snapshots` (what the server pushes: the main cost at 100
 students), `data_received`, `actions_accepted`, `actions_expected_rejects`,

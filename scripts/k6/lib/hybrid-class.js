@@ -35,6 +35,15 @@ const JOIN_TIMEOUT = num('JOIN_TIMEOUT', 120) // s, the host starts once all joi
 const START_DELAY = num('START_DELAY', 0) // s, year 1 never starts earlier: time for a person to join the lobby
 const FRONTEND_URL = env('FRONTEND_URL', '').replace(/\/$/, '') // the game's site, for the join hint in the log
 const MARKET_LOG_EVERY = num('MARKET_LOG_EVERY', 15) // s between market lines in the log
+/**
+ * The host's events, by game year (1 = the first played round): `year:kind[:arg]`, comma
+ * separated, or `none`. Kinds: energyCrisis:<rounds>, rateCut, subsidy:<rounds>, tech[:<cap>],
+ * nuclear, freeCut, referendum[:<cap fraction>]. All but the referendum are announced at the
+ * start of that year's cap stage; the referendum runs in that year's summary.
+ */
+const EVENTS = env('EVENTS', '2:energyCrisis:3,4:rateCut,5:subsidy:3,6:tech,7:nuclear,8:freeCut,9:referendum')
+const REFERENDUM_CHAT = num('REFERENDUM_CHAT', 20) // s
+const REFERENDUM_VOTE = num('REFERENDUM_VOTE', 15) // s
 const AGENTS = env('AGENTS', 'all') // 'all' = every hybrid model once, 'none', or a comma list of model ids
 const BOTS = env('BOTS', 'compliance:28,marketMaker:4,speculator:2,noise:6')
 
@@ -43,8 +52,49 @@ const BOT_TYPES = ['compliance', 'marketMaker', 'speculator', 'noise']
 /** Refusals a real student also gets: racing the clock, selling what is already offered, … */
 const EXPECTED = new Set([
   'INSUFFICIENT_CREDITS', 'WRONG_PHASE', 'NO_ORDER', 'BAD_ORDER', 'ABATE_DOWN', 'BAD_ABATE',
-  'PERMANENT', 'BAD_BID', 'WRONG_MODE',
+  'PERMANENT', 'BAD_BID', 'WRONG_MODE', 'TOO_FAST', 'CHAT_CLOSED', 'VOTE_CLOSED', 'NO_VOTE',
 ])
+
+const EVENT_KINDS = ['energyCrisis', 'rateCut', 'subsidy', 'tech', 'nuclear', 'freeCut', 'referendum']
+
+/** `EVENTS` as { year: [{ kind, arg }] }. */
+function parseEvents(spec) {
+  const out = {}
+  if (!spec || spec.trim() === 'none') return out
+  for (const part of spec.split(',').map((x) => x.trim()).filter(Boolean)) {
+    const [year, kind, arg] = part.split(':').map((x) => x.trim())
+    if (!(Number(year) >= 1) || !EVENT_KINDS.includes(kind)) fail(`bad EVENTS entry "${part}"`)
+    ;(out[Number(year)] = out[Number(year)] || []).push({ kind, arg: arg === undefined ? undefined : Number(arg) })
+  }
+  return out
+}
+const SCHEDULE = parseEvents(EVENTS)
+const REFERENDUMS = Object.values(SCHEDULE).flat().filter((e) => e.kind === 'referendum').length
+
+/** The host action and payload of one scheduled event, and how the log names it. */
+function eventCall({ kind, arg }) {
+  switch (kind) {
+    case 'energyCrisis': return ['host:announceEnergyCrisis', { rounds: arg || 3 }, `energy crisis (${arg || 3} rounds)`]
+    case 'rateCut': return ['host:announceRateCut', {}, 'interest rate cut']
+    case 'subsidy': return ['host:announceSubsidy', { rounds: arg || 3 }, `green subsidy (${arg || 3} rounds)`]
+    case 'tech': return ['host:announceTech', arg === undefined ? {} : { cap: arg }, 'technology unlock']
+    case 'nuclear': return ['host:announceNuclear', {}, 'nuclear closure']
+    case 'freeCut': return ['host:announceFreeCut', {}, 'free allocation cut']
+    default: return null
+  }
+}
+
+const describeSchedule = () => Object.entries(SCHEDULE)
+  .map(([year, list]) => list.map((e) => `year ${year} ${e.kind === 'referendum' ? 'referendum' : eventCall(e)[2]}`).join(', '))
+  .join(', ') || 'none'
+
+const CHAT_LINES = [
+  'A cap on borrowing hits the firms that are already short.',
+  'Without a cap some of us just roll our debt every year.',
+  'I vote no, the auction is expensive enough.',
+  'Seven percent sounds fair to me.',
+  'If prices keep rising we will need the room to borrow.',
+]
 
 /** Every student join that was accepted. */
 const joinOk = new Rate('join_ok')
@@ -54,6 +104,8 @@ const accepted = new Counter('actions_accepted')
 const expectedRejects = new Counter('actions_expected_rejects')
 /** The host played every year and ended the game without a refused transition. */
 const gameCompleted = new Rate('game_completed')
+/** Every scheduled event was accepted (a referendum also has to close with a result). */
+const eventOk = new Rate('event_ok')
 /** Students who saw the game end before their deadline. */
 const sawEnd = new Rate('student_saw_end')
 const classJoined = new Gauge('class_joined')
@@ -68,7 +120,8 @@ const lobbySeconds = () => Math.max(START_DELAY, JOIN_SPREAD + JOIN_TIMEOUT)
 
 /** Seconds the whole run may take: the lobby, every year, and a margin (≈ 19 min at the defaults). */
 export function gameSeconds() {
-  return Math.ceil(lobbySeconds() + YEARS * (CAP_WINDOW + ROUND_WINDOW + REVIEW_GAP + 5) + 60)
+  return Math.ceil(lobbySeconds() + YEARS * (CAP_WINDOW + ROUND_WINDOW + REVIEW_GAP + 5) +
+    REFERENDUMS * (REFERENDUM_CHAT + REFERENDUM_VOTE + 15) + 60)
 }
 
 const K6_NAME = 'k6 student'
@@ -240,6 +293,7 @@ export function makeTest(students) {
       ws_connect_failures: ['count<1'],
       game_completed: ['rate==1'],
       student_saw_end: ['rate>0.99'],
+      event_ok: ['rate==1'],
     },
     summaryTrendStats: ['avg', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
   }
@@ -287,6 +341,7 @@ export function makeTest(students) {
     for (const line of [
       `════════ ROOM ${created.roomCode} ════════`,
       `${students} k6 students · ${botCount} bots (${BOTS}) · ${agentCount} RL agents · ${YEARS} years × (cap ${CAP_WINDOW} s + market ${ROUND_WINDOW} s + summary ${REVIEW_GAP} s)`,
+      `events: ${describeSchedule()}`,
       `Year 1 starts in about ${Math.max(START_DELAY, JOIN_SPREAD)} s (once all k6 students are in and the start delay has passed). Joining closes then.`,
       `PLAY:  open ${site}, enter room ${created.roomCode}, any name and industry.`,
       `WATCH as host, in another browser or a private window: open ${site}, then run in the browser console:`,
@@ -346,9 +401,47 @@ export function makeTest(students) {
       console.log(`${label} · last ${fmt(mv && mv.lastPrice)} € · VWAP ${fmt(mv && mv.vwap)} € · volume ${fmt(mv && mv.volume, 0)} t · ` +
         `bid/ask ${fmt(mv && mv.bestBid)}/${fmt(mv && mv.bestAsk)} € · reserve sold ${fmt(reserve, 0)} t`)
     }
+    /** A borrowing referendum in the year summary: open it, say a line, wait for its result. */
+    const referendum = async (frac) => {
+      const res = await client.emit('host:openReferendum', {
+        ...(frac === undefined ? {} : { frac }), chatSeconds: REFERENDUM_CHAT, voteSeconds: REFERENDUM_VOTE,
+      })
+      if (!res.ok) {
+        eventOk.add(false, { event: 'referendum' })
+        console.error(`event · referendum refused: ${res.code} ${res.error}`)
+        return
+      }
+      console.log(`event · borrowing referendum open: chat ${REFERENDUM_CHAT} s, then vote ${REFERENDUM_VOTE} s`)
+      tally(await client.emit('host:referendumChat', { text: 'Should borrowing be capped from next year? Say what you think, then vote.' }), 'host:referendumChat')
+      const until = Date.now() + (REFERENDUM_CHAT + REFERENDUM_VOTE + 15) * 1000
+      let r = null
+      while (Date.now() < until) {
+        await wait(1000)
+        const s = snap.get()
+        r = s && s.referendum
+        if (r && r.stage === 'closed' && r.result) break
+      }
+      const done = !!(r && r.stage === 'closed' && r.result)
+      eventOk.add(done, { event: 'referendum' })
+      if (done) {
+        console.log(`event · referendum ${r.result.approved ? 'PASSED' : 'failed'}: yes ${r.result.yes} · no ${r.result.no} · eligible ${r.result.eligible} · chat lines ${r.chat.length}`)
+      } else {
+        console.error('event · referendum did not close in time')
+      }
+    }
+
     for (let y = 0; y < YEARS; y++) {
       await step(y === 0 ? 'host:startYear' : 'host:advanceYear')
       console.log(`──── year ${y + 1}/${YEARS} ──── cap stage (auction) ${CAP_WINDOW} s`)
+      // This year's announcements, at the start of its cap stage.
+      for (const e of SCHEDULE[y + 1] || []) {
+        const call = eventCall(e)
+        if (!call) continue
+        const res = await client.emit(call[0], call[1])
+        eventOk.add(res.ok === true, { event: e.kind })
+        if (res.ok) console.log(`event · ${call[2]} announced`)
+        else console.error(`event · ${call[2]} refused: ${res.code} ${res.error}`)
+      }
       await wait(CAP_WINDOW * 1000)
       await step('host:closeCapStage')
       await wait(300)
@@ -369,10 +462,16 @@ export function makeTest(students) {
       const settled = snap.get()
       const connected = settled ? settled.players.filter((p) => !p.isBot && !p.agentModel && p.connected).length : 0
       console.log(`  top: ${topOf(settled && settled.leaderboard, 3)} · connected students and people: ${connected}`)
+      for (const e of SCHEDULE[y + 1] || []) if (e.kind === 'referendum') await referendum(e.arg)
       await wait(Math.max(0, REVIEW_GAP * 1000 - 800))
     }
     await step('host:endGame')
-    await wait(1500)
+    // Under load the host's (large) snapshot can trail the ack: give it time to show the end.
+    for (let i = 0; i < 20; i++) {
+      await wait(1000)
+      const now = snap.get()
+      if (now && now.phase === 'ended') break
+    }
 
     const s = snap.get()
     const rows = (s && s.leaderboard ? s.leaderboard : []).filter((r) => r.points !== null)
@@ -418,11 +517,27 @@ export function makeTest(students) {
     let borrowYear = null
     let nextTradeAt = 0
     let ended = false
+    let chatted = null
+    let voted = null
     while (client.open && Date.now() < deadline) {
       await wait(1000)
       const s = snap.get()
       if (!s) continue
       if (s.phase === 'ended') { ended = true; break }
+      // A referendum: some say a line in the chat, everyone who may vote does.
+      const r = s.referendum
+      if (r && r.stage === 'chat' && chatted !== r.id) {
+        chatted = r.id
+        if (Math.random() < 0.3) {
+          await wait(rand(0, Math.max(0, REFERENDUM_CHAT - 3)) * 1000)
+          tally(await client.emit('player:chat', { text: CHAT_LINES[Math.floor(Math.random() * CHAT_LINES.length)] }), 'player:chat')
+        }
+      }
+      if (r && r.stage === 'vote' && r.canVote && !r.myVote && voted !== r.id) {
+        voted = r.id
+        await wait(rand(0, Math.max(0, REFERENDUM_VOTE - 4)) * 1000)
+        tally(await client.emit('player:vote', { choice: Math.random() < 0.45 ? 'yes' : 'no' }), 'player:vote')
+      }
       if (s.phase === 'cap' && borrowYear !== s.currentYear) {
         borrowYear = s.currentYear
         // Most leave borrowing on (the default); some switch it off for the year.

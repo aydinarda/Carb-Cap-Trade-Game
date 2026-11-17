@@ -1,8 +1,13 @@
 import type { Server, Socket } from 'socket.io'
 import type { ClientToServerEvents, ServerToClientEvents } from '../shared/events'
-import { FLUSH_MS } from './config'
+import { FLUSH_MAX_MS, FLUSH_MS, FLUSH_PER_SOCKET_MS } from './config'
 import type { Session } from './session'
-import { hostSnapshot, playerSnapshot } from './views'
+import { hostSnapshot, playerSnapshot, sharedPlayerView, type SharedPlayerView } from './views'
+
+/** The coalescing window for a room with `sockets` connections (see FLUSH_PER_SOCKET_MS). */
+export function flushDelay(sockets: number): number {
+  return Math.max(FLUSH_MS, Math.min(FLUSH_MAX_MS, sockets * FLUSH_PER_SOCKET_MS))
+}
 
 export type IO = Server<ClientToServerEvents, ServerToClientEvents>
 
@@ -68,10 +73,10 @@ export class Broadcaster {
   }
 
   /**
-   * Coalesced push. Trailing-edge: at most one flush per FLUSH_MS per room, and the last
-   * state is never dropped — the timer is always armed *after* the mutation, and `flush()`
-   * reads live session state at fire time. Acks are already sent before this is called, so
-   * only the state echo waits.
+   * Coalesced push. Trailing-edge: at most one flush per window per room (`flushDelay`:
+   * FLUSH_MS, longer in a big room), and the last state is never dropped — the timer is always
+   * armed *after* the mutation, and `flush()` reads live session state at fire time. Acks are
+   * already sent before this is called, so only the state echo waits.
    */
   schedule(session: Session) {
     session.touch()
@@ -82,7 +87,7 @@ export class Broadcaster {
       setTimeout(() => {
         this.timers.delete(code)
         this.flush(session)
-      }, FLUSH_MS),
+      }, flushDelay(this.members.get(code)?.size ?? 0)),
     )
   }
 
@@ -125,12 +130,15 @@ export class Broadcaster {
     const set = this.members.get(session.state.roomCode)
     if (!set || set.size === 0) return
 
-    // Built once for the whole flush rather than once per host socket: two instructor tabs
-    // used to double the most expensive payload in the game.
+    // Built once for the whole flush rather than once per socket: two instructor tabs used to
+    // double the most expensive payload in the game, and the class-wide parts of every player's
+    // snapshot (roster, market, aggregates, leaderboard) used to be rebuilt for each player.
     let host: ReturnType<typeof hostSnapshot> | undefined
+    let shared: SharedPlayerView | undefined
     for (const socket of set) {
-      if (socket.data.role === 'host' && !host) host = hostSnapshot(session)
-      this.emitTo(socket, session, host)
+      if (socket.data.role === 'host') host ??= hostSnapshot(session)
+      else shared ??= sharedPlayerView(session)
+      this.emitTo(socket, session, host, shared)
     }
   }
 
@@ -138,6 +146,7 @@ export class Broadcaster {
     socket: AppSocket,
     session: Session,
     host: ReturnType<typeof hostSnapshot> | undefined,
+    shared?: SharedPlayerView,
   ) {
     if (socket.data.role === 'host') {
       socket.emit('session:snapshot', host ?? hostSnapshot(session))
@@ -145,10 +154,10 @@ export class Broadcaster {
       // Exactly what that player's own screen gets. It has no playerId, so every player action
       // from it is refused, and it is not the host, so every host action is too.
       if (socket.data.watchId && session.getPlayer(socket.data.watchId)) {
-        socket.emit('session:snapshot', playerSnapshot(session, socket.data.watchId))
+        socket.emit('session:snapshot', playerSnapshot(session, socket.data.watchId, shared))
       }
     } else if (socket.data.playerId && session.getPlayer(socket.data.playerId)) {
-      socket.emit('session:snapshot', playerSnapshot(session, socket.data.playerId))
+      socket.emit('session:snapshot', playerSnapshot(session, socket.data.playerId, shared))
     }
     // A kicked player keeps a socket whose playerId no longer resolves. Sending nothing is
     // the established behaviour — do not "fix" this into a throw.
