@@ -17,7 +17,7 @@ import http from 'k6/http'
 import { check, fail } from 'k6'
 import exec from 'k6/execution'
 import { Counter, Gauge, Rate } from 'k6/metrics'
-import { connect, wait } from './socketio.js'
+import { connect, resilient, wait } from './socketio.js'
 
 const env = (key, fallback) => (__ENV[key] !== undefined && __ENV[key] !== '' ? __ENV[key] : fallback)
 const num = (key, fallback) => Number(env(key, fallback))
@@ -102,6 +102,8 @@ const joinOk = new Rate('join_ok')
 const ackFailed = new Rate('ack_failed')
 const accepted = new Counter('actions_accepted')
 const expectedRejects = new Counter('actions_expected_rejects')
+/** Actions whose ack was lost because the socket dropped (the drop is counted in ws_drops). */
+const lostToDrops = new Counter('actions_lost_to_drops')
 /** The host played every year and ended the game without a refused transition. */
 const gameCompleted = new Rate('game_completed')
 /** Every scheduled event was accepted (a referendum also has to close with a result). */
@@ -166,7 +168,23 @@ function snapshotHolder() {
   }
 }
 
+/** Where the game was, for a log line: "trade, year 6". */
+function where(s) {
+  return s ? `${s.phase}${s.phase === 'lobby' || s.phase === 'ended' ? '' : `, year ${s.currentYear + 1}`}` : 'before the first snapshot'
+}
+
+/** A dropped socket, for the log: what the close said and where the game was. */
+function dropLine(who, info, s) {
+  return `${who}: connection dropped in ${where(s)} · close ${info.code ?? '—'}${info.reason ? ` "${info.reason}"` : ''}` +
+    `${info.serverDisconnect ? ' · the server disconnected it' : ' · reconnecting'}`
+}
+
 function tally(res, event) {
+  if (res && res.code === 'CLOSED') {
+    // The drop is what failed, and ws_drops counts it; a browser would resend after reconnecting.
+    lostToDrops.add(1, { event })
+    return false
+  }
   const ok = !!res && res.ok === true
   const expected = !ok && !!res && EXPECTED.has(res.code)
   if (ok) accepted.add(1, { event })
@@ -291,6 +309,10 @@ export function makeTest(students) {
       join_ok: ['rate>0.99'],
       ack_failed: ['rate<0.01'],
       ws_connect_failures: ['count<1'],
+      // A dropped socket reconnects, as a browser's does. Fewer drops than students over the game,
+      // and each back within 10 s, is a class that does not notice them.
+      ws_drops: [`count<${students}`],
+      ws_downtime: ['p(95)<10000'],
       game_completed: ['rate==1'],
       student_saw_end: ['rate>0.99'],
       event_ok: ['rate==1'],
@@ -354,7 +376,11 @@ export function makeTest(students) {
 
   async function host(data) {
     const snap = snapshotHolder()
-    const client = await connect(BASE_URL, { role: 'host', token: data.hostToken }, { onSnapshot: snap.onSnapshot })
+    const client = await resilient(BASE_URL, () => ({ role: 'host', token: data.hostToken }), {
+      onSnapshot: snap.onSnapshot,
+      onDrop: (info) => console.warn(dropLine('host', info, snap.get())),
+      onBack: (ms, attempts) => console.log(`host: back after ${fmt(ms / 1000)} s (attempt ${attempts})`),
+    })
 
     // Lobby: wait for the class, and for the start delay so a person can join too.
     const roster = () => {
@@ -493,9 +519,15 @@ export function makeTest(students) {
     await wait(rand(0, JOIN_SPREAD) * 1000)
 
     const snap = snapshotHolder()
+    // Like the browser: once joined, a dropped socket reconnects with the player's token.
+    let identity = null
     let client
     try {
-      client = await connect(BASE_URL, null, { onSnapshot: snap.onSnapshot })
+      client = await resilient(BASE_URL, () => identity, {
+        onSnapshot: snap.onSnapshot,
+        onDrop: (info) => console.warn(dropLine(`student ${id}`, info, snap.get())),
+        onBack: (ms, attempts) => console.log(`student ${id}: back after ${fmt(ms / 1000)} s (attempt ${attempts})`),
+      })
     } catch (e) {
       joinOk.add(false)
       console.error(`student ${id}: ${e.message}`)
@@ -512,6 +544,7 @@ export function makeTest(students) {
       client.close()
       return
     }
+    identity = { role: 'player', roomCode: data.roomCode, token: joined.token }
 
     let bidYear = null
     let borrowYear = null

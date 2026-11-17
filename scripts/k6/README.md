@@ -34,6 +34,13 @@ using: they share the instance.
 - **health** (1 request / 2 s): `GET /healthz` for the whole run. It shares the event loop with
   the game, so it is what Render's health check sees.
 
+A socket that drops (closed by the server, Render's proxy or the network, not by the test)
+reconnects as the browser does: after 1 s, then 2, 4 and every 5 s, with the player's token (the
+host's for the host), so the student keeps playing. Each drop is logged with its close code and
+where the game was (`student 17: connection dropped in trade, year 6 · close 1006 …`), then
+`back after 1.3 s`. Before 2026-11-17 a dropped student stopped for good, which a browser never
+does.
+
 At the defaults one run takes about 19 minutes (plus `START_DELAY` beyond the class's join window).
 
 ## Watching and joining
@@ -80,21 +87,27 @@ reading them could take over that test room (only that one).
 | `ack_rtt{scenario:students}` (action → ack) | p95 < 500 ms, p99 < 1.5 s |
 | `ack_rtt{scenario:host}` | p95 < 1 s |
 | `http_req_duration{name:healthz}` | p95 < 1 s, 99% answered 200 |
-| `ack_failed` (neither accepted nor an expected refusal; timeouts included) | < 1% |
+| `ack_failed` (neither accepted nor an expected refusal; timeouts included, acks lost to a drop not) | < 1% |
 | `join_ok` | > 99% |
-| `ws_connect_failures` | 0 |
+| `ws_connect_failures` (first connection) | 0 |
+| `ws_drops` (connected sockets closed by the server, the proxy or the network) | fewer than students |
+| `ws_downtime` (drop → connected again) | p95 < 10 s |
 | `game_completed` (every host transition accepted, game ended) | 100% |
-| `student_saw_end` | > 99% |
+| `student_saw_end` (after reconnecting, if it dropped) | > 99% |
 | `event_ok` (every scheduled event accepted; the referendum closed with a result) | 100% |
 
 Also reported: `snapshot_size` and `snapshots` (what the server pushes: the main cost at 100
 students), `data_received`, `actions_accepted`, `actions_expected_rejects`,
-`leaderboard_max_points`. Expected refusals (racing the clock, offering credits already offered,
-…) are counted, not failed.
+`actions_lost_to_drops`, `ws_reconnect_failures`, `leaderboard_max_points`. Expected refusals
+(racing the clock, offering credits already offered, …) are counted, not failed.
+
+Close codes in a drop line: `1006` with "unexpected EOF" is the connection cut with no close frame
+(network or proxy); a code from the server (`1000`, `1001`, `1005`) means it closed the socket,
+e.g. an Engine.IO ping timeout when the server fell 20 s behind.
 
 ## How it talks to the server
 
 k6 has WebSockets but no Socket.IO, so `lib/socketio.js` speaks Engine.IO v4 / Socket.IO v4 by
 hand over the websocket transport: open → `40{auth}`, ping/pong, `42<id>[event, data]` emits and
-their `43<id>[response]` acks, `session:snapshot` pushes. A new server event or a change to the
-handshake has to be mirrored there.
+their `43<id>[response]` acks, `session:snapshot` pushes. `resilient()` there is the reconnecting
+socket. A new server event or a change to the handshake has to be mirrored there.

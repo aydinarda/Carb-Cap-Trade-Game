@@ -28,6 +28,12 @@ export const snapshotSize = new Trend('snapshot_size')
 export const snapshots = new Counter('snapshots')
 /** Sockets that never reached the connected state. */
 export const connectFailures = new Counter('ws_connect_failures')
+/** Connected sockets that closed without our asking: the server, Render's proxy or the network. */
+export const wsDrops = new Counter('ws_drops')
+/** From a drop to being connected again, in ms. */
+export const wsDowntime = new Trend('ws_downtime', true)
+/** Reconnect attempts that failed (another follows). */
+export const reconnectFailures = new Counter('ws_reconnect_failures')
 
 const ACK_TIMEOUT_MS = Number(__ENV.ACK_TIMEOUT_MS || 10000)
 const CONNECT_TIMEOUT_MS = Number(__ENV.CONNECT_TIMEOUT_MS || 30000)
@@ -43,8 +49,10 @@ function digitsEnd(data, from) {
  *
  * @param {string} baseUrl  http(s)://host[:port] of the backend
  * @param {object|null} auth  the handshake `auth` (SocketAuth), or null for a fresh socket
- * @param {{ onSnapshot?: (raw: string) => void, onClose?: () => void }} handlers
+ * @param {{ onSnapshot?: (raw: string) => void, onClose?: (info: CloseInfo) => void, failures?: Counter }} handlers
  *   `onSnapshot` gets `["session:snapshot",{...}]` as a string; `JSON.parse(raw)[1]` is the snapshot.
+ *   `onClose` gets `{ code, reason, byUs, wasConnected, serverDisconnect }`. `failures` counts a
+ *   failed connect (default `ws_connect_failures`).
  */
 export function connect(baseUrl, auth, handlers = {}) {
   return new Promise((resolve, reject) => {
@@ -54,12 +62,14 @@ export function connect(baseUrl, auth, handlers = {}) {
     let seq = 0
     let connected = false
     let closed = false
+    let byUs = false
+    let serverDisconnect = false
     let settled = false
 
     const failConnect = (reason) => {
       if (settled) return
       settled = true
-      connectFailures.add(1)
+      ;(handlers.failures || connectFailures).add(1)
       clearTimeout(connectTimer)
       try { ws.close() } catch (_) { /* already closing */ }
       reject(new Error(reason))
@@ -91,6 +101,7 @@ export function connect(baseUrl, auth, handlers = {}) {
       },
       close() {
         closed = true
+        byUs = true
         try { ws.close() } catch (_) { /* already closing */ }
       },
       get open() {
@@ -142,22 +153,110 @@ export function connect(baseUrl, auth, handlers = {}) {
         failConnect(`connect refused: ${data.slice(2)}`)
         return
       }
-      if (packet === '1') client.close()
+      if (packet === '1') {
+        // The server disconnected this socket (socket.disconnect()). The game never does; a
+        // browser would not reconnect after it either.
+        serverDisconnect = true
+        closed = true
+        try { ws.close() } catch (_) { /* already closing */ }
+      }
     }
 
     ws.onerror = (e) => {
       if (!connected) failConnect(`websocket error: ${e && e.error}`)
     }
 
-    ws.onclose = () => {
+    ws.onclose = (e) => {
       closed = true
       for (const cb of pending.values()) cb({ ok: false, error: 'socket closed', code: 'CLOSED' })
       pending.clear()
       if (!connected) failConnect('closed before connecting')
-      if (handlers.onClose) handlers.onClose()
+      if (handlers.onClose) {
+        handlers.onClose({ code: e && e.code, reason: (e && e.reason) || '', byUs, wasConnected: connected, serverDisconnect })
+      }
     }
   })
 }
+
+/** Resolves true once `promise` settles, or false after `ms`, without leaving a timer behind. */
+function within(promise, ms) {
+  return new Promise((done) => {
+    const timer = setTimeout(() => done(false), ms)
+    promise.then(() => {
+      clearTimeout(timer)
+      done(true)
+    })
+  })
+}
+
+/**
+ * A socket that comes back, as the game's browser client does: socket.io-client reconnects on
+ * its own and authenticates with the identity it stored at join, so a student whose connection
+ * drops is back within seconds and keeps playing. When this socket closes without `close()`, it
+ * reconnects with `auth()` after 1 s, then 2, 4 and every 5 s, until it is in or `close()` is
+ * called. An emit made while it is away waits for it (up to ACK_TIMEOUT_MS), as socket.io-client
+ * buffers it; one whose ack was in flight when it dropped resolves with code CLOSED.
+ *
+ * @param {() => object|null} auth  the handshake auth for each connection (a player's token once joined)
+ * @param {{ onSnapshot?, onDrop?: (info: CloseInfo) => void, onBack?: (awayMs: number, attempts: number) => void }} handlers
+ */
+export async function resilient(baseUrl, auth, handlers = {}) {
+  let stopped = false
+  let back = null // while away: resolves once connected again (or stopped)
+  let current = null
+
+  const dropped = (info) => {
+    if (info.byUs || !info.wasConnected || stopped) return
+    wsDrops.add(1)
+    if (handlers.onDrop) handlers.onDrop(info)
+    if (info.serverDisconnect) stopped = true
+    else back = reconnect(Date.now())
+  }
+  const open = (failures) => connect(baseUrl, auth(), { onSnapshot: handlers.onSnapshot, onClose: dropped, failures })
+  async function reconnect(t0) {
+    for (let attempt = 1; !stopped; attempt++) {
+      await wait(Math.min(5000, 1000 * 2 ** (attempt - 1)))
+      if (stopped) return
+      try {
+        current = await open(reconnectFailures)
+      } catch (_) {
+        continue // counted in ws_reconnect_failures; try again
+      }
+      if (stopped) {
+        current.close() // closed while this attempt was connecting: an open socket keeps the VU alive
+        return
+      }
+      back = null
+      wsDowntime.add(Date.now() - t0)
+      if (handlers.onBack) handlers.onBack(Date.now() - t0, attempt)
+      return
+    }
+  }
+
+  current = await open()
+  return {
+    async emit(event, payload) {
+      if (back && !(await within(back, ACK_TIMEOUT_MS))) {
+        return { ok: false, error: 'still reconnecting', code: 'CLOSED' }
+      }
+      return current.emit(event, payload)
+    },
+    close() {
+      stopped = true
+      current.close()
+    },
+    /** Until `close()`: a dropped socket is still open, it is coming back. */
+    get open() {
+      return !stopped
+    },
+    /** Connected right now. */
+    get connected() {
+      return !back && current.open
+    },
+  }
+}
+
+/** @typedef {{ code?: number, reason: string, byUs: boolean, wasConnected: boolean, serverDisconnect: boolean }} CloseInfo */
 
 /** A promise that resolves after `ms`, without blocking the VU's event loop. */
 export function wait(ms) {
