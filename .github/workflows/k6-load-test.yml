@@ -35,7 +35,7 @@ on:
         default: '12'
         required: true
       round_window:
-        description: Market window per round (seconds); the agents need 31 s for their decisions
+        description: Market window per round (seconds); the agents make 13 of their 15 decisions in 45 s, all in 50 s
         default: '45'
         required: true
       cap_window:

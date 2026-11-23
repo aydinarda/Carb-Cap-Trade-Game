@@ -75,7 +75,7 @@ reading them could take over that test room (only that one).
 | `HOST_KEY` | `admin123` | instructor key (the workflow uses the `HOST_KEY` secret when set) |
 | `YEARS` | 12 | rounds |
 | `CAP_WINDOW` | 20 | s, cap stage |
-| `ROUND_WINDOW` | 45 | s, market (the agents need 31 s for their 15 decisions) |
+| `ROUND_WINDOW` | 45 | s, market (the agents decide at 2, 4, …, 10, 13, …, 25, 30, …, 50 s: 13 decisions in 45 s, all 15 need 50 s) |
 | `REVIEW_GAP` | 10 | s, year summary |
 | `TRADE_MIN`, `TRADE_MAX` | 3, 8 | s between a student's market actions |
 | `JOIN_SPREAD` | 20 | s over which students arrive |
