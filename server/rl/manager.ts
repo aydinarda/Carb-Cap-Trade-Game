@@ -3,6 +3,7 @@ import type { CapMode, Player, RlModelInfo } from '../../shared/types'
 import { GameError, type Session, type SessionStore } from '../session'
 import { playerSnapshot } from '../views'
 import { apply, decode } from './act'
+import { decisionOffsets, RL_STAGE_SCHEDULE, type ScheduleSegment } from './clock'
 import { createMemory, remember, type Memory } from './memory'
 import { getModel, listModels, type LoadedModel, type Policy } from './models'
 import { observe, type FeatureSet, type RlMode, type StepKind } from './observe'
@@ -13,23 +14,29 @@ import { observe, type FeatureSet, type RlMode, type StepKind } from './observe'
  * An agent is an ordinary company (`addPlayer`, not `addBot`) because that is what it was trained
  * as: the leaderboard, the class counts and its own memory all see it as a student. It reads
  * exactly the `playerSnapshot` a student's screen receives and acts through the same Session
- * methods the socket handlers call, on the clock it was trained with: one sealed bid at the cap
- * stage, a buy/sell decision every `agent_every_seconds` once the market opens, and the abatement
- * decision straight after the last of them. A host who closes the market before then skips that
- * round's abatement decision, like a student who never reached the slider.
+ * methods the socket handlers call.
+ *
+ * It decides on a schedule (`clock.ts`, 2026-11-23), because the host decides how long each stage
+ * lasts and the agent cannot know it: from the moment it sees a stage open, its decisions fall due
+ * 2 s apart five times, then 3 s apart, then 5 s apart (2, 4, …, 10, 13, …, 25, 30, …, 50 s). The
+ * cap stage takes the first of them (one sealed bid, at 2 s); the market up to 15 buy/sell
+ * decisions, with the abatement decision straight after the last; a referendum's vote stage the
+ * first (the vote, by the shared rule). A stage that closes early skips the rest (for the market
+ * `finishWindow` still takes the abatement decision at the close), and an agent that has made
+ * them all waits for the stage to end. The models were trained on 15 decisions 2 s apart over a
+ * 30 s window, with no time in their observation, so they run unchanged on this schedule.
  *
  * A policy only understands the mode it was trained in, and the host can change the mode under
  * it (see `reconcile`): in the lobby the agent is removed; once the game has started the company
  * cannot leave, so another model trained for the new mode takes over, and the agent's own model
  * returns when the room does. With no model for the mode, the company sits the rounds out.
  *
- * Mirrors rl/live-agent.ts, which plays the same way over a socket from outside the server.
+ * rl/live-agent.ts plays the same models over a socket from outside the server, still on the
+ * trained 2 s clock.
  */
 
 /** How often the clock is checked; a decision lands within this of when it is due. */
 const POLL_MS = 200
-/** The bid waits this long after the cap stage opens, as the socket agent does. */
-const BID_DELAY_MS = 500
 /** Most agents one click adds. */
 export const MAX_AGENTS_PER_ADD = 10
 
@@ -62,16 +69,24 @@ interface Agent {
   homeModelId: string
   mode: RlMode
   policy: Policy
-  everyMs: number
-  decisionsPerWindow: number
   /** The observation its model was trained on; set 2 and later make the borrowing choice too. */
   featureSet: FeatureSet
   memory: Memory
-  capSeen: { year: number; at: number } | null
-  bidYear: number | null
-  window: { year: number; count: number; nextAt: number; done: boolean } | null
+  /** The stage it is deciding in, and how far through the schedule it is. */
+  clock: StageClock | null
   settledYear: number | null
   stats: AgentStats
+}
+
+/**
+ * One stage's decisions. `stage` names it: `<year>:cap`, `<year>:trade` or `vote:<referendum id>`.
+ * `startedAt` is the first poll that saw it open; `done` once it will decide nothing more there.
+ */
+interface StageClock {
+  stage: string
+  startedAt: number
+  count: number
+  done: boolean
 }
 
 interface Room {
@@ -84,8 +99,16 @@ export class RlAgentManager {
   private timer?: NodeJS.Timeout
   private store?: SessionStore
   private broadcast?: AgentBroadcast
+  /** When each decision of a stage is due, in ms from its start. */
+  private readonly offsets: number[]
 
-  constructor(private readonly source: ModelSource = DISK) {}
+  /** `schedule`: the live one by default; tests and measurements can pass another (e.g. FIXED_2S_SCHEDULE). */
+  constructor(
+    private readonly source: ModelSource = DISK,
+    schedule: readonly ScheduleSegment[] = RL_STAGE_SCHEDULE,
+  ) {
+    this.offsets = decisionOffsets(schedule)
+  }
 
   start(store: SessionStore, broadcast: AgentBroadcast) {
     this.store = store
@@ -133,9 +156,7 @@ export class RlAgentManager {
         player,
         homeModelId: info.id,
         memory: createMemory(),
-        capSeen: null,
-        bidYear: null,
-        window: null,
+        clock: null,
         settledYear: null,
         stats: { bids: 0, trades: 0, abatements: 0, refused: 0, errors: 0 },
       } as Agent
@@ -216,19 +237,21 @@ export class RlAgentManager {
    * The market is about to close: every agent that has not made this year's abatement decision
    * makes it now, on the screen as it stands. The host decides when the market closes and the agent
    * cannot know it, so tying the decision to the agent's last trade (as `step` does) would skip it
-   * whenever the window is shorter than the agent's 15 slots. In training the abatement is likewise
-   * the decision that comes after the window. Called right before `Session.closeTrade`. True if any
-   * agent decided.
+   * whenever the market closes before the schedule's last slot (50 s). In training the abatement is
+   * likewise the decision that comes after the window. Called right before `Session.closeTrade`.
+   * True if any agent decided.
    */
   finishWindow(session: Session): boolean {
     const room = this.roomOf(session)
     if (!room || session.state.phase !== 'trade') return false
     const { currentYear: year, capMode } = session.state
+    const stage = `${year}:trade`
     let decided = false
     for (const agent of room.agents) {
       if (!session.state.players.includes(agent.player) || capMode !== agent.mode) continue
-      if (agent.window?.year === year && agent.window.done) continue
-      agent.window = { year, count: agent.window?.year === year ? agent.window.count : 0, nextAt: Infinity, done: true }
+      const own = agent.clock?.stage === stage ? agent.clock : null
+      if (own?.done) continue
+      agent.clock = { stage, startedAt: own?.startedAt ?? 0, count: own?.count ?? 0, done: true }
       try {
         this.decide(session, agent, 'abate')
         decided = true
@@ -260,8 +283,6 @@ export class RlAgentManager {
   private seat(agent: Agent, model: LoadedModel) {
     agent.mode = model.info.mode as RlMode
     agent.policy = model.policy as Policy
-    agent.everyMs = model.everyMs
-    agent.decisionsPerWindow = model.decisionsPerWindow
     agent.featureSet = model.featureSet
     agent.player.agentModel = model.info.id
   }
@@ -271,45 +292,52 @@ export class RlAgentManager {
     // A round under a mode no model was found for is sat out: the policy has never seen one.
     if (phase === 'lobby' || phase === 'ended' || capMode !== agent.mode) return false
 
+    // The cap stage: one sealed bid, at the schedule's first slot.
     if (phase === 'cap') {
-      if (!session.usesAuction || agent.bidYear === year) return false
-      let seen = agent.capSeen
-      if (!seen || seen.year !== year) {
-        seen = { year, at: now }
-        agent.capSeen = seen
-      }
-      if (now - seen.at < BID_DELAY_MS) return false
-      agent.bidYear = year
+      if (!session.usesAuction || !this.due(agent, `${year}:cap`, now, 1)) return false
       this.decide(session, agent, 'bid')
       return true
     }
 
+    // The market: up to a full schedule of buy/sell decisions, the abatement decision straight
+    // after the last of them, then nothing until the market closes.
     if (phase === 'trade') {
-      let window = agent.window
-      if (!window || window.year !== year) {
-        window = { year, count: 0, nextAt: now + agent.everyMs, done: false }
-        agent.window = window
-      }
-      if (window.done || now < window.nextAt) return false
-      window.count += 1
-      // A fixed cadence from the window's start, so polling latency does not add up over 15 decisions.
-      window.nextAt += agent.everyMs
+      if (!this.due(agent, `${year}:trade`, now, this.offsets.length)) return false
       this.decide(session, agent, 'trade')
-      if (window.count >= agent.decisionsPerWindow) {
-        window.done = true
-        this.decide(session, agent, 'abate')
-      }
+      if (agent.clock!.done) this.decide(session, agent, 'abate')
       return true
     }
 
+    if (phase !== 'yearSummary') return false
     // The year-summary screen is where a student reads the round's results.
-    if (phase === 'yearSummary' && agent.settledYear !== year) {
+    if (agent.settledYear !== year) {
       agent.settledYear = year
       remember(agent.memory, playerSnapshot(session, agent.player.id))
     }
-    // A referendum's vote: by the shared rule, as the bots do — no model has learnt to vote.
-    if (phase === 'yearSummary') return session.castRuleVotes([agent.player.id])
-    return false
+    // A referendum's vote, at the vote stage's first slot: by the shared rule, as the bots do —
+    // no model has learnt to vote.
+    const r = session.activeReferendum
+    if (!r || r.stage !== 'vote' || !this.due(agent, `vote:${r.id}`, now, 1)) return false
+    return session.castRuleVotes([agent.player.id])
+  }
+
+  /**
+   * Whether the agent's next decision in `stage` is due, counting it if so. A stage it has not
+   * seen before starts its clock at `now` (the first poll that sees it open, within POLL_MS). The
+   * schedule is fixed from that start, so polling latency does not add up; after a stall the
+   * missed decisions follow one per poll. At most `limit` decisions in a stage.
+   */
+  private due(agent: Agent, stage: string, now: number, limit: number): boolean {
+    let clock = agent.clock
+    if (!clock || clock.stage !== stage) {
+      clock = { stage, startedAt: now, count: 0, done: false }
+      agent.clock = clock
+    }
+    const n = Math.min(limit, this.offsets.length)
+    if (clock.done || clock.count >= n || now < clock.startedAt + this.offsets[clock.count]) return false
+    clock.count += 1
+    if (clock.count >= n) clock.done = true
+    return true
   }
 
   private decide(session: Session, agent: Agent, kind: StepKind) {

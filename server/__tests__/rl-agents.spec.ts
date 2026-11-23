@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { RlModelInfo } from '../../shared/types'
+import { decisionOffsets, FIXED_2S_SCHEDULE, RL_STAGE_SCHEDULE } from '../rl/clock'
 import { RlAgentManager, type ModelSource } from '../rl/manager'
 import { getModel, listModels, modelFromFile, Policy, type LoadedModel } from '../rl/models'
 import { featuresFor, type FeatureSet, type RlMode } from '../rl/observe'
@@ -106,7 +107,7 @@ describe('RL agents in a game', () => {
     expect(() => manager.add(s, model.id)).toThrow(/lobby/)
   })
 
-  it('plays a round on its trained clock: one bid, 15 trades, then the abatement decision', () => {
+  it('plays a round on its schedule: one bid at 2 s, 15 trades by 50 s, then the abatement decision', () => {
     const manager = new RlAgentManager()
     const s = new Session('hybrid', 3)
     s.addPlayer('Alice', 'Heavy Materials')
@@ -126,12 +127,12 @@ describe('RL agents in a game', () => {
     const stats = () => manager.statsFor(s)[0].stats
 
     s.startYear()
-    run(1_000)
+    run(2_500)
     expect(stats().bids).toBe(1)
 
     s.closeCapStage()
     s.openTrade()
-    run(31_000)
+    run(51_000)
     expect(stats()).toMatchObject({ bids: 1, trades: 15, abatements: 1, errors: 0 })
     run(10_000)
     expect(stats().trades).toBe(15)
@@ -139,7 +140,7 @@ describe('RL agents in a game', () => {
     s.closeTrade()
     run(500)
     s.advanceYear()
-    run(1_000)
+    run(2_500)
     expect(stats()).toMatchObject({ bids: 2, errors: 0 })
   })
 
@@ -178,7 +179,7 @@ describe('RL agents in a game', () => {
     run(1_000)
     s.closeCapStage()
     s.openTrade()
-    run(31_000)
+    run(51_000)
     expect(stats()).toMatchObject({ trades: 19, abatements: 2 })
     expect(manager.finishWindow(s)).toBe(false)
     expect(stats().abatements).toBe(2)
@@ -191,6 +192,127 @@ describe('RL agents in a game', () => {
     s.kickPlayer(agent.id)
     manager.tick(1)
     expect(manager.statsFor(s)).toEqual([])
+  })
+})
+
+/**
+ * The stage schedule (2026-11-23): the host decides how long a stage lasts and the agent cannot
+ * know it, so its decisions come 2 s apart five times, then 3 s, then 5 s, from the moment it sees
+ * the stage open. A stage that closes early skips the rest; once they are all made it waits.
+ */
+describe('RL agents decide on the stage schedule', () => {
+  /** A hybrid room with one agent, and a virtual clock that ticks the manager every `stepMs`. */
+  function room(seed: number, schedule = RL_STAGE_SCHEDULE) {
+    const manager = new RlAgentManager(undefined, schedule)
+    const s = new Session('hybrid', seed)
+    s.addPlayer('Alice', 'Heavy Materials')
+    s.addBot('compliance')
+    s.addBot('marketMaker')
+    const [player] = manager.add(s, usableHybrid().id)
+    const clock = { now: 0 }
+    const run = (ms: number, stepMs = 250, each?: () => void) => {
+      const end = clock.now + ms
+      while (clock.now < end) {
+        clock.now += stepMs
+        manager.tick(clock.now)
+        each?.()
+      }
+    }
+    const stats = () => manager.statsFor(s)[0].stats
+    return { manager, s, player, clock, run, stats }
+  }
+
+  it('lays the decisions at 2, 4, 6, 8, 10, 13, …, 25, 30, …, 50 s', () => {
+    expect(decisionOffsets(RL_STAGE_SCHEDULE)).toEqual(
+      [2, 4, 6, 8, 10, 13, 16, 19, 22, 25, 30, 35, 40, 45, 50].map((x) => x * 1000),
+    )
+    expect(decisionOffsets(FIXED_2S_SCHEDULE)).toEqual(Array.from({ length: 15 }, (_, i) => (i + 1) * 2000))
+    expect(() => decisionOffsets([{ count: 2, everySeconds: 0 }])).toThrow(/bad schedule/)
+    expect(() => decisionOffsets([])).toThrow(/at least one/)
+  })
+
+  it('trades at exactly those moments after the market opens, then abates and waits', () => {
+    const { s, clock, run, stats } = room(11)
+    s.startYear()
+    run(2_500)
+    s.closeCapStage()
+    s.openTrade()
+    const opened = clock.now
+    const at: number[] = []
+    let abatedAt: number | null = null
+    run(70_000, 50, () => {
+      if (stats().trades > at.length) at.push(clock.now - opened)
+      if (abatedAt === null && stats().abatements > 0) abatedAt = clock.now - opened
+    })
+    // The clock starts at the first poll that sees the market (50 ms here).
+    const expected = decisionOffsets(RL_STAGE_SCHEDULE).map((ms) => ms + 50)
+    expect(at).toEqual(expected)
+    expect(abatedAt).toBe(expected[14]) // straight after the 15th
+    expect(stats()).toMatchObject({ trades: 15, abatements: 1, errors: 0 }) // and nothing in the 20 s after
+  })
+
+  it('skips the rest when the market closes early, and takes the abatement decision at the close', () => {
+    const { manager, s, run, stats } = room(12)
+    s.startYear()
+    run(2_500)
+    s.closeCapStage()
+    s.openTrade()
+    run(20_000) // 2, 4, 6, 8, 10, 13, 16 and 19 s: 8 of 15
+    expect(stats()).toMatchObject({ trades: 8, abatements: 0 })
+    expect(manager.finishWindow(s)).toBe(true)
+    s.closeTrade()
+    run(10_000)
+    expect(stats()).toMatchObject({ trades: 8, abatements: 1, errors: 0 })
+  })
+
+  it('bids once, 2 s into the cap stage, and not at all if the cap stage closes before then', () => {
+    const { s, run, stats } = room(13)
+    s.startYear()
+    run(1_500)
+    expect(stats().bids).toBe(0)
+    run(1_000)
+    expect(stats().bids).toBe(1)
+    run(20_000)
+    expect(stats().bids).toBe(1) // one bid per cap stage
+
+    s.closeCapStage()
+    s.openTrade()
+    run(1_000)
+    s.closeTrade()
+    s.advanceYear()
+    run(1_500) // the host closes this cap stage before the agent's first slot
+    s.closeCapStage()
+    run(5_000)
+    expect(stats().bids).toBe(1)
+  })
+
+  it('votes in a referendum 2 s after the vote opens', () => {
+    const { s, player, clock, run } = room(14)
+    s.startYear()
+    run(2_500)
+    s.closeCapStage()
+    s.openTrade()
+    run(1_000)
+    s.closeTrade()
+    run(500)
+    s.openReferendum({ chatSeconds: 5, voteSeconds: 30 }, clock.now)
+    run(5_000)
+    expect(s.referendumTick(clock.now)).toBe(true) // the chat is over: the vote opens
+    expect(s.activeReferendum?.stage).toBe('vote')
+    run(1_500)
+    expect(s.activeReferendum?.votes[player.id]).toBeUndefined()
+    run(1_000)
+    expect(s.activeReferendum?.votes[player.id]).toBeDefined()
+  })
+
+  it('can still run the old fixed 2 s clock (for comparisons)', () => {
+    const { s, run, stats } = room(15, FIXED_2S_SCHEDULE)
+    s.startYear()
+    run(2_500)
+    s.closeCapStage()
+    s.openTrade()
+    run(31_000)
+    expect(stats()).toMatchObject({ bids: 1, trades: 15, abatements: 1, errors: 0 })
   })
 })
 
@@ -254,10 +376,10 @@ describe('RL agents follow the room mode', () => {
       }
     }
     const playRound = () => {
-      run(1_000)
+      run(2_500)
       s.closeCapStage()
       s.openTrade()
-      run(31_000)
+      run(51_000)
       s.closeTrade()
       run(500)
     }

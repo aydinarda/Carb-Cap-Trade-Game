@@ -302,7 +302,7 @@ export function HostLobbyScreen({ snap }: { snap: HostSnapshot }) {
                 <p className="text-[11px] text-muted-foreground font-mono mt-2">
                   {chosenAgent === null
                     ? `None of these agents was trained for ${mode?.label ?? 'this mode'}.`
-                    : 'Agents join as companies and play like a student: a sealed bid, a buy/sell decision every 2 s, then the abatement decision. Keep each trade window open at least 30 s. Remove one with the ✕ in the roster.'}
+                    : 'Agents join as companies and play like a student: a sealed bid 2 s into the cap stage; in the market up to 15 buy/sell decisions, 5 at 2 s, 5 at 3 s and 5 at 5 s apart (all 15 by 50 s), then the abatement decision. A shorter market skips the rest. Remove one with the ✕ in the roster.'}
                 </p>
                 {brokenAgents.length > 0 && (
                   <p className="text-[11px] text-destructive font-mono mt-1">

@@ -47,9 +47,6 @@ export interface LoadedModel {
   info: RlModelInfo
   /** Null when the model cannot run on this server; `info.error` says why. */
   policy: Policy | null
-  /** The decision clock it was trained with. */
-  everyMs: number
-  decisionsPerWindow: number
   /** The observation it was trained on; set 2 and later also make the borrowing choice. */
   featureSet: FeatureSet
 }
@@ -155,8 +152,6 @@ export function modelFromFile(raw: unknown, fallbackId: string): LoadedModel {
   const refuse = (error: string): LoadedModel => ({
     info: { ...info, error },
     policy: null,
-    everyMs: 0,
-    decisionsPerWindow: 0,
     featureSet: 1,
   })
 
@@ -180,6 +175,8 @@ export function modelFromFile(raw: unknown, fallbackId: string): LoadedModel {
     )
   }
 
+  // The clock it was trained on. The live clock is the server's own schedule (clock.ts), but a
+  // file that does not say how it was trained is not one we exported.
   const every = Number(file.env?.agent_every_seconds)
   const round = Number(file.env?.round_seconds)
   if (!(every > 0) || !(round >= every)) return refuse('the model file has no usable decision timing')
@@ -209,8 +206,6 @@ export function modelFromFile(raw: unknown, fallbackId: string): LoadedModel {
   return {
     info,
     policy,
-    everyMs: every * 1000,
-    decisionsPerWindow: Math.max(1, Math.floor(round / every + 1e-9)),
     featureSet: featureSet as FeatureSet,
   }
 }
