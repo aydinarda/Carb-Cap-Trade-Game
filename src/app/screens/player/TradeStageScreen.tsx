@@ -23,6 +23,7 @@ import { EmissionHistoryChart } from '../../components/game/charts'
 import { OrderBook, PriceStrip, TradesFeed } from '../../components/game/market'
 import { cn, PALETTE } from '../../components/game/theme'
 import { useGame } from '../../net/GameContext'
+import { FillNotifications } from './FillNotifications'
 
 const r1 = (n: number) => Math.round(n * 10) / 10
 
@@ -168,6 +169,8 @@ export function TradeStageScreen({ snap }: { snap: PlayerSnapshot }) {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Fixed to the bottom right: a notification for each of your own fills. */}
+      <FillNotifications trades={snap.you.myTrades} youId={snap.you.id} />
       {/* --- the four numbers the whole decision turns on ------------------------ */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
